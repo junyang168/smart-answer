@@ -153,6 +153,7 @@ def test_website_generation_returns_onedrive_path_without_leaving_old_local_outp
     old = tmp_path / "old-local"
     monkeypatch.setattr(service, "SUNDAY_WORSHIP_DIR", old)
     monkeypatch.setattr(service, "list_fellowships", lambda: [])
+    monkeypatch.setattr(service, "_prepare_scripture_sections", lambda *_: ([], [], []))
     monkeypatch.setattr(service, "_fetch_scripture_sections", lambda _: [{"display": "馬太福音20:28", "book": "馬太福音",
         "verses": [{"chapter": 20, "verse": 28, "text": "測試"}]}])
     def render(template, replacements, target, **kwargs):
@@ -276,3 +277,87 @@ def test_failed_final_publish_keeps_previous_deck_and_protects_it_from_worker(cl
     source.write_bytes(b"new draft")
     cloud.publish_generated(day, source)
     assert target.read_bytes() == b"generated"
+
+
+def test_file_provider_deadlock_is_retried_but_never_without_limit(monkeypatch):
+    import errno
+    import backend.sunday_presenter as module
+    monkeypatch.setattr(module.time,'sleep',lambda _:None)
+    calls=[]
+    def transient():
+        calls.append(1)
+        if len(calls)<3:raise OSError(errno.EDEADLK,'File Provider busy')
+        return b'complete'
+    assert module._file_provider_retry(transient)==b'complete'
+    assert len(calls)==3
+    calls.clear()
+    def persistent():
+        calls.append(1);raise OSError(errno.EDEADLK,'still busy')
+    with pytest.raises(OSError):module._file_provider_retry(persistent)
+    assert len(calls)==4
+    calls.clear()
+    def permanent():
+        calls.append(1);raise PermissionError(errno.EACCES,'denied')
+    with pytest.raises(PermissionError):module._file_provider_retry(permanent)
+    assert len(calls)==1
+
+
+def test_existing_cloud_placeholder_read_retries_without_overwriting_manual_edit(cloud,tmp_path,monkeypatch):
+    import errno
+    import backend.sunday_presenter as module
+    day=date(2026,11,22)
+    target=cloud.generated(day);target.parent.mkdir();target.write_bytes(b'manually edited')
+    state=cloud._state_path(day);state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({'kind':'generated','sha256':'old digest'}))
+    source=tmp_path/'new.pptx';source.write_bytes(b'new generated deck')
+    read=Path.read_bytes;attempts=[]
+    def hydration(path):
+        if path==target:
+            attempts.append(1)
+            if len(attempts)<3:raise OSError(errno.EDEADLK,'hydrating')
+        return read(path)
+    monkeypatch.setattr(Path,'read_bytes',hydration)
+    monkeypatch.setattr(module.time,'sleep',lambda _:None)
+    result=cloud.publish_generated(day,source)
+    assert target.read_bytes()==b'manually edited'
+    assert result!=target and result.read_bytes()==b'new generated deck'
+
+
+def test_generation_retains_download_on_persistent_cloud_failure(ready,cloud,monkeypatch,tmp_path):
+    from backend.api import service
+    from backend.sunday_presenter import PptPublicationPending
+    agent,ppt,day,_,_=ready
+    monkeypatch.setattr(service,'repository',agent.repository)
+    monkeypatch.setattr(service,'get_sunday_service',lambda _:agent.repository.services[day])
+    monkeypatch.setattr(service,'PPT_TEMPLATE_FILE',ppt.template)
+    monkeypatch.setattr(service,'SUNDAY_WORSHIP_DIR',tmp_path/'local')
+    monkeypatch.setattr(service,'list_fellowships',lambda:[])
+    monkeypatch.setattr(service,'_prepare_scripture_sections',lambda *_:([],[],[]))
+    monkeypatch.setattr(service,'_fetch_scripture_sections',lambda _:[{'display':'馬太福音20:28','book':'馬太福音','verses':[{'chapter':20,'verse':28,'text':'測試'}]}])
+    import shutil
+    monkeypatch.setattr(service,'generate_presentation_from_template',lambda template,replacements,target,**kw: shutil.copyfile(template,target))
+    def offline(*_):raise OSError(11,'Resource deadlock avoided')
+    monkeypatch.setattr(OneDrivePpts,'publish_generated',offline)
+    with pytest.raises(PptPublicationPending) as error:service.generate_sunday_service_ppt(day)
+    retained=error.value.draft_path
+    assert retained.is_file() and 'generated-drafts' in retained.parts
+    assert len(Presentation(retained).slides)==1
+    assert not cloud.generated(service_day(day)).exists()
+
+
+def test_download_survives_cloud_failure_and_reports_pending(tmp_path,monkeypatch):
+    import importlib
+    router=importlib.import_module('backend.api.router')
+    from backend.api.models import SundayServiceEntry
+    from backend.sunday_presenter import PptPublicationPending
+    import backend.sunday_service_skeletons as skeletons
+    target=tmp_path/'retained.pptx';target.write_bytes(b'complete generated presentation')
+    def pending(_):raise PptPublicationPending(target)
+    monkeypatch.setattr(router,'generate_sunday_service_ppt',pending)
+    monkeypatch.setattr(router,'list_sunday_services',lambda:[SundayServiceEntry(date='2026-11-22',donationAmount=0)])
+    monkeypatch.setattr(skeletons,'skeleton_status',lambda *_:[])
+    app=FastAPI();app.include_router(router.sunday_service_router)
+    response=TestClient(app).post('/admin/sunday-services/2026-11-22/ppt')
+    assert response.status_code==200 and response.content==target.read_bytes()
+    assert response.headers['X-Sunday-Ppt-Cloud-Status']=='pending'
+    assert response.headers['Cache-Control']=='no-store'
