@@ -7,8 +7,9 @@ from typing import Iterable, Mapping, Optional, Sequence
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
+from pptx.util import Pt
 from pptx.oxml.xmlchemy import OxmlElement
 
 from backend.ppt_text_layout import prepare_frame, format_paragraph, format_run
@@ -29,6 +30,7 @@ def generate_presentation_from_template(
     """Populate placeholders in a PPTX template and save to output_path."""
     normalized = {key: str(value) for key, value in replacements.items()}
     presentation = Presentation(template_path)
+    _balance_static_slides(presentation)
     _expand_section_slides(presentation, section_configs or {})
     _populate_scripture_summary(presentation, scripture_summary or [])
     if holy_communion:
@@ -40,6 +42,39 @@ def generate_presentation_from_template(
     _apply_replacements(presentation, normalized)
     presentation.save(output_path)
     return output_path
+
+
+def _balance_static_slides(presentation) -> None:
+    """Balance the fixed prayer and sermon cover without rewriting their words."""
+    width, height = presentation.slide_width, presentation.slide_height
+    for slide in presentation.slides:
+        for shape in list(slide.shapes):
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            frame = shape.text_frame
+            if '{sermonTitle}' in frame.text and '{sermonSpeaker}' in frame.text:
+                frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+                frame.auto_size = MSO_AUTO_SIZE.NONE
+            if not frame.text.startswith('主禱文') or '我們在天上的父' not in frame.text:
+                continue
+            paragraphs = list(frame.paragraphs)
+            start = next(i for i,p in enumerate(paragraphs) if '我們在天上的父' in p.text)
+            heading = slide.shapes.add_textbox(int(width*.049), int(height*.044), int(width*.902), int(height*.105))
+            heading.text_frame._txBody.remove(heading.text_frame.paragraphs[0]._p)
+            heading.text_frame._txBody.append(deepcopy(paragraphs[0]._p))
+            heading.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            heading.text_frame.auto_size = MSO_AUTO_SIZE.NONE
+            for paragraph in paragraphs[:start]:
+                frame._txBody.remove(paragraph._p)
+            shape.left, shape.top = int(width*.101), int(height*.207)
+            shape.width, shape.height = int(width*.798), int(height*.68)
+            frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            frame.auto_size = MSO_AUTO_SIZE.NONE
+            frame.word_wrap = True
+            for paragraph in frame.paragraphs:
+                paragraph.line_spacing = Pt(42)
+                paragraph.space_before = Pt(0)
+                paragraph.space_after = Pt(0)
 
 
 def _apply_replacements(presentation, replacements: Mapping[str, str]) -> None:
