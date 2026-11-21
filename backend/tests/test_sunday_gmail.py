@@ -3,6 +3,7 @@ from hashlib import sha256
 from functools import lru_cache
 from io import BytesIO
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -358,3 +359,67 @@ def test_malformed_package_metadata_is_input_error():
         archive.writestr('ppt/presentation.xml','<broken')
     with pytest.raises(ValueError,match='完整'):
         validate_ppt(out.getvalue(),'.pptx')
+
+
+@pytest.mark.parametrize("filename,expected", [
+    ("宣教感言.pptx", "imported"),
+    ("宣教感言 pptx .key", "imported"),
+])
+def test_forwarded_sermon_uses_subject_date_and_body_attribution(mail, monkeypatch, filename, expected):
+    agent, inbox, client, payloads, _ = mail
+    speaker = '陳國志 牧師'
+    agent.repository.workers[speaker] = SundayWorker(name=speaker)
+    agent.repository.services['2026-11-15'] = SundayServiceEntry(
+        date='2026-11-15', sermonSpeaker=speaker, sermonTitle='宣教感言',
+    )
+    services = [{'date': '2026-11-15', 'speaker': speaker, 'title': '宣教感言'}]
+    message = {
+        'id': 'forward', 'thread_id': 'forward', 'from': 'Jiechao <jiechao@example.com>',
+        'subject': 'Fwd: 11/15 主日证道ppt',
+        'body': '这是陈国志牧师下个主日讲道文件。\n读经经文：徒20:25~35\n'
+                '---------- Forwarded message ---------\nFrom: kc chen\nDate: Nov 2',
+        'sent_at': '2026-11-09T10:00:00-06:00',
+        'attachments': [{'part_id': '0', 'filename': filename, 'size': 2048}],
+    }
+    assert source.forwarded_binding(message, services) == services[0]
+    assert source.forwarded_binding({**message, 'body': '請看附件'}, services) is None
+    assert source.forwarded_binding({**message, 'subject': 'Fwd: 11/8 主日证道ppt'}, services) is None
+    inbox.classifier = lambda *_: source.Matches(attachments=[
+        source.Match(part_id='0', kind='speaker', service_date='2026-11-15',
+                     speaker=speaker, evidence=['11/15 主日证道ppt', '陈国志牧师'], reason='明確歸屬'),
+    ])
+    payloads['forward'] = deck()
+    if filename.endswith('.key'):
+        from backend.sunday_assistant import gmail_inbox
+        original = BytesIO()
+        with zipfile.ZipFile(original, 'w') as package:
+            package.writestr('Index/Document.iwa', b'keynote test')
+        payloads['forward'] = original.getvalue()
+        calls = []
+        def convert(data):
+            calls.append(data)
+            if len(calls) == 1:
+                raise gmail_inbox.KeynoteExportError('測試匯出失敗')
+            return deck()
+        monkeypatch.setattr(gmail_inbox, 'export_keynote', convert)
+    with inbox.db() as db:
+        db.execute("INSERT INTO mail_messages VALUES (?,?,?,?,NULL,'queued',NULL,?)",
+                   ('forward', 'jun@example.com', 'forward', dump(message), now_text()))
+        row = dict(db.execute("SELECT * FROM mail_messages WHERE key='forward'").fetchone())
+    if filename.endswith('.key'):
+        with pytest.raises(RuntimeError, match='測試匯出失敗'):
+            inbox.process(row, client, services)
+        with inbox.db() as db:
+            record = db.execute('SELECT status,error FROM mail_files').fetchone()
+            assert record['status'] == 'error'
+            assert '已收到 Keynote，待轉檔' in record['error']
+            row = dict(db.execute("SELECT * FROM mail_messages WHERE key='forward'").fetchone())
+    inbox.process(row, client, services)
+    with inbox.db() as db:
+        record = db.execute('SELECT status,error FROM mail_files').fetchone()
+        assert record['status'] == expected
+    assert client.calls == 1
+    if filename.endswith('.key'):
+        assert calls == [payloads['forward'], payloads['forward']]
+        assert list((inbox.root / 'blobs').glob('*.key'))[0].read_bytes() == payloads['forward']
+    assert inbox.sender_workers('jiechao@example.com') == set()

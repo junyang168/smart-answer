@@ -13,7 +13,7 @@ from typing import Annotated
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
-from langchain_openai import ChatOpenAI
+from .subscription import SubscriptionToolModel
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import InjectedState, ToolNode
@@ -410,14 +410,12 @@ def build_graph(agent, msg, model, checkpointer):
 
 
 def run_agent(agent, msg, *, model=None):
-    from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
     from .engine import MESSAGE_POLICY, upcoming_sunday
     from .models import SERVICE_FIELDS
 
     settings = agent.store.settings()
     if model is None:
-        model = ChatOpenAI(model=os.getenv("SUNDAY_ASSISTANT_MODEL", DEFAULT_OPENAI_GENERATION_MODEL),
-                           timeout=45, max_retries=0)
+        model = SubscriptionToolModel()
     system = MESSAGE_POLICY + """
 詩歌來源群收集的兩首分別是主日詩歌 hymn 和回應詩歌 responseHymn。領詩優先沿用網站已預填安排或群內明確指定，不把發詩歌消息的人自動當成領詩。
 原文有標籤就按標籤；原文只列有先後的兩首時，按已確認的群內慣例，第一首是主日詩歌，第二首是回應詩歌。順序或指定不清楚時追問，不自行多加第三首。

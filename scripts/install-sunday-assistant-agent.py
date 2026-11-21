@@ -58,8 +58,8 @@ def main():
         "SUNDAY_WHATSAPP_AUTOCONNECT": "1",
         "SUNDAY_WHATSAPP_CHROME": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     }
-    # Same model credentials as the backend, without putting them in the plist.
-    values.update({k: v for k, v in backend_env.items() if k.startswith(("OPENAI_", "SUNDAY_ASSISTANT_MODEL"))})
+    # Keep local subscription runtime configuration outside the plist.
+    values.update({k: v for k, v in backend_env.items() if k in {"SUNDAY_CODEX_MODEL", "CODEX_EXECUTABLE", "CODEX_HOME"}})
     assistant_env.touch(mode=0o600, exist_ok=True)
     assistant_env.chmod(0o600)
     for key, value in values.items():
