@@ -263,3 +263,16 @@ def test_source_clock_keeps_word_anchors_when_neighbouring_estimates_drift():
     selected = flow.audio.ordered_start_anchors(anchors, 100)
     assert selected == anchors
     assert flow.audio.start_estimates(blocks, selected, 100) == [75, 83, 91]
+
+
+def test_layout_applies_self_correction_without_counting_it_as_repetition():
+    text = "保羅在羅馬，在以弗所書第五章談到這個問題。"
+    blocks = [{"start": 1, "end": 3, "cues": [
+        {"id": "t1", "text": text, "speaker": "p", "start": 1, "end": 3},
+    ]}]
+    result = flow.editor_layout(blocks, {"p": "professor"}, [
+        {"kind": "self_correction", "id": "t1", "drop": "在羅馬，", "keep": "在以弗所書第五章"},
+    ])
+    assert result["paragraphs"][0]["text"] == text.replace("在羅馬，", "~~在羅馬，~~")
+    assert result["repetitions_marked"] == 0
+    assert result["self_corrections_marked"] == 1
