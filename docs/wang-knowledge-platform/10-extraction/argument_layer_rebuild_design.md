@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer。
 > **類型**：規範。
 > **狀態**：當前（#787，PR #788）。
-> **與代碼對齊**：第八節 1a 核對到 61ac3332 之後的 `argument_fidelity.py`；第一節流程與第八節其餘核對到 16502067（`backend/pipeline/claim_creation_flash.py`、`backend/pipeline/prompts/argument_steps.md`）；其餘各節未核對。
+> **與代碼對齊**：2026-11-21，第三節的審查綁定、更正重放與替換回讀核對到 9da86d64（`argument_review_binding.py`、`argument_corrections.py`、`argument_instance_load.py`）；第八節 1a 核對到 61ac3332 之後的 `argument_fidelity.py`；第一節流程與第八節其餘核對到 16502067（`backend/pipeline/claim_creation_flash.py`、`backend/pipeline/prompts/argument_steps.md`）；其餘各節未核對。
 > **權威範圍**：論證層（Claim、Evidence、Observation、Question、Position）的重建流程、寫入新知識庫實例的方式、試作代碼轉正式代碼的範圍，以及按章投影片如何讀取新實例。題外話標記另見 [新知識庫實例與題外話標記](../20-knowledge/knowledge_instance_and_asides_solution.md)。
 
 **目標：每一講的論證層照試作驗證過的方法生成，經程式與模型驗證後寫入新知識庫實例；全程可接續、可重放、不丟任何一句原文。** 試作學到的見 [試作經驗記錄](./argument_layer_poc_lessons_20261116.md)。
@@ -149,6 +149,12 @@
 2. 新實例裡已有這一講時，舊記錄在同一個 ChangeSet 裡退役，不直接覆寫；版本歷史保留舊的。
 3. Flash 照現有分層在新實例上檢查與修正，每次修改是一次短交易，寫完回讀。
 4. 中途停止時，從新實例裡已提交的事實接續，不換目錄重跑。
+
+**審查綁定與更正。** `argument_fidelity` 與 `argument_shape` 的新報告在 `input_binding` 保存被審原稿的檔案 SHA 與完整受查記錄清單；終判前先核對初篩與當前原稿一致，檢查期間改稿則不寫出報告。入庫工具先核對兩份報告均對應更正收據所指的同一份原稿，且各自完整覆蓋應查記錄，再核對原稿、更正單、更正結果的 SHA，以純程式重放更正單，確認實際待寫檔案與收據記錄完全一致。負責人已裁定的更正沿用這條更正鏈，不因綁定檢查而增加模型審查；ChangeSet 同時保存忠實與故事報告的 SHA。
+
+**替換與回讀。** 舊 ChangeSet 寫過的記錄，無論當時是第幾版，凡仍活躍且不在新稿中，都要在本次交易退役；保留者寫入新版本。回讀另核對舊記錄已退役或由本次新版本接替，不能只憑新稿記錄數一致宣稱替換完成。歷史版本保留，其他講次不變。
+
+**舊報告。** 已入庫的資料與歷史報告繼續保留、照常讀取。缺少輸入綁定的舊報告不能直接用於新的入庫；程式不把當前原稿的 SHA 補到舊報告上，也不自動重調模型。原稿與已保存答覆未變時，現有按請求保存的答覆仍可重用；不能用換目錄或重置預算補審。
 
 **保留的保護**：重建工具只接受 `ARGUMENT_DATABASE_URL`；它拒絕現有正式庫的位址（第二節）。一次性私有庫的入口保留給其他還在用它的流程，不刪。
 
