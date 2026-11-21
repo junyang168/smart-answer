@@ -40,7 +40,7 @@ def test_a_changed_diagram_is_refused(tmp_path):
 
 def test_the_saved_keys_match_the_owner_confirmed_items():
     keys = json.loads(d.KEYS.read_text(encoding='utf-8'))
-    assert [i['id'] for k in keys['keys'] for i in k['items']] == ['A1', 'A2', 'A3', 'B1']
+    assert [i['id'] for k in keys['keys'] for i in k['items']] == ['A1', 'A2', 'A3', 'B1'] + [f'C{n}' for n in range(1, 11)] + [f'D{n}' for n in range(1, 5)]
 
 
 def test_saved_links_name_records_of_the_approved_lecture():

@@ -129,7 +129,8 @@
       }
      ]
     }
-   ]
+   ],
+   "source_kind": "professor"
   },
   {
    "key": "B",
@@ -202,7 +203,292 @@
       }
      ]
     }
-   ]
+   ],
+   "source_kind": "professor"
+  },
+  {
+   "key": "C",
+   "title": "登山寶訓的文學結構",
+   "authority": "Owner 2026-11-18: 「this can be another gold key. use this to validate argument layer」, for the diagram in the notes manuscript (釋經筆記母本) section 登山寶訓的文學結構. Items drafted by Claude from the diagram text only.",
+   "diagram": {
+    "path": "full_article/images/sermon-on-the-mount-structure.svg",
+    "sha256": "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17",
+    "text": [
+     "太 5:3–12　彌賽亞的身份（八福的 inclusio）",
+     "門徒的使命",
+     "太 5:13–16　總綱：鹽與光",
+     "太 5:17 – 7:12　Inclusio：門徒與舊約（律法和先知）的關係",
+     "5:17–48",
+     "門徒的義（勝過法利賽人）",
+     "6:8–7:11 inclusio",
+     "門徒義的實踐（施捨，禱告等）",
+     "7:12　小結：律法與先知的總結（黃金律）",
+     "7:13–27　門徒使命的結論（兩條路）",
+     "7:28–29　敘事結尾"
+    ]
+   },
+   "notes": [
+    "C7: owner 2026-11-18 「should be 6:8」, 「you should modify the svg」. The diagram (made by hand from the sermon and the notes) labelled the inclusio 6:1–7:11; Claude changed the label to 6:8–7:11 (backup sermon-on-the-mount-structure.before-6-8-20261118.svg beside it). The item follows lecture 5: 6:8–7:11.",
+    "C10: the diagram draws 7:28–29 inside the 門徒的使命 box; in lecture 6 he calls it 整個登山寶訓的結論. The item does not take a side on the nesting.",
+    "C9 terms widened 2026-11-18 to accept 總結 after lecture 6 point 18 said 「總結整個門徒的使命」; disclosed to the owner."
+   ],
+   "items": [
+    {
+     "id": "C1",
+     "statement": "五章三至十二節講彌賽亞的身份。",
+     "terms": [
+      [
+       "五章三",
+       "5:3"
+      ],
+      [
+       "彌賽亞的身份",
+       "彌賽亞的身分"
+      ]
+     ]
+    },
+    {
+     "id": "C2",
+     "statement": "認出彌賽亞之後，是門徒的使命。",
+     "terms": [
+      [
+       "彌賽亞"
+      ],
+      [
+       "門徒的使命"
+      ]
+     ]
+    },
+    {
+     "id": "C3",
+     "statement": "五章十三至十六節是門徒使命的總綱（鹽與光）。",
+     "terms": [
+      [
+       "五章十三",
+       "5:13"
+      ],
+      [
+       "總綱",
+       "綜合",
+       "發光",
+       "鹽"
+      ]
+     ]
+    },
+    {
+     "id": "C4",
+     "statement": "五章十七節至七章十二節前後呼應，講門徒與舊約（律法和先知）的關係。",
+     "terms": [
+      [
+       "五章十七",
+       "5:17"
+      ],
+      [
+       "七章十二",
+       "7:12"
+      ],
+      [
+       "呼應",
+       "inclusio"
+      ],
+      [
+       "舊約",
+       "律法和先知"
+      ]
+     ]
+    },
+    {
+     "id": "C5",
+     "statement": "五章十七至四十八節講門徒的義，要勝過法利賽人的義。",
+     "terms": [
+      [
+       "四十八",
+       "5:48"
+      ],
+      [
+       "勝過"
+      ],
+      [
+       "法利賽人"
+      ]
+     ]
+    },
+    {
+     "id": "C6",
+     "statement": "六章一節至七章十一節講門徒的義的實踐：施捨、禱告等。",
+     "terms": [
+      [
+       "六章一節",
+       "6:1"
+      ],
+      [
+       "七章十一",
+       "7:11"
+      ],
+      [
+       "施捨"
+      ]
+     ]
+    },
+    {
+     "id": "C7",
+     "statement": "六章八節至七章十一節以禱告前後呼應（inclusio）。",
+     "terms": [
+      [
+       "六章八",
+       "6:8"
+      ],
+      [
+       "七章十一",
+       "7:11"
+      ],
+      [
+       "呼應",
+       "inclusio"
+      ]
+     ]
+    },
+    {
+     "id": "C8",
+     "statement": "七章十二節是小結：律法和先知的總結。",
+     "terms": [
+      [
+       "七章十二",
+       "7:12"
+      ],
+      [
+       "結論",
+       "小結",
+       "總結"
+      ],
+      [
+       "律法和先知"
+      ]
+     ]
+    },
+    {
+     "id": "C9",
+     "statement": "七章十三至二十七節是門徒使命的結論。",
+     "terms": [
+      [
+       "七章十三",
+       "7:13"
+      ],
+      [
+       "門徒的使命"
+      ],
+      [
+       "結論",
+       "總結"
+      ]
+     ]
+    },
+    {
+     "id": "C10",
+     "statement": "七章二十八、二十九節是登山寶訓的結尾。",
+     "terms": [
+      [
+       "二十八",
+       "7:28"
+      ],
+      [
+       "結論",
+       "結尾"
+      ]
+     ]
+    }
+   ],
+   "arguments": [],
+   "source_kind": "editorial"
+  },
+  {
+   "key": "D",
+   "title": "登山寶訓（論彌賽亞／門徒的使命）",
+   "authority": "Owner 2026-11-18: 「这个是教授画的」, 「this is 释经笔记母本的讲义」 — the professor's own diagram from the notes manuscript (母本) handout, section 登山寶訓的結構. Items drafted by Claude from the diagram text only.",
+   "source_kind": "professor",
+   "diagram": {
+    "path": "full_article/images/sermon-on-the-mount-overview.svg",
+    "sha256": "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291",
+    "text": [
+     "登山寶訓",
+     "論彌賽亞",
+     "太 5:3-12　應驗賽 61",
+     "門徒的使命",
+     "太 5:13-16　綜合",
+     "太 5:17-7:29　闡明，細節"
+    ]
+   },
+   "items": [
+    {
+     "id": "D1",
+     "statement": "登山寶訓分兩大段：五章三至十二節論彌賽亞，五章十三節至七章二十九節是門徒的使命。",
+     "terms": [
+      [
+       "彌賽亞"
+      ],
+      [
+       "五章三",
+       "5:3"
+      ],
+      [
+       "門徒的使命"
+      ],
+      [
+       "七章二十九",
+       "7:29"
+      ]
+     ]
+    },
+    {
+     "id": "D2",
+     "statement": "五章三至十二節應驗以賽亞書六十一章。",
+     "terms": [
+      [
+       "以賽亞書六十一",
+       "以賽亞書第六十一",
+       "賽61",
+       "賽六十一",
+       "以賽亞六十一"
+      ],
+      [
+       "彌賽亞",
+       "應驗"
+      ]
+     ]
+    },
+    {
+     "id": "D3",
+     "statement": "五章十三至十六節是門徒使命的綜合說明。",
+     "terms": [
+      [
+       "五章十三",
+       "5:13"
+      ],
+      [
+       "綜合"
+      ]
+     ]
+    },
+    {
+     "id": "D4",
+     "statement": "五章十七節至七章二十九節闡明門徒使命的細節。",
+     "terms": [
+      [
+       "五章十七",
+       "5:17"
+      ],
+      [
+       "七章二十九",
+       "7:29"
+      ],
+      [
+       "闡明",
+       "細節"
+      ]
+     ]
+    }
+   ],
+   "arguments": []
   }
  ],
  "arguments_note": "Owner 2026-11-17: 「把 diagram 和整个我 approved 论证连接起来，生成 PPT 时正好用」. Each argument links one diagram to an approved Claim in the knowledge instance; each element names the diagram text and the records that carry it there (Evidence steps, or his own words as the Claim's SourceFragments). An element with no records is not taught in that lecture.",

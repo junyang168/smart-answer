@@ -1,0 +1,20 @@
+{
+ "lecture": "2011 NYSC 專題：馬太福音釋經（二）6",
+ "run": "gpt-20261118-lecture6-r2",
+ "corrections": [
+  {
+   "op": "restate_claim",
+   "short": "CL0001",
+   "statement": "求神賜給我們日用的飲食，就要倚靠神，不要焦慮、憂慮，神一定會供給；同時要盡本分，為將來計劃。",
+   "basis_fragment_id": "FR-7d54ad98d8ebdbf69e133305c6f6a14c",
+   "ruling": "Owner 2026-11-18 「ok」 to Claude's proposed text: the cover follows his own summary 「所以這段聖經才告訴我們說，你好好的倚靠神……神一定會供給你。可是你要盡你的本分」 (S0009), which the rerun's cover missed."
+  },
+  {
+   "op": "restate_claim",
+   "short": "CL0014",
+   "statement": "登山寶訓先在五章三至十二節藉給門徒的福講明彌賽亞的身份，其餘五章十三節至七章二十九節都講門徒的使命，其中七章二十八至二十九節是整個登山寶訓的結論；認出彌賽亞，就連著門徒的責任。",
+   "basis_fragment_id": "FR-nysc_2011_2_6-ae54a09d6c1e-DK-7f15061f63954913856f-P05-ST07-01",
+   "ruling": "Owner 2026-11-18 「make your change」: he divides 登山寶訓 into two parts, 5:3–12 and 5:13–7:29 (lecture 1; notes 登山寶訓的結構), and here says 「下面所剩下的這一段，都是講……門徒的使命」. The model wrote 5:13–7:27, a range he never gives; 7:28–29 is the conclusion of the whole sermon inside the second part."
+  }
+ ]
+}

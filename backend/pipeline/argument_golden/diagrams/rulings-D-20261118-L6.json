@@ -1,0 +1,18 @@
+{
+ "D1": {
+  "verdict": "claim",
+  "reason": "CL0014 (point 16, as restated 2026-11-18): 五章三至十二節…其餘五章十三節至七章二十九節都講門徒的使命. Before the restatement (5:13–7:27) this item would have been contradicted."
+ },
+ "D2": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 6 does not mention 以賽亞書六十一章 for the Beatitudes."
+ },
+ "D3": {
+  "verdict": "claim",
+  "reason": "CL0016 (point 18): 五章十三至十六節作綜合說明."
+ },
+ "D4": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 6 subdivides instead: 五章十七節到七章十一節來闡明 (para 28), with 7:12, 7:13–27, 7:28–29 as conclusions; it does not give 5:17–7:29 as one unit."
+ }
+}
