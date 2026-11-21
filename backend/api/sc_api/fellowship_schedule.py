@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from backend.fellowship_timing import next_biweekly_date
+
 
 DATE_FORMAT = "%m/%d/%Y"
 
@@ -45,7 +47,7 @@ def compute_next_fellowship(
         return last_date.strftime(DATE_FORMAT), entries, False
 
     existing_dates = {date.date() for date, _entry in dated_entries}
-    next_date = last_date + timedelta(weeks=2)
+    next_date = datetime.combine(next_biweekly_date(last_date.date()), last_date.time())
     updated_entries = list(entries)
     changed = False
 
@@ -55,6 +57,6 @@ def compute_next_fellowship(
             existing_dates.add(next_date.date())
             changed = True
         last_date = next_date
-        next_date = last_date + timedelta(weeks=2)
+        next_date = datetime.combine(next_biweekly_date(last_date.date()), last_date.time())
 
     return next_date.strftime(DATE_FORMAT), updated_entries, changed

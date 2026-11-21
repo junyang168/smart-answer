@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 try:
     from .fellowship_email import build_fellowship_email_content
+    from .fellowship_timing import START_TIME
     from .fellowship_reminder_status import (
         load_last_sent_fellowship_date,
         record_fellowship_email_sent,
@@ -40,6 +41,7 @@ except ImportError as exc:  # Allows running as a script (python fellowship_remi
         sys.path.insert(0, str(script_dir))
 
     from fellowship_email import build_fellowship_email_content  # type: ignore[no-redef]
+    from fellowship_timing import START_TIME
     from fellowship_reminder_status import (  # type: ignore[no-redef]
         load_last_sent_fellowship_date,
         record_fellowship_email_sent,
@@ -239,7 +241,7 @@ def compute_send_timestamp(events: list[FellowshipEvent]) -> tuple[FellowshipEve
     # Sort events by date to ensure correctness regardless of JSON order
     sorted_events = sorted(events, key=lambda e: e.date)
 
-    # Include today so a late completion can still use --catch-up before 19:30.
+    # Include today so a late completion can still use --catch-up before the fellowship starts.
     # The normal daily invocation retains its day-before send window.
     now_date = datetime.now(TIMEZONE).date()
     future_events = [e for e in sorted_events if e.date >= now_date]
@@ -306,7 +308,7 @@ def main() -> None:
         if now < send_at:
             print(f"Not time yet. Scheduled for {send_at}. Exiting without sending.")
             return
-        end_at = datetime.combine(event.date, time(19, 30), tzinfo=TIMEZONE)
+        end_at = datetime.combine(event.date, START_TIME, tzinfo=TIMEZONE)
         if (args.catch_up and now >= end_at) or (not args.catch_up and now.date() > send_at.date()):
             print("Send window has passed; exiting without sending.")
             return

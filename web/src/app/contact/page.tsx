@@ -15,7 +15,7 @@ const contactInfo = {
     },
     fellowship: {
         title: "線上團契",
-        time: "每兩週一次，週五晚 7:30 - 9:00 CST",
+        time: "每兩週一次，週四晚 8:00（美國中部時間）",
         address: "線下地址： 903 W. Parker Road, Plano, TX 75023",
         meetLink: "https://meet.google.com/mhc-nafs-ahn",
         calendarFile: "https://calendar.app.google/Z3XKNcMKvCcz4U4FA" // ✅ 指向我们创建的 .ics 文件

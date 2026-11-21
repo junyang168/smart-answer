@@ -30,6 +30,7 @@ def generate_presentation_from_template(
     """Populate placeholders in a PPTX template and save to output_path."""
     normalized = {key: str(value) for key, value in replacements.items()}
     presentation = Presentation(template_path)
+    _update_fellowship_labels(presentation)
     _balance_static_slides(presentation)
     _expand_section_slides(presentation, section_configs or {})
     _populate_scripture_summary(presentation, scripture_summary or [])
@@ -42,6 +43,22 @@ def generate_presentation_from_template(
     _apply_replacements(presentation, normalized)
     presentation.save(output_path)
     return output_path
+
+
+def _update_fellowship_labels(presentation) -> None:
+    # Keep template run formatting while updating the recurring announcement.
+    labels = {'週五团契': '週四線上查經', '週五團契': '週四線上查經',
+              '未來兩週團契安排': '未來兩週線上查經安排'}
+    for slide in presentation.slides:
+        for frame in _iter_text_frames(slide.shapes):
+            text = frame.text.strip()
+            if text in labels:
+                # Labels can be split over runs by PowerPoint.
+                runs = [run for p in frame.paragraphs for run in p.runs]
+                if runs:
+                    runs[0].text = labels[text]
+                    for run in runs[1:]:
+                        run.text = ''
 
 
 def _balance_static_slides(presentation) -> None:
