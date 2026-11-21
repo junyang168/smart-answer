@@ -336,3 +336,21 @@ converted to traditional Chinese at repository writes, retaining paragraph break
 and URLs. Worker/song identifiers and scripture codes are preserved. Resource
 `displayLabels` supplies traditional labels for names and song titles in the form.
 Original WhatsApp messages remain unchanged.
+
+### Scripture readability and reader limits
+
+Scripture body leading is 1.28× with 6 pt between verses; lyrics retain 1.5×.
+Pagination measures actual verse text against the template's body frame, margins
+and Chinese font at up to 30 pt, rather than packing fixed verse counts and
+shrinking dense passages. Prefer extra slides; exceptionally long single verses
+retain the existing bounded fit/overflow check. Local cached CUV text is preferred
+for stable Chinese passage content, with the existing network fallback retained.
+
+Reader allocation is independent of slide count: at most four distinct readers,
+each reading at most eight verses, with contiguous balanced assignments within
+each passage. Each assignment can span multiple slides. More than 32 verses or
+other passage combinations needing more than four readers require an explicit
+schedule change instead of silently breaking the limits. The handover cue appears
+only on the last slide before a different reader; the final reader has no cue.
+The renderer fingerprint includes the layout modules so a cached older draft
+cannot be reported as newly prepared after these rules change.

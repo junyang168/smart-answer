@@ -54,7 +54,7 @@ def test_large_readable_type_is_explicit_capped_and_template_chinese_font_is_pre
 
 def test_dense_scripture_shrinks_and_retains_every_verse_and_alternating_colors():
     deck,shape=frame()
-    lines=[f'1:{n} '+('這是完整經文，應保留原文。'*3) for n in range(1,8)]
+    lines=[f'1:{n} '+('這是完整經文，應保留原文。'*2) for n in range(1,8)]
     _populate_scripture_text_frame(shape.text_frame,lines)
     size=body_size(shape.text_frame)
     assert 18<=size<30

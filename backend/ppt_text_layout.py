@@ -16,7 +16,8 @@ from pptx.util import Pt
 
 MAX_BODY_PT = 30
 MIN_BODY_PT = 18
-LINE_HEIGHT = 1.10
+LINE_HEIGHT = 1.28
+SCRIPTURE_GAP_PT = 6
 LYRIC_LINE_HEIGHT = 1.50
 _SCALE = 4
 _TOKEN = re.compile(r"\s+|[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|.")
@@ -135,7 +136,7 @@ def fits(text_frame, lines, family, size, *, scripture=False):
             if width_points(visible,family,size) > width:
                 return False
             total += 1
-    gap = 1.5 if scripture else 0
+    gap = SCRIPTURE_GAP_PT if scripture else 0
     leading = LINE_HEIGHT if scripture else LYRIC_LINE_HEIGHT
     return total*size*leading + len(lines)*gap <= height
 
@@ -158,7 +159,7 @@ def format_paragraph(paragraph, family, size, *, scripture=False):
     paragraph.font.size = Pt(size)
     paragraph.font.bold = True
     paragraph.space_before = Pt(0)
-    paragraph.space_after = Pt(1.5 if scripture else 0)
+    paragraph.space_after = Pt(SCRIPTURE_GAP_PT if scripture else 0)
     paragraph.line_spacing = Pt(size*(LINE_HEIGHT if scripture else LYRIC_LINE_HEIGHT))
     ppr = paragraph._p.get_or_add_pPr()
     ppr.set('marL','0');ppr.set('marR','0');ppr.set('indent','0')

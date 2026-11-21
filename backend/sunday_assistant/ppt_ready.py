@@ -9,7 +9,7 @@ from pptx import Presentation
 
 from backend.sunday_data_lock import sunday_data_lock
 from backend.sunday_service_skeletons import skeleton_status, maintain_skeletons
-from .role_assignment import assign_readers, reading_page_count
+from .role_assignment import assign_readers, required_reader_count
 from .models import FRIDAY_FIELDS, ZONE
 from .store import dump, now_text
 
@@ -46,7 +46,7 @@ class PptReady:
         if current.get('donationAmount') is None:
             missing.append('本週奉獻總額')  # zero is a valid explicitly saved amount
         reader_names = [name.strip() for name in entry.scripture_readers if name.strip()]
-        if len(set(reader_names)) < reading_page_count(entry.scripture) or len(reader_names) != len(set(reader_names)):
+        if len(set(reader_names)) < required_reader_count(entry.scripture) or len(reader_names) > 4 or len(reader_names) != len(set(reader_names)):
             missing.append('自動安排讀經同工')
         songs = []
         catalog = self.agent.repository.list_sunday_songs()
@@ -72,7 +72,8 @@ class PptReady:
             return None, missing
         # Template/renderer changes require a new output even if the form is identical.
         renderer_files = [Path(__file__).parents[1] / 'api' / name for name in ('service.py', 'ppt_generator.py')]
-        renderer_files += [Path(__file__).parents[1] / 'sunday_song_performance.py', Path(__file__)]
+        renderer_files += [Path(__file__).parents[1] / name for name in ('sunday_song_performance.py', 'ppt_text_layout.py', 'sunday_scripture_layout.py')]
+        renderer_files.append(Path(__file__))
         from backend.api.scripture import BIBLE_API_TRANSLATION_ZH
         fellowship = []
         if hasattr(self.agent.repository, 'list_fellowships'):

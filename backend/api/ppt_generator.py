@@ -424,6 +424,9 @@ def _render_section(
             lines = []
     reader = section.get("reader") if isinstance(section, dict) else None
     label = section.get("label") if isinstance(section, dict) else None
+    if style == "scripture":
+        from backend.sunday_text import traditional
+        reader, next_reader = traditional(reader), traditional(next_reader)
 
     for text_frame in _iter_text_frames(slide.shapes):
         content = _text_frame_content(text_frame)

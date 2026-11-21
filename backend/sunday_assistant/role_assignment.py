@@ -1,19 +1,17 @@
-"""Select one eligible, available worker per natural scripture slide."""
+"""Rotate eligible readers, at most four, each reading at most eight verses."""
 from datetime import date, timedelta
 
 from backend.sunday_data_lock import sunday_data_lock
 
 
-def reading_page_count(references):
+def required_reader_count(references):
     from backend.api.scripture import parse_reference
-    from backend.api.service import _split_scripture_section
-
-    count = 0
+    from backend.sunday_scripture_layout import reader_counts
+    lengths=[]
     for reference in references:
-        parsed = parse_reference(reference)
-        verses = [{} for _ in range(parsed['end'] - parsed['start'] + 1)]
-        count += len(_split_scripture_section(verses))
-    return count
+        info=parse_reference(reference)
+        lengths.append(info['end']-info['start']+1)
+    return sum(reader_counts(lengths))
 
 
 def assign_readers(repository, store, days):
@@ -31,7 +29,7 @@ def assign_readers(repository, store, days):
                 continue  # Preserve manually saved reader order.
             candidates = [name for name, worker in workers.items() if worker.is_available_on(day) and
                           '讀經經文' in worker.preferred_roles]
-            required = reading_page_count(entry.scripture)
+            required = required_reader_count(entry.scripture)
             if len(candidates) < required:
                 continue
             occupied = {entry.sermon_speaker, entry.pianist, entry.presider, entry.worship_leader}

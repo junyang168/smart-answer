@@ -2430,6 +2430,18 @@ def _fetch_single_scripture(reference: str) -> tuple[str | None, list[dict[str, 
         return reference, [], None
 
     translation = BIBLE_API_TRANSLATION_ZH
+    if translation == "cuv":
+        from backend.bible_study.paths import cuv_dir
+        try:
+            chapter = json.loads((cuv_dir() / info["slug_book"].upper() / f"{info['chapter']}.json").read_text(encoding="utf-8"))
+            text = [chapter.get(str(n), "").strip() for n in range(info['start'],info['end']+1)]
+            if text and all(text):
+                book = BOOK_SLUG_TO_NAME.get(info['slug'], info['slug'].upper())
+                label = f"{book} {info['chapter']}:{info['start']}" + (f"-{info['end']}" if info['end']!=info['start'] else '')
+                return label, [dict(book=book,chapter=info['chapter'],verse=n,text=value)
+                    for n,value in zip(range(info['start'],info['end']+1),text)], book
+        except (OSError,ValueError,AttributeError):
+            pass
     if not translation:
         book_slug = info.get("slug")
         book_name = BOOK_SLUG_TO_NAME.get(book_slug, book_slug.upper()) if isinstance(book_slug, str) else None
@@ -2493,88 +2505,30 @@ def _split_scripture_section(
     verses: list[dict[str, object]],
     max_segments: int | None = None,
 ) -> list[list[dict[str, object]]]:
-    total = len(verses)
-    if total == 0:
-        return []
-
-    max_slots = max_segments if isinstance(max_segments, int) and max_segments > 0 else 3
-
-    def balanced(slides: int) -> list[int]:
-        base = total // slides
-        remainder = total % slides
-        return [base + (1 if idx < remainder else 0) for idx in range(slides)]
-
-    chosen_sizes: list[int] | None = None
-    for slides in range(1, min(max_slots, total) + 1):
-        sizes = balanced(slides)
-        if all(4 <= size <= 7 for size in sizes):
-            chosen_sizes = sizes
-            break
-
-    if chosen_sizes is None:
-        slides = min(max_slots, max(1, math.ceil(total / 7)))
-        sizes = balanced(slides)
-        while slides > 1 and sizes[-1] < 5:
-            sizes[-2] += sizes[-1]
-            sizes.pop()
-            slides -= 1
-        chosen_sizes = sizes
-
-    sections: list[list[dict[str, object]]] = []
-    index = 0
-    for size in chosen_sizes:
-        sections.append(verses[index : index + size])
-        index += size
-    if index < total:
-        sections[-1].extend(verses[index:])
-    return sections
-
-
-def _assign_slide_readers(slide_entries: list[dict[str, object]], readers: list[str]) -> list[str]:
-    """One reader per slide when there are enough; otherwise a reader takes
-    consecutive slides of the same passage.
-
-    2026-10-04: 創 5:21–29 (9 verses) splits into two slides, so three passages
-    made four slides for three readers, and the PPT could not be generated
-    (OPS-33). A passage still needs at least one reader of its own; spare
-    readers go to the passages with the most slides per reader.
-    """
-
-    if len(readers) >= len(slide_entries):
-        return readers[: len(slide_entries)]
-    passages: list[list[int]] = []
-    for index, slide in enumerate(slide_entries):
-        if passages and slide_entries[passages[-1][0]].get("section") == slide.get("section"):
-            passages[-1].append(index)
-        else:
-            passages.append([index])
-    if len(readers) < len(passages):
-        raise ValueError(f"讀經同工人數不足：{len(passages)} 段經文至少需要 {len(passages)} 位讀經同工")
-    counts = [1] * len(passages)
-    for _ in range(len(readers) - len(passages)):
-        best = max(
-            (i for i in range(len(passages)) if counts[i] < len(passages[i])),
-            key=lambda i: len(passages[i]) / counts[i],
-        )
-        counts[best] += 1
-    slide_readers: list[str] = []
-    remaining = iter(readers)
-    for slides, count in zip(passages, counts):
-        base, extra = divmod(len(slides), count)
-        for chunk in range(count):
-            slide_readers.extend([next(remaining)] * (base + (1 if chunk < extra else 0)))
-    return slide_readers
+    from backend.sunday_scripture_layout import paginate, scripture_frame
+    # A reader count is not a limit on how many slides the text needs.
+    return paginate(verses, scripture_frame(PPT_TEMPLATE_FILE))
 
 
 def _prepare_scripture_sections(
     sections: list[dict[str, object]],
     readers: list[str],
 ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[str]]:
-    slide_entries: list[dict[str, object]] = []
-    for section_index, section in enumerate(sections):
-        verses = section.get("verses") or []
-        if not verses:
+    unique_readers: list[str] = []
+    for candidate in readers:
+        name = (candidate or "").strip()
+        if not name:
             continue
+        if name in unique_readers:
+            raise ValueError(f"讀經同工不可重複：{name}")
+        unique_readers.append(name)
+
+    slide_entries: list[dict[str, object]] = []
+    from backend.sunday_scripture_layout import reader_groups
+    for group in reader_groups(sections, len(unique_readers)):
+        section_index = group["section"]
+        section = sections[section_index]
+        verses = group["verses"]
         section_slides = _split_scripture_section(verses)
         book_name = section.get("book") or ""
         for slide in section_slides:
@@ -2610,22 +2564,14 @@ def _prepare_scripture_sections(
                     "label": label,
                     "reference": section.get("display", ""),
                     "section": section_index,
+                    "reader": unique_readers[group["reader_index"]],
                 }
             )
 
     if not slide_entries:
         return [], [], []
 
-    unique_readers: list[str] = []
-    for candidate in readers:
-        name = (candidate or "").strip()
-        if not name:
-            continue
-        if name in unique_readers:
-            raise ValueError(f"讀經同工不可重複：{name}")
-        unique_readers.append(name)
-
-    slide_readers = _assign_slide_readers(slide_entries, unique_readers)
+    slide_readers = [slide["reader"] for slide in slide_entries]
     assigned_readers = list(dict.fromkeys(slide_readers))
 
     assigned_sections: list[dict[str, object]] = []
