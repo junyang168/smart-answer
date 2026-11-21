@@ -54,3 +54,23 @@ def test_cached_chinese_scripture_avoids_network_and_keeps_chinese_label(tmp_pat
     label,verses,book=service._fetch_single_scripture('1ki-19-1-2')
     assert label==book+' 19:1-2' and book=='列王記上'
     assert [v['text'] for v in verses]==['第一節經文','第二節經文']
+
+
+def test_summary_uses_one_row_per_reader_and_does_not_collide_with_footer(tmp_path):
+    from backend.api import service
+    from backend.api.ppt_generator import generate_presentation_from_template
+    from backend.api.config import PPT_TEMPLATE_FILE
+    sections=[{'book':'列王紀上','display':'列王紀上 19:1-18','verses':[
+        {'chapter':19,'verse':n,'text':'這是需要舒適閱讀的完整經文。'*4} for n in range(1,19)]}]
+    pages,summary,_=service._prepare_scripture_sections(sections,['支勇','刘纳','李建午'])
+    out=tmp_path/'summary.pptx'
+    generate_presentation_from_template(PPT_TEMPLATE_FILE,{},out,section_configs={'scriptureVerses':{'sections':pages,'style':'scripture'}},scripture_summary=summary)
+    deck=Presentation(out)
+    tables=[(slide,shape) for slide in deck.slides for shape in slide.shapes if shape.has_table and any('19:1-6' in cell.text for row in shape.table.rows for cell in row.cells)]
+    assert len(tables)==1
+    slide,shape=tables[0]
+    assert [[cell.text for cell in row.cells] for row in shape.table.rows]==[
+        ['列王紀上 19:1-6','支勇'],['列王紀上 19:7-12','劉納'],['列王紀上 19:13-18','李建午']]
+    bottom=shape.top+sum(row.height for row in shape.table.rows)
+    footer=next(s for s in slide.shapes if s.has_text_frame and '{reader}' in s.text)
+    assert bottom<footer.top

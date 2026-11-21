@@ -234,6 +234,13 @@ def _populate_scripture_summary(presentation: Presentation, summary_rows: list[d
             new_row = table.rows[insert_index]
             _fill_summary_row(new_row, entry)
         _fill_summary_row(template_row, summary_rows[0])
+        from backend.sunday_text import traditional
+        # The overview is displayed in traditional Chinese; preserve the
+        # template's per-run fonts and colours, including its static guidance.
+        for frame in _iter_text_frames(slide.shapes):
+            for paragraph in frame.paragraphs:
+                for run in paragraph.runs:
+                    run.text = traditional(run.text)
         return
 
 
@@ -257,7 +264,8 @@ def _insert_row_from_template(table, template_xml, insert_index: int):
 
 def _fill_summary_row(row, entry: dict[str, str]) -> None:
     label = entry.get("label", "")
-    reader = entry.get("reader", "")
+    from backend.sunday_text import traditional
+    reader = traditional(entry.get("reader", ""))
     replacements = {
         "scriptureLabel": label,
         "scriptureReader": reader,
