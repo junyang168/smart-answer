@@ -199,3 +199,41 @@ def test_operator_can_select_genesis_and_clear_it(agent, monkeypatch):
     chosen = empty.model_copy(update={"scripture": ["gen-1-1-1"]})
     assert service.update_sunday_service(day, chosen, original_scripture=[]).scripture == ["gen-1-1-1"]
     assert service.update_sunday_service(day, empty, original_scripture=chosen.scripture).scripture == []
+
+
+def test_underused_presider_does_not_repeat_on_consecutive_sundays(agent):
+    enable(agent)
+    for day in ('2026-10-18', '2026-10-25', '2026-11-01'):
+        agent.repository.services[day] = SundayServiceEntry(date=day, presider='王明')
+    maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
+    assert agent.repository.services['2026-11-08'].presider == '李芳'
+    assert agent.repository.services['2026-11-15'].presider == '王明'
+
+
+def test_repairs_existing_auto_repeat_and_remains_stable(agent):
+    enable(agent)
+    for day in ('2026-11-08', '2026-11-15'):
+        agent.repository.services[day] = SundayServiceEntry(date=day, presider='李芳')
+        agent.store.put('auto_presider:' + day, {'after': '李芳', 'status': 'applied'})
+    # A manual assignment in the preceding week must also count in rotation.
+    agent.repository.services['2026-11-01'] = SundayServiceEntry(date='2026-11-01', presider='王明')
+    maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
+    assigned = [agent.repository.services[day].presider for day in ('2026-11-08', '2026-11-15')]
+    assert assigned == ['李芳', '王明']
+    maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
+    assert assigned == [agent.repository.services[day].presider for day in ('2026-11-08', '2026-11-15')]
+
+
+def test_no_repeat_rule_respects_availability_and_manual_assignments(agent):
+    enable(agent)
+    agent.repository.workers['王明'].preferred_roles = []
+    for day in ('2026-11-08', '2026-11-15'):
+        agent.repository.services[day] = SundayServiceEntry(date=day, presider='李芳')
+        agent.store.put('auto_presider:' + day, {'after': '李芳', 'status': 'applied'})
+    maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
+    assert all(entry.presider == '李芳' for entry in agent.repository.services.values())
+    agent.repository.workers['王明'].preferred_roles = ['司會']
+    agent.store.put('auto_presider:2026-11-08', {'after': '李芳', 'status': 'confirmed_in_group'})
+    agent.store.put('auto_presider:2026-11-15', {'after': '李芳', 'status': 'confirmed_in_group'})
+    maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
+    assert all(entry.presider == '李芳' for entry in agent.repository.services.values())

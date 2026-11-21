@@ -69,16 +69,25 @@ def maintain_skeletons(repository, store, as_of):
             ownership = store.get('auto_presider:' + key)
             owned = ownership and ownership.get('status') in {'applied', 'applying'} and ownership.get('after') == entry.presider
             occupied = {entry.worship_leader, entry.sermon_speaker, entry.pianist, *entry.scripture_readers}
-            if entry.presider and (not owned or (entry.presider in eligible and workers[entry.presider].is_available_on(key) and entry.presider not in occupied)):
-                continue
+            adjacent = {
+                entries[neighbor.isoformat()].presider
+                for neighbor in (day - timedelta(days=7), day + timedelta(days=7))
+                if neighbor.isoformat() in entries
+            }
             candidates = [name for name in eligible if workers[name].is_available_on(key) and name not in occupied]
+            valid = entry.presider in candidates
+            previous = entries.get((day - timedelta(days=7)).isoformat())
+            repeats_with_alternative = (previous and entry.presider == previous.presider
+                                        and any(name != entry.presider for name in candidates))
+            if entry.presider and (not owned or (valid and not repeats_with_alternative)):
+                continue
             if not candidates and not (owned and entry.presider):
                 continue
             def rank(name):
                 assigned = [date.fromisoformat(other.date) for other in entries.values() if other.presider == name and other.date != key]
                 recent = sum(as_of - timedelta(days=84) <= prior <= day for prior in assigned)
                 last = max((prior for prior in assigned if prior < day), default=date.min)
-                return recent, last, name
+                return bool(previous and name == previous.presider), name in adjacent, recent, last, name
             chosen = min(candidates, key=rank) if candidates else None
             receipt = {'before': entry.presider, 'after': chosen, 'status': 'applying', 'basis': 'eligible_available_rotation'}
             store.put('auto_presider:' + key, receipt)
