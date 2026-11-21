@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wang Topic Discovery"
+  short_description: "Discover topic groups through Claim graph boundaries"
+  default_prompt: "Use $wang-topic-discovery to group the authorized Wang Claims from existing topic seeds, expand adjacent groups from borderline Claims, and reconcile corpus coverage."
