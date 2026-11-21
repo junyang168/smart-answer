@@ -26,3 +26,12 @@ test('OneDrive date encoding redirects keep the same folder identity', () => {
   assert.equal(sameFolderURL('https://onedrive.live.com/my?id=%2Fpersonal%2Fa%2F11%2D8%2D2026', 'https://onedrive.live.com/my?id=%2Fpersonal%2Fa%2F11-8-2026'),true);
   assert.equal(sameFolderURL('https://onedrive.live.com/my?id=/personal/a/11-1-2026', 'https://onedrive.live.com/my?id=/personal/a/11-8-2026'),false);
 });
+
+test('document identity ignores view action and transient query values, never login or another document', () => {
+  const { documentKey } = require('../folder-wizard.js');
+  const base='https://onedrive.live.com/personal/account/_layouts/15/Doc.aspx?sourcedoc=%7Bf20e788f-51d2-40a6-928b-28aeb7495277%7D';
+  assert.equal(documentKey(base+'&CT=1&action=view'),documentKey(base+'&CT=2&action=present'));
+  assert.equal(documentKey('https://login.live.com/Doc.aspx?sourcedoc=f20e788f-51d2-40a6-928b-28aeb7495277'),null);
+  assert.equal(documentKey('https://onedrive.live.com/my?id=folder'),null);
+  assert.notEqual(documentKey(base),documentKey(base.replace('f20e788f','a20e788f')));
+});

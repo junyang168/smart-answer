@@ -32,3 +32,13 @@ function cardPage(state, deck) {
 }
 if (typeof module !== 'undefined') module.exports = { identifyFiles, fileElements, isDocumentURL, sameFolderURL, cardPage };
 else window.presenterCards = { cardPage };
+
+function documentKey(value) {
+  if (!isDocumentURL(value)) return null;
+  const url = new URL(value);
+  const params = Object.fromEntries([...url.searchParams].map(([key, value]) => [key.toLowerCase(), value]));
+  const id = (params.sourcedoc || params.resid || '').replace(/[{}]/g, '').toLowerCase();
+  if (!/^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]+![a-f0-9]+)$/.test(id)) return null;
+  return `${url.origin}${url.pathname.split(/\/_layouts\//i)[0]}:${id}`;
+}
+if (typeof module !== 'undefined') module.exports.documentKey = documentKey;

@@ -135,3 +135,10 @@ test('preparing the current preview keeps its live view attached instead of repa
   assert.doesNotThrow(()=>stage.prepare(page.id));
   preparation.contentView.removeChildView=remove;
 });
+
+
+test('late destroyed callback does not access an already destroyed host contentView', () => {
+ const output=host(),stage=new Stage(output,host()),page=stage.add('sermon',view(90));
+ output.isDestroyed=()=>true;Object.defineProperty(output,'contentView',{get(){throw Error('destroyed host');}});
+ assert.doesNotThrow(()=>stage.remove(page.id));assert.equal(stage.pages.size,0);
+});

@@ -54,3 +54,5 @@ header h1 { font-size: 20px; }
 #record-mic { max-width: 100%; min-width: 150px; padding: 8px; border-radius: 6px; background: #172231; color: #e9edf5; border: 1px solid #435269; }
 #record-status { overflow-wrap: anywhere; }
 #record-level { width: 160px; margin-left: 8px; }
+
+.music-slot{display:grid;grid-template-columns:5em minmax(0,1fr) auto 4.5em;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid #dbe2ec}.music-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.music-active{color:#087957}.music-progress{display:flex;gap:12px;align-items:center}.music-progress input{flex:1;min-width:60px}.music .transport label{display:flex;gap:8px;align-items:center}.music input[type=range]{accent-color:#167455}.music #music-time{font-variant-numeric:tabular-nums;min-width:94px;font-size:13px}

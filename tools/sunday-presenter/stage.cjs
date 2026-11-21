@@ -127,7 +127,7 @@ class Stage {
     page.ready = false;
     if (this.active === id) this.black(false);
     if (this.preview === id) { this.preview = null; this.preparation.hide(); }
-    page.host?.contentView?.removeChildView(page.view);
+    if (page.host && !page.host.isDestroyed?.()) page.host.contentView?.removeChildView(page.view);
     if (this.selected[page.deck] === id) this.selected[page.deck] = null;
     this.changed();
   }

@@ -23,7 +23,7 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, controlShortcut, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, clicker, controlShortcut, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
   let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
@@ -236,6 +236,15 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     // Taking a deck again also hides settings, even for the same deck.
     stage.take('worship');
     assert.equal(controller.isVisible(), false);
+    assert.equal(clicker.active, true);
+    for (const key of ['PageDown','PageUp','Right','Left']) assert.equal(globalShortcut.isRegistered(key), true);
+    toggleControls();
+    assert.equal(clicker.active, false);
+    for (const key of ['PageDown','PageUp','Right','Left']) assert.equal(globalShortcut.isRegistered(key), false);
+    await act('hide-panel');
+    assert.equal(clicker.active, true);
+    await act('clicker-toggle'); assert.equal(clicker.active, false);
+    await act('clicker-toggle'); assert.equal(clicker.active, true);
     assert.equal(controller.isFullScreen(), false);
     await act('hide-panel');
     // Deck changes must not reopen a panel the operator explicitly dismissed.
@@ -303,6 +312,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await until(() => wc(ending).mainFrame.frames.length === 1, 'cross-origin frame');
     const endFrame = wc(ending).mainFrame.frames[0];
     await until(async () => await endFrame.executeJavaScript('!!window.__sundayEndProtected'), 'end guard installed in frame');
+    await until(() => ending.loaded && !wc(ending).isLoading(), 'end fixture fully loaded');
     await act('arm', {id:ending.id}); await act('take', {deck:'sermon'});
     await until(async () => await endFrame.executeJavaScript('typeof steps') === 'number', 'end fixture loaded');
     const endKey = key => endFrame.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', {key:${JSON.stringify(key)}, bubbles:true, cancelable:true}))`);
@@ -318,6 +328,30 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(await endFrame.executeJavaScript('steps'), 1, 'advance after returning');
     assert.equal(await endFrame.executeJavaScript('exited'), false);
     stage.remove(ending.id); wc(ending).close();
+    if (process.argv.includes('--clicker-interactive')) {
+      const doneFile = path.join(evidence,'clicker-done');
+      fs.rmSync(doneFile, {force:true});
+      const manual = await load('sermon'); await act('take', {deck:'sermon'});
+      await wc(manual).executeJavaScript("document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){steps--;document.querySelector('#slide').textContent='Slide / animation step '+steps;}})");
+      const startedAt = new Date().toISOString(), focusEvents = [];
+      const blur = () => focusEvents.push({type:'blur',at:new Date().toISOString()});
+      const focus = () => focusEvents.push({type:'focus',at:new Date().toISOString()});
+      output.on('blur',blur); output.on('focus',focus);
+      console.log('CLICKER INTERACTIVE READY', startedAt);
+      const capture = async running => {
+        const state = { startedAt, observedAt:new Date().toISOString(), running, focusEvents,
+          clicker:clicker.snapshot(), outputFocused:output.isFocused(), controllerVisible:controller.isVisible(),
+          steps:await wc(manual).executeJavaScript('steps'), keys:await wc(manual).executeJavaScript('keyLog') };
+        fs.writeFileSync(path.join(evidence,'clicker-live.json'),JSON.stringify(state));
+      };
+      // Keep the hardware test open until the operator explicitly completes it.
+      // A five-minute expiry previously ended the test before the user replied.
+      while(!fs.existsSync(doneFile)) {
+        await capture(true); await new Promise(resolve=>setTimeout(resolve,200));
+      }
+      await capture(false);
+      output.removeListener('blur',blur); output.removeListener('focus',focus);
+    }
     const result = { platform: process.platform, versions: process.versions,
       switches: 20, steps: [10, 10], stableOutput: true, popupOpener: true,
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
