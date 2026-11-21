@@ -80,6 +80,58 @@ def prefilter_report(rows, risk):
             'judge': 'Claude reads each look against his words; owner rules on what Claude finds changed'}
 
 
+JUDGE_MODEL = 'claude-opus-5-5'
+JUDGE_BATCH = 8  # records per call; his words run to 8,000 characters each
+
+
+def judge(rows, root, client):
+    """Claude's verdict on each record Jev flagged, against his words (owner 2026-11-17: Claude is the final judge).
+
+    Same question as the GPT check. Each batch's request and raw answer are kept under
+    ``root/claude/<request sha>``, and a successful call is replayed rather than repeated.
+    """
+    import hashlib
+    decided = {}
+    for start in range(0, len(rows), JUDGE_BATCH):
+        jobs = [{k: r[k] for k in ('job_id', 'kind', 'statement', 'his_words', 'context')}
+                for r in rows[start:start + JUDGE_BATCH]]
+        user = json.dumps({'jobs': jobs}, ensure_ascii=False, sort_keys=True)
+        key = hashlib.sha256((INSTRUCTION + user + client.model).encode()).hexdigest()
+        directory = Path(root) / 'claude' / key
+        directory.mkdir(parents=True, exist_ok=True)
+        client.call_artifacts = directory / 'transport'
+        reply = client.generate_json(INSTRUCTION, user, SCHEMA)
+        asked = {j['job_id'] for j in jobs}
+        answered = {i['job_id']: i for i in reply['items'] if i['job_id'] in asked}
+        if set(answered) != asked:
+            raise ValueError(f'Claude left {sorted(asked - set(answered))} unanswered')
+        (directory / 'reply.json').write_text(json.dumps(reply, ensure_ascii=False, indent=1))
+        decided.update(answered)
+    return decided
+
+
+def judged_report(pre, rows, decided, *, model=JUDGE_MODEL, day=None):
+    """The prefilter report with Claude's verdicts: faithful looks are ruled; changed or added go to the owner.
+
+    A finding has no ``ruling``, so ``argument_instance_load`` refuses the lecture until the owner rules on it
+    (owner 2026-11-20: 「出問題的轉人工」).
+    """
+    from datetime import date
+    day = day or date.today().isoformat()
+    by_id = {r['job_id']: r for r in rows}
+    looks, findings = [], []
+    for look in pre['needs_look']:
+        g = decided[look['id']]
+        if g['verdict'] == 'faithful':
+            looks.append(look | {'ruling': f"Claude {day} ({model}, program; final judge per owner): faithful. {g['detail']}".rstrip()})
+        else:
+            findings.append(look | {'verdict': g['verdict'], 'detail': g['detail'], 'his_words': by_id[look['id']]['his_words']})
+    return pre | {'findings': findings, 'needs_look': looks,
+                  'judged_by': f'{model} through the claude CLI (subscription), program `argument_fidelity --judge`; '
+                               'owner 2026-11-17 「jev is used for prefilter and you are the final judge」',
+                  'judge': 'faithful looks are ruled by the program; changed or added findings wait for the owner'}
+
+
 def prefilter(rows, root, ports):
     """Jev's risk for each record: 1 - P(his words lead to the statement)."""
     from backend.pipeline import claim_flash_common as f
@@ -191,9 +243,28 @@ def main():
     p.add_argument('--no-jev', action='store_true')
     p.add_argument('--prefilter', action='store_true', help='Jev prefilter only (owner 2026-11-17); Claude judges the looks')
     p.add_argument('--recheck', help='an earlier fidelity.json: re-ask only its findings and looks; the rest passed a stricter check')
+    p.add_argument('--judge', action='store_true',
+                   help="after --prefilter: Claude judges its looks; writes fidelity-final.json, findings left for the owner")
     a = p.parse_args()
     load_dotenv('.env')
     candidate = json.loads(Path(a.candidate).read_text())
+    if a.judge:
+        from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
+        out = Path(a.out)
+        final = out / 'fidelity-final.json'
+        if final.exists():
+            raise SystemExit(f'{final} exists; it may hold owner rulings')
+        pre = json.loads((out / 'prefilter.json').read_text())
+        wanted = {look['id'] for look in pre['needs_look']}
+        rows = [r for r in records(candidate) if r['job_id'] in wanted]
+        if {r['job_id'] for r in rows} != wanted:
+            raise SystemExit('prefilter.json names records this candidate does not have')
+        client = ClaudeSubscriptionClient(model=JUDGE_MODEL, reasoning_effort='high')
+        result = judged_report(pre, rows, judge(rows, out, client))
+        final.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        print(json.dumps({'looks': len(wanted), 'faithful': len(result['needs_look']),
+                          'to_owner': [f['id'] for f in result['findings']]}, ensure_ascii=False))
+        return
     if a.count:
         rows = records(candidate)
         print(json.dumps({'records': len(rows), 'his_words_chars': sum(len(r['his_words']) for r in rows),
