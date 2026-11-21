@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import json
+from urllib.parse import quote
 from email.utils import parseaddr
 from pathlib import Path
 
@@ -396,10 +398,21 @@ def get_sunday_service_resources() -> SundayServiceResources:
 @sunday_service_router.post("/{date:path}/ppt")
 def create_sunday_service_ppt(date: str) -> FileResponse:
     ppt_path = generate_sunday_service_ppt(date)
+    from .service import repository
+    from backend.sunday_presenter import service_day
+    from backend.sunday_service_skeletons import skeleton_status
+    entry = next(entry for entry in list_sunday_services() if entry.date == date)
+    missing = ['本週奉獻總額'] if entry.donation_amount is None else []
+    missing.extend(
+        row['date'] + '：' + '、'.join(row['missing'])
+        for row in skeleton_status(repository, service_day(date))
+        if row['missing']
+    )
     return FileResponse(
         ppt_path,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=ppt_path.name,
+        headers={"X-Sunday-Ppt-Missing": quote(json.dumps(missing, ensure_ascii=False))},
     )
 
 

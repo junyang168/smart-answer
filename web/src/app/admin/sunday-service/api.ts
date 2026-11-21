@@ -183,7 +183,7 @@ export async function generateHymnLyrics(
   return parseJson(response);
 }
 
-export async function generateSundayServicePpt(date: string): Promise<Blob> {
+export async function generateSundayServicePpt(date: string): Promise<{ blob: Blob; missing: string[] }> {
   const response = await fetch(resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/ppt`), {
     method: "POST",
   });
@@ -199,7 +199,9 @@ export async function generateSundayServicePpt(date: string): Promise<Blob> {
     }
     throw new Error(detail || `Request failed with status ${response.status}`);
   }
-  return response.blob();
+  const missingHeader = response.headers.get("X-Sunday-Ppt-Missing");
+  const missing: string[] = missingHeader ? JSON.parse(decodeURIComponent(missingHeader)) : [];
+  return { blob: await response.blob(), missing };
 }
 
 export async function uploadFinalSundayServicePpt(

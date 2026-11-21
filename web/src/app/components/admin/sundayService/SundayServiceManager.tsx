@@ -902,7 +902,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
     setFeedback(null);
     setError(null);
     try {
-      const blob = await generateSundayServicePpt(date);
+      const { blob, missing } = await generateSundayServicePpt(date);
       if (blob.size === 0) {
         throw new Error("產生的檔案內容為空");
       }
@@ -916,7 +916,8 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
       anchor.click();
       document.body.removeChild(anchor);
       window.URL.revokeObjectURL(url);
-      setPptResult({ date, message: `已生成 ${fileName}，已要求瀏覽器下載。`, failed: false });
+      const notice = missing.length ? ` 可先檢查版面，資料尚缺 ${missing.join("、")}。` : "";
+      setPptResult({ date, message: `已生成 ${fileName}，已要求瀏覽器下載。${notice}`, failed: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : "生成 PPT 失敗，沒有下載檔案，請稍後重試。";
       setPptResult({ date, message, failed: true });
