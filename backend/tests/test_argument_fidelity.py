@@ -28,3 +28,38 @@ def test_prefilter_sends_records_at_the_measured_risk_to_claude_and_decides_noth
     assert [x['id'] for x in out['needs_look']] == ['a'] and out['findings'] == []
     assert F.prefilter_question('Position')['Q0']['criteria'] == F.SUPPORTED['others']['criteria']
     assert F.prefilter_question('Question')['Q0']['instructions'] == F.SUPPORTED['question']['instructions']
+
+
+class FakeClaude:
+    model = 'claude-opus-5-5'
+
+    def __init__(self, verdicts):
+        self.verdicts, self.calls = verdicts, 0
+
+    def generate_json(self, system, user, schema):
+        import json
+        self.calls += 1
+        jobs = json.loads(user)['jobs']
+        return {'items': [{'job_id': j['job_id'], 'verdict': self.verdicts[j['job_id']], 'detail': 'd'} for j in jobs]}
+
+
+def test_claude_rules_faithful_looks_and_leaves_changed_ones_for_the_owner(tmp_path):
+    rows = af.records(candidate())
+    pre = af.prefilter_report(rows, {'DK-x-CL0001': 0.5, 'DK-x-P01-ST01': 0.9})
+    client = FakeClaude({'DK-x-CL0001': 'faithful', 'DK-x-P01-ST01': 'changed'})
+    out = af.judged_report(pre, rows, af.judge(rows, tmp_path, client), day='2026-11-20')
+    assert [x['id'] for x in out['needs_look']] == ['DK-x-CL0001'] and out['needs_look'][0]['ruling'].startswith('Claude 2026-11-20')
+    assert [(f['id'], f['verdict']) for f in out['findings']] == [('DK-x-P01-ST01', 'changed')]
+    assert 'ruling' not in out['findings'][0]   # the loader refuses until the owner rules
+    assert (tmp_path / 'claude').is_dir()
+
+
+def test_judge_refuses_an_answer_that_skips_a_record(tmp_path):
+    import pytest
+    rows = af.records(candidate())
+
+    class Skips(FakeClaude):
+        def generate_json(self, system, user, schema):
+            return {'items': super().generate_json(system, user, schema)['items'][:1]}
+    with pytest.raises(ValueError, match='unanswered'):
+        af.judge(rows, tmp_path, Skips({'DK-x-CL0001': 'faithful', 'DK-x-P01-ST01': 'faithful'}))

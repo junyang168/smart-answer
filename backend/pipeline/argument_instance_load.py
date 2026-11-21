@@ -36,7 +36,7 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces=None):
+def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces=None, shape_path=None):
     from backend.api.canonical_repository.postgres_store import normalize_package, record_content_sha
     from backend.pipeline.knowledge_package_merge import validate_merged_package
     package = json.loads(Path(candidate_path).read_text())
@@ -47,6 +47,11 @@ def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces
     open_items = [f['id'] for f in fidelity['findings'] + fidelity['needs_look'] if not f.get('ruling')]
     if open_items:
         raise ValueError(f'fidelity check has {len(open_items)} items without a ruling: {open_items[:5]}')
+    if shape_path is not None:
+        shape = json.loads(Path(shape_path).read_text())
+        open_shape = [f['id'] for f in shape['findings'] + shape['needs_look'] if not f.get('ruling')]
+        if open_shape:
+            raise ValueError(f'story check has {len(open_shape)} Claims without a ruling: {open_shape[:5]}')
     validate_merged_package(package, native_relations=True)
     records = normalize_package(package)
     if len(records.get('source_documents', {})) != 1:
@@ -141,13 +146,17 @@ def main():
     from backend.pipeline.argument_review import database_url
     p = argparse.ArgumentParser(description='Write one validated lecture into the new knowledge instance')
     p.add_argument('--run', required=True, help='the lecture run directory')
+    p.add_argument('--skip-shape', action='store_true', help='lectures loaded before the story check existed')
     p.add_argument('--replaces', help='the ChangeSet that holds this lecture now; its records are retired')
     a = p.parse_args()
     load_dotenv('.env')
     run = Path(a.run)
     candidate = run / 'creation' / 'candidate-owner-corrected.json'
+    shape = run / 'shape' / 'shape-final.json'
+    if not a.skip_shape and not shape.exists():
+        raise SystemExit(f'{shape} is missing: run `argument_shape --prefilter` then `--judge` first')
     with psycopg.connect(database_url()) as conn:
-        print(json.dumps(load(conn, candidate, receipt_path=candidate.with_suffix('.receipt.json'),
+        print(json.dumps(load(conn, candidate, shape_path=None if a.skip_shape else shape, receipt_path=candidate.with_suffix('.receipt.json'),
                               fidelity_path=run / 'fidelity' / 'fidelity-final.json', run_dir=run,
                               replaces=a.replaces), ensure_ascii=False, indent=1))
 

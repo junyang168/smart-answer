@@ -224,9 +224,14 @@
 1a. **每句忠實**（負責人 2026-11-17：「this should be part of your validation」；`argument_fidelity.py --prefilter`）。程式核對保證他的話一句不漏、SourceFragment 是原話、經文都在；它看不到 GPT 寫的每一句 statement（Claim、Evidence、Observation、Position、Question）有沒有改變他的判斷或加上他沒說的。分工照負責人 2026-11-17：「jev is used for prefilter and you are the final judge」。
    - **Jev 初篩**：每條記錄連同它的原話（SourceFragment）與同一段論證裡他前後的話，問一個正面的、一步步讀的 Noul，附明確的 true／false 準則（照 [Jev cookbook「Verifying LLM answers against their source」](https://docs.typesafe.ai/cookbooks/verify_llm_outputs.md) 的形式）：「照他的原話一步步讀，會得出這句話的判斷嗎？」Position 問「他轉述的別人看法就是這句嗎」，Question 問「這個問題是這樣被問的嗎」。風險 = 1 − 得分。
    - **門檻是量出來的**：2026-11-17 用第一、二講 142 條已判忠實的記錄，加 18 條故意改錯的副本（說反、說廣、說得更確定、加理由、換對象、問題加前提；`argument_golden/fidelity/planted.json`，只作測試輸入）。風險 ≥ 0.3 抓到 18/18，送審 36/142；0.4 會漏一條（時態說反，0.37）。初篩要的是不漏，所以取 0.3。
-   - **Claude 終判**：送審的記錄由 Claude 對照他的原話逐條判；判為改變的，連同原話交負責人裁定。Jev 不判任何一條。
+   - **Claude 終判**：送審的記錄由 Claude 對照他的原話逐條判；判為改變的，連同原話交負責人裁定。Jev 不判任何一條。終判由程式執行（`argument_fidelity.py --judge`，負責人 2026-11-20：「出問題的轉人工」）：與 GPT 核對同一問題，每次 8 條，經 claude CLI（訂閱）調用 claude-opus-5-5，請求與原始答覆存在 `fidelity/claude/`；判為忠實的寫入裁定，判為改變或添加的列為 finding，不寫裁定，`argument_instance_load` 因此拒絕入庫，直到負責人裁定。`fidelity-final.json` 已存在時拒絕執行，以免蓋掉負責人的裁定。2026-11-20 驗證（`argument-layer-runs/fidelity-judge-eval-20261120/`，8 次調用）：18 條故意改錯的副本全部判出；第（二）6 講送審的 33 條中 32 條與會話中的裁定一致，1 條（P03-ST01「求不要遇見超過所能承受的試探」）判為添加——他緊接著那句說了「不要遇見到我們所能承受的試探以外」，但那句不在這條記錄的原話與前後文裡。這是誤報，方向安全：交負責人，不會放過。
    - 措辭、語氣、詳略不算（口語講課，不是法律條文）。舊做法（GPT 逐條判、Jev 標待看）第一、二講各跑過一次：GPT 沒找到改變，Jev 的 9 條待看都忠實，問法是負面的一句加長規則、門檻 0.5 沒量過，Position 誤報最多（7/9）；新問法 Position 只誤報 1/14。
    - 這一步取代 Flash 的 Evidence 與 Claim 忠實檢查；Flash 其餘檢查（每句落腳、原文片段、經文、連結）生成時已由程式做。
+1b. **故事檢查**（`argument_shape.py`，#787，2026-11-21）。提示詞已寫「故事中別人說的話不是他的教導」，第 2 講 v2、v4、v6 三輪仍把工程師故事裡牧師的話寫成 Claim（CL0022、CL0019、CL0018），只有 v7 改用「一條 Claim 回答他自己的一個問題」加例子後消失。這一步是提示詞之下的網，做法同 1a：
+   - **Jev 初篩**：每條 Claim 連同它的 Evidence 與他的原話，問「這個判斷是他自己親口作成的教導嗎」（故事裡別人說的話、只從故事推出的不算）；風險 = 1 − 得分，門檻 0.3。
+   - **Claude 終判**：送審的 Claim 由 claude-opus-5-5 對照原話判為「他自己的」或「別人說的／故事推出的」；前者寫入裁定，後者列為 finding、不寫裁定，`argument_instance_load` 拒絕入庫，直到負責人裁定。命令行 `--skip-shape` 只給此步驟之前已入庫的講。
+   - **校準**（`argument_golden/shape/story_calibration.json`，`argument_shape --calibrate`）：3 條已裁定的故事 Claim（風險 0.61–0.77）全部達標；負責人已裁定正確的第 2 講 22 條中 2 條送審（0.35、0.36），Claude 都判為他自己的。最新一輪第 1–6 講共 114 條中 4 條送審，Claude 判 4 條都是他自己的。樣本只有 3 個真錯誤，換提示詞或門檻後要重跑 `--calibrate`。
+   - **只查故事這一項**：同一測試顯示 Jev 不適合「只是前提」（錯誤得分 0.17–0.36，低於多條正確的）與「一條說了兩件事」（0.5 時 22 條正確的 10 條被送審）；Claude 單獨判「兩件事」又與負責人的粒度裁定衝突（第 2 講 22 條正確的 Claim 中 5 條被判為兩件事，如負責人定為一條的「主觀」）。這兩項要等負責人的粒度裁定做成例子再重測，不進閘門。
 2. **獨立評審**（調模型，用與生成不同的模型：Gemini 4 Argon，負責人 2026-11-16）。評審讀逐字稿與 GPT 的結果，一條一條回答窄問題，不給整講打分：
    - 每條 Claim：他自己有沒有說出這個判斷（引原句）？還是用來證明另一條的論據、別人的話，或從故事推出而他沒說的？
    - 每條題外話：他有沒有給經文或推理？
