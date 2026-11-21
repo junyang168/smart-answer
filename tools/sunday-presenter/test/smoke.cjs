@@ -329,18 +329,28 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(await endFrame.executeJavaScript('exited'), false);
     stage.remove(ending.id); wc(ending).close();
     if (process.argv.includes('--clicker-interactive')) {
+      const doneFile = path.join(evidence,'clicker-done');
+      fs.rmSync(doneFile, {force:true});
       const manual = await load('sermon'); await act('take', {deck:'sermon'});
-      console.log('CLICKER INTERACTIVE READY');
-      const capture = async () => {
-        const state = { clicker:clicker.snapshot(), outputFocused:output.isFocused(), controllerVisible:controller.isVisible(),
+      await wc(manual).executeJavaScript("document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){steps--;document.querySelector('#slide').textContent='Slide / animation step '+steps;}})");
+      const startedAt = new Date().toISOString(), focusEvents = [];
+      const blur = () => focusEvents.push({type:'blur',at:new Date().toISOString()});
+      const focus = () => focusEvents.push({type:'focus',at:new Date().toISOString()});
+      output.on('blur',blur); output.on('focus',focus);
+      console.log('CLICKER INTERACTIVE READY', startedAt);
+      const capture = async running => {
+        const state = { startedAt, observedAt:new Date().toISOString(), running, focusEvents,
+          clicker:clicker.snapshot(), outputFocused:output.isFocused(), controllerVisible:controller.isVisible(),
           steps:await wc(manual).executeJavaScript('steps'), keys:await wc(manual).executeJavaScript('keyLog') };
         fs.writeFileSync(path.join(evidence,'clicker-live.json'),JSON.stringify(state));
       };
-      const deadline=Date.now()+300000;
-      while(Date.now()<deadline && !fs.existsSync(path.join(evidence,'clicker-done'))) {
-        await capture(); await new Promise(resolve=>setTimeout(resolve,200));
+      // Keep the hardware test open until the operator explicitly completes it.
+      // A five-minute expiry previously ended the test before the user replied.
+      while(!fs.existsSync(doneFile)) {
+        await capture(true); await new Promise(resolve=>setTimeout(resolve,200));
       }
-      await capture();
+      await capture(false);
+      output.removeListener('blur',blur); output.removeListener('focus',focus);
     }
     const result = { platform: process.platform, versions: process.versions,
       switches: 20, steps: [10, 10], stableOutput: true, popupOpener: true,
