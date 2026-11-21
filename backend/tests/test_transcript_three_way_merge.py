@@ -158,6 +158,11 @@ def test_modern_editor_replacement_keeps_history_owner_and_publication(setup, tm
     raw = publication.read_bytes()
     result = promotion.replace_review(beta, root, '講道 test', backup, run, actor='a')
     after = target.document('a', '講道 test')
+    visible = target.history('a', '講道 test', grouped=True)
+    assert {r["revision"] for period in visible["periods"] for r in period["revisions"]} == {
+        *map(lambda name: int(name.removesuffix(".json")), history), result["revision"],
+    }
+    assert target.revision('a', '講道 test', before['context']['revision'])['script'] == before['script']
     assert after['context']['revision'] == before['context']['revision'] + 1
     assert after['script'] == source.document('a', '講道 test')['script']
     assert after['header'] == before['header'] and after['epoch'] == before['epoch']

@@ -34,3 +34,14 @@ def test_isolated_editor_link_keeps_correct_host_and_escapes_sermon_id():
     assert editor_link('S')=='/admin/surmons/S'
     for origin in ('javascript:alert(1)','https://example.com/path','https://user:secret@example.com'):
         with pytest.raises(ValueError):editor_link('S',origin)
+
+
+def test_production_editor_destination_requires_existing_catalog(tmp_path):
+    from backend.pipeline.media_batch.stages import production_editor_root
+    import pytest
+
+    with pytest.raises(ValueError, match="catalog is missing"):
+        production_editor_root(str(tmp_path))
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/sermon.json").write_text("[]")
+    assert production_editor_root(str(tmp_path)) == tmp_path.resolve()

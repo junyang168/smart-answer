@@ -254,8 +254,15 @@ def replace_review(beta_root, production_root, item, backup_root, merge_run, *, 
         context.update(revision=dst_context['revision'],script_sha256=dst_context['script_sha256'])
         baseline=read(beta_root/'script_patched'/f'{item}.json')
         if baseline is None:raise ValueError('incoming pre-edit baseline missing')
+        incoming_record = source.folder(item) / 'source-record.json'
+        record = read(incoming_record)
+        if record is None or file_hash(incoming_record) != src_context['source_record_sha256']:
+            raise ValueError('incoming source record does not match its editor context')
+        if src_context.get('playback_media') != dst_context.get('playback_media'):
+            raise ValueError('replacement playback media differs; explicit media reconciliation required')
         receipt=target.commit(item,actor,request['operation_id'],request,src_rows,context,
-            'adopt_merged_transcript',extra={production_root/'script_patched'/f'{item}.json':baseline})
+            'adopt_merged_transcript',extra={production_root/'script_patched'/f'{item}.json':baseline,
+            target.folder(item)/'source-record.json':record})
         actual_rows,actual_context=target.load(item)
         if actual_rows!=expected or actual_context!={**src_context,'revision':receipt['revision'],'script_sha256':digest(expected)}:
             raise ValueError('replacement readback differs')
