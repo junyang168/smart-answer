@@ -1,3 +1,4 @@
+const { Clicker } = require('./clicker.cjs');
 const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu, globalShortcut, dialog, powerSaveBlocker, protocol } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -23,6 +24,7 @@ let controller, output, preparation, stage, officeSession, quitting = false, qui
 let website, remoteControl, awakeBlocker, hostVideo, music, preparer;
 let choosingMusic = false;
 let keyQueue = Promise.resolve();
+let clicker;
 let folderTimer, choosingRecording = false;
 let folderMessage = '';
 const folderRuns = new Map();
@@ -45,13 +47,18 @@ function changed(reason) {
     output.focus();
     stage.get(stage.active).view.webContents.focus();
   }
+  syncClicker();
   preparer?.observe();
   if (stage) remoteControl?.observe(stage.active);
   hostVideo?.observe();
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
-function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
+function syncClicker() {
+  clicker?.sync(!!stage?.pages.get(stage.active)?.ready && !controller.isVisible() && !preparation.isVisible() && output.isVisible() && !output.isMinimized());
+}
+
+function snapshot() { return { clicker: clicker?.snapshot(), ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
   preparation: preparer?.snapshot(), folderMessage, recording: hostVideo?.recording.snapshot(), music: music?.snapshot() }; }
 
 
@@ -326,6 +333,7 @@ async function act(action, args = {}) {
   switch (action) {
     case 'prepare-week': preparer.start(); break;
     case 'state': return snapshot();
+    case 'clicker-toggle': clicker.enabled = !clicker.enabled; syncClicker(); changed(); break;
     case 'hide-panel': controller.hide(); if (stage.active !== null) { output.focus(); stage.get(stage.active).view.webContents.focus(); } break;
     case 'choose-week': {
       folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
@@ -561,8 +569,10 @@ app.whenReady().then(async () => {
   music = new Music({ file:path.join(app.getPath('userData'),'music.json'), changed: state => {
     if (controller && !controller.isDestroyed()) controller.webContents.send('presenter:music-state',state);
   } });
-  output.on('minimize', () => hostVideo.observe());
-  output.on('hide', () => hostVideo.observe());
+  output.on('minimize', () => changed());
+  output.on('restore', () => changed());
+  output.on('show', () => changed());
+  output.on('hide', () => changed());
   let remoteIdentity, identityError;
   if (!smoke) {
     try { remoteIdentity = identity(path.join(app.getPath('userData'), 'remote')); }
@@ -576,6 +586,9 @@ app.whenReady().then(async () => {
       keyQueue = task.catch(() => {}); return task;
     } });
   if (identityError) remoteControl.error = identityError;
+  clicker = new Clicker({ shortcuts: globalShortcut, changed, send: (key, valid) => act('key', { key, valid }) });
+  controller.on('show', () => changed()); controller.on('hide', () => changed());
+  preparation.on('show', () => changed()); preparation.on('hide', () => changed());
   stage.layout();
   preparation.setPosition(...output.getPosition());
   if (!globalShortcut.register(controlShortcut, toggleControls)) {
@@ -639,7 +652,7 @@ app.whenReady().then(async () => {
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        website, remoteControl, hostVideo, music, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
+        website, remoteControl, hostVideo, music, clicker, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
       if (process.argv.includes('--music-smoke')) await require('./test/music-smoke.cjs').run({ music, act, stage, controller, setOrigin: origin => { testOrigin = origin; } });
       if (process.argv.includes('--preparation-smoke')) await require('./test/preparation-smoke.cjs').run({ preparer, act, stage, controller, website, officeSession });
       console.log('SMOKE PASS');
@@ -668,6 +681,7 @@ app.on('before-quit', event => {
   }
   if (quitCleanupDone) return;
   quitCleanupDone = true; quitting = true;
+  clicker?.release();
   globalShortcut.unregisterAll();
   clearInterval(folderTimer);
   if (awakeBlocker !== undefined && powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker);

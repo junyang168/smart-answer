@@ -23,7 +23,7 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, controlShortcut, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, clicker, controlShortcut, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
   let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
@@ -236,6 +236,15 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     // Taking a deck again also hides settings, even for the same deck.
     stage.take('worship');
     assert.equal(controller.isVisible(), false);
+    assert.equal(clicker.active, true);
+    for (const key of ['PageDown','PageUp','Right','Left']) assert.equal(globalShortcut.isRegistered(key), true);
+    toggleControls();
+    assert.equal(clicker.active, false);
+    for (const key of ['PageDown','PageUp','Right','Left']) assert.equal(globalShortcut.isRegistered(key), false);
+    await act('hide-panel');
+    assert.equal(clicker.active, true);
+    await act('clicker-toggle'); assert.equal(clicker.active, false);
+    await act('clicker-toggle'); assert.equal(clicker.active, true);
     assert.equal(controller.isFullScreen(), false);
     await act('hide-panel');
     // Deck changes must not reopen a panel the operator explicitly dismissed.

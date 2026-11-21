@@ -250,3 +250,10 @@ Playback is independent of PPT navigation and deck switching. OUTPUT continues t
 For Meet, share **Sunday Presenter — OUTPUT** and explicitly enable **Also share system audio**. Google supports window/system-audio presentation on macOS 14.2+ and Chrome 142+ ([official release note](https://workspaceupdates.googleblog.com/2025/12/share-devices-audio-when-presenting.html), [Meet help](https://support.google.com/meet/answer/9308856?co=GENIE.Platform%3DDesktop)). Leave Meet's speaker device on the system default as Google advises. Verify both room and an independent Meet participant before the service; playback on the host alone is not proof of remote delivery. Local Presenter MP4 recording keeps its existing selected-microphone audio track; this feature does not mix MP3 into that recording.
 
 `npm run smoke:music` runs real MP3 playback in Electron along with the existing slide/focus smoke. It covers the three slots, silent startup, continuity through deck changes, pause/resume, seeking, volume, single-track playback, no automatic advance, invalid MP3 errors, and cancelling a pending start with Stop. It does not claim Meet receiver acceptance.
+
+USB clicker: during audience playback, Presenter captures Page Up / Page Down
+and Left / Right as global shortcuts and routes them through the same serialized
+slide/animation command path as Remote. This works while another app has focus.
+Opening settings or preparation, ending playback, or pausing Clicker releases
+these keys. The panel reports registration conflicts and delivery errors. Other
+clicker keys (for example a laser button or blank-screen key) are not remapped.

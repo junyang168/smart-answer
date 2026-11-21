@@ -63,6 +63,9 @@ document.querySelector('#music-stop').onclick=()=>act('music-stop');
 document.querySelector('#music-seek').onchange=e=>act('music-seek',{position:Number(e.target.value)});
 document.querySelector('#music-volume').oninput=e=>act('music-volume',{volume:Number(e.target.value)});
 function render(state) {
+  const clicker = state.clicker || {};
+  document.querySelector('#clicker-status').textContent = clicker.error || (!clicker.enabled ? '已停用' : clicker.active ? '播放中：全域換頁已啟用' : '已啟用；返回播放後接收換頁鍵');
+  document.querySelector('#clicker-toggle').textContent = clicker.enabled ? '暫停 Clicker' : '啟用 Clicker';
   renderMusic(state.music);
   const preparation=state.preparation||{status:'idle',decks:{}};
   const preparing=!!preparation.busy;
