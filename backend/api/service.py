@@ -2238,20 +2238,20 @@ def _populate_fellowship_replacements(
         parsed for entry in fellowship_entries if (parsed := _parse_fellowship_date(entry.date))
     }
 
-    first_friday = _upcoming_friday(service_date)
-    second_friday = first_friday + timedelta(weeks=1)
+    first_thursday = _upcoming_thursday(service_date)
+    second_thursday = first_thursday + timedelta(weeks=1)
 
     for date_key, flag_key, target_date in (
-        ("fellowDate1", "hasFellow1", first_friday),
-        ("fellowDate2", "hasFellow2", second_friday),
+        ("fellowDate1", "hasFellow1", first_thursday),
+        ("fellowDate2", "hasFellow2", second_thursday),
     ):
         replacements[date_key] = target_date.strftime("%m/%d")
         replacements[flag_key] = "有" if target_date.date() in fellowship_dates else "無"
 
 
-def _upcoming_friday(reference: datetime) -> datetime:
-    days_until_friday = (4 - reference.weekday()) % 7
-    return reference + timedelta(days=days_until_friday)
+def _upcoming_thursday(reference: datetime) -> datetime:
+    days_until_thursday = (3 - reference.weekday()) % 7
+    return reference + timedelta(days=days_until_thursday)
 
 
 def _parse_fellowship_date(value: str | None) -> datetime.date | None:

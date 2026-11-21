@@ -43,11 +43,12 @@ def test_interrupted_process_reservation_blocks_automatic_duplicate(tmp_path):
 
 
 @pytest.mark.parametrize('now,complete,expected',[
- ('2026-11-19T07:59:59-06:00',True,0),
- ('2026-11-19T10:00:00-06:00',False,0),
- ('2026-11-19T15:00:00-06:00',True,1),
- ('2026-11-20T10:00:00-06:00',True,1),
- ('2026-11-20T19:30:00-06:00',True,0),
+ ('2026-12-02T07:59:59-06:00',True,0),
+ ('2026-12-02T10:00:00-06:00',False,0),
+ ('2026-12-02T15:00:00-06:00',True,1),
+ ('2026-12-03T10:00:00-06:00',True,1),
+ ('2026-12-03T19:59:59-06:00',True,1),
+ ('2026-12-03T20:00:00-06:00',True,0),
 ])
 def test_email_catch_up_after_details_are_completed_and_stops_before_meeting(tmp_path,monkeypatch,now,complete,expected):
     from backend import fellowship_reminder_job as job
@@ -56,7 +57,7 @@ def test_email_catch_up_after_details_are_completed_and_stops_before_meeting(tmp
         @classmethod
         def now(cls,tz=None):return when.astimezone(tz) if tz else when
     monkeypatch.setattr(job,'datetime',Clock)
-    event=job.FellowshipEvent(date=date(2026,11,20),host='王明' if complete else None,title='饒恕',series='馬太福音18章')
+    event=job.FellowshipEvent(date=date(2026,12,3),host='王明' if complete else None,title='饒恕',series='馬太福音18章')
     monkeypatch.setattr(job,'load_fellowship_events',lambda *_:[event])
     monkeypatch.setattr(job,'load_notification_recipients',lambda *_:['test@example.com'])
     monkeypatch.setattr(job,'BASE_DIR',str(tmp_path));monkeypatch.setattr(job,'STATUS_FILE',str(tmp_path/'last_sent.json'))

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 from backend.api.models import FellowshipEntry
+from backend.fellowship_timing import START_TIME, following_sunday, next_biweekly_date
 from backend.sunday_data_lock import sunday_data_lock
 from .models import ZONE
 from .store import dump, now_text
@@ -95,7 +96,7 @@ class Fellowship:
             if value.get('status')=='sending' and (datetime.now(ZONE)-datetime.fromisoformat(value['at'])).total_seconds()>180:return 'unknown'
             return value.get('status','waiting')
         except FileNotFoundError:
-            if datetime.now(ZONE)>=datetime.combine(date.fromisoformat(day),time(19,30),ZONE):return 'expired'
+            if datetime.now(ZONE)>=datetime.combine(date.fromisoformat(day),START_TIME,ZONE):return 'expired'
             return 'waiting'
         except (ValueError,OSError):return 'error'
 
@@ -126,16 +127,16 @@ class Fellowship:
             entries=self.entries()
             # Only completed, explicitly populated events after activation anchor new cases.
             previous=[day for day,row in entries.items() if settings.fellowship_start_date<=date.fromisoformat(day)<local.date()
-                      and row.host and row.title and date.fromisoformat(day).weekday()==4]
+                      and row.host and row.title and date.fromisoformat(day).weekday() in (3,4)]
             for before in sorted(previous)[-4:]:
                 day=date.fromisoformat(before)
-                sunday=day+timedelta(days=2)
+                sunday=following_sunday(day)
                 if (local.date()-sunday).days>13:
                     continue
                 existing=next((case for case in self.cases() if case['previous_day']==before),None)
                 if not existing:
                     future=sorted(key for key in entries if key>before)
-                    target=future[0] if future else (day+timedelta(days=14)).isoformat()
+                    target=future[0] if future else next_biweekly_date(day).isoformat()
                     if date.fromisoformat(target)<=local.date():
                         continue
                     entry=entries.get(target)
@@ -154,7 +155,7 @@ class Fellowship:
                     continue
                 if local>=datetime.combine(sunday,time(15),ZONE):
                     self.queue('fellowship:request:'+before,self.request_text(case,entry))
-                reminder=datetime.combine(day+timedelta(days=6),time(9),ZONE)
+                reminder=datetime.combine(sunday+timedelta(days=4),time(9),ZONE)
                 if local>=reminder and local.date()<=target and (missing or case['data'].get('questions')):
                     self.queue('fellowship:reminder:'+before,self.reminder_text(case,missing))
 

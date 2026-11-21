@@ -86,7 +86,7 @@ def test_get_fellowship_email_content_uses_reminder_template(monkeypatch):
 
     content = service.get_fellowship_email_content("2026-06-05")
 
-    assert content.subject == "達拉斯圣道教会团契 时间: 06/05 周五晚 7:30 - 9:00 CST "
+    assert content.subject == "達拉斯圣道教会团契 时间: 06/05 週四晚 8:00（美國中部時間） "
     assert "弟兄姊妹们平安" in content.html
     assert "主持人:</td>" in content.html
     assert "Series 系列 的第 3 講" in content.html
