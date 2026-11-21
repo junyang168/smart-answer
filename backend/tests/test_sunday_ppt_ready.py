@@ -377,9 +377,9 @@ def test_video_slots_ready_without_catalog_or_lyrics_and_url_changes_version(rea
     assert len(calls)==2 and agent.store.get('ppt_readiness')['missing']
 
 
-def test_long_passage_repairs_legacy_single_reader_to_one_per_slide(agent):
+def test_long_passage_repairs_legacy_single_reader_with_bounded_reader_groups(agent):
     from backend.api.service import _prepare_scripture_sections
-    from backend.sunday_assistant.role_assignment import reading_page_count
+    from backend.sunday_assistant.role_assignment import required_reader_count
     day = '2026-11-22'
     for name in ['甲', '乙', '丙', '丁']:
         agent.repository.workers[name] = SundayWorker(name=name, preferredRoles=['讀經經文'])
@@ -392,7 +392,7 @@ def test_long_passage_repairs_legacy_single_reader_to_one_per_slide(agent):
     assign_readers(agent.repository, agent.store, [day])
     saved = agent.repository.services[day]
     assert saved.scripture == ['1ki-19-1-18']
-    assert len(set(saved.scripture_readers)) == reading_page_count(saved.scripture) == 3
+    assert len(set(saved.scripture_readers)) == required_reader_count(saved.scripture) == 3
     assert '丁' not in saved.scripture_readers
     sections = [{
         'book': '列王紀上', 'display': '列王紀上 19:1-18',
