@@ -3,8 +3,8 @@
 import json
 import re
 
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.full_video_transcript import cleanup_generate
-from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import check_schema, obj
 from backend.pipeline.transcript_gemini_proofreading import saved_response
 
@@ -30,7 +30,7 @@ def validate_punctuation(before, after):
 
 
 def punctuate(rows, folder):
-    model = VisionReviewer("openai", PROMPT, SCHEMA)
+    model = TranscriptSubscriptionReviewer(PROMPT, SCHEMA)
     folder.mkdir(parents=True, exist_ok=True)
     answer = saved_response(folder, "punctuation", model, rows, lambda: cleanup_generate(
         model, json.dumps(rows, ensure_ascii=False)))
@@ -53,8 +53,8 @@ COMBINED_SCHEMA = obj({"o": {"type": "array", "items": {"type": "string"}}})
 
 
 def combined_operations(turns, folder):
-    model = VisionReviewer("openai", COMBINED_PROMPT, COMBINED_SCHEMA)
-    model.config.update(max_output_tokens=12000, reasoning={"effort": "medium"})
+    model = TranscriptSubscriptionReviewer(COMBINED_PROMPT, COMBINED_SCHEMA)
+    model.config.update(max_output_tokens=12000, reasoning_effort="medium")
     packet = [[i, t["speaker"], t["text"]] for i, t in enumerate(turns, 1)]
     folder.mkdir(parents=True, exist_ok=True)
     answer = saved_response(folder, "combined", model, packet, lambda: cleanup_generate(

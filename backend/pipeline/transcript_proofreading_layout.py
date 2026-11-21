@@ -105,8 +105,9 @@ def proofreading_speaker_text(cues, roles):
             turns.append({"speaker": speaker, "role": role, "text": cue["text"]})
     names = {"professor": "教授", "audience": "聽眾"}
     parts = []
+    dialogue = any(turn["role"] == "audience" for turn in turns)
     for turn in turns:
         name = names.get(turn["role"])
-        label = f"**{name}**：" if name and (len(turns) > 1 or turn["role"] == "audience") else ""
+        label = f"**{name}**：" if name and dialogue else ""
         parts.append(label + turn["text"])
     return "\n\n".join(parts), turns

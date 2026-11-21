@@ -14,6 +14,7 @@ import tempfile
 import time
 
 from backend.pipeline import transcript_gemini_audio as audio
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.full_video_transcript import cleanup_generate
 from backend.pipeline.media_batch.runtime import WaitingCapacity
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
@@ -68,6 +69,12 @@ def saved_response(folder, name, model, payload, invoke):
     raw = read_json(result)
     if (raw.get("model") or raw.get("model_version")) != model.model:
         raise ValueError(f"Unexpected model for {name}")
+    if name.startswith("flash-") and getattr(model, "provider", None) == "gemini":
+        candidates = raw.get("candidates") or []
+        blocked_prompt = (raw.get("prompt_feedback") or {}).get("block_reason") == "PROHIBITED_CONTENT"
+        blocked_response = len(candidates) == 1 and candidates[0].get("finish_reason") == "PROHIBITED_CONTENT"
+        if blocked_prompt or blocked_response:
+            raise audio.FilteredRefinement("PROHIBITED_CONTENT")
     return json.loads(model.text(raw))
 
 
@@ -130,7 +137,7 @@ def repetition_proposals(blocks, folder, protected):
     candidates = [[{key: cue[key] for key in ("id", "speaker", "text")} for cue in block["cues"]]
                   for i, block in enumerate(blocks, 1)
                   if str(i) not in protected]
-    model = VisionReviewer("openai", REPETITION_PROMPT, REPETITION_SCHEMA)
+    model = TranscriptSubscriptionReviewer(REPETITION_PROMPT, REPETITION_SCHEMA)
     model.config.update(max_output_tokens=3500)
     edits = []
     for i, packet in enumerate(batches(candidates, 14)):
@@ -201,15 +208,15 @@ def editor_layout(blocks, roles, proposals, protected=None):
     return {"paragraphs": rows, "repetitions_marked": marked}
 
 
-def run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None):
+def run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None, recovery=None):
     out.mkdir(parents=True, exist_ok=True)
     with (out / "run.lock").open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return _run(cues, media, out, start=start, prior=prior, protected=protected, aligner=aligner,
-                    speaker_name=speaker_name)
+                    speaker_name=speaker_name, recovery=recovery)
 
 
-def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None):
+def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None, recovery=None):
     first = "speakers" if cues is not None else "transcribe"
     stages = STAGES[STAGES.index(first):]
     start = start or first
@@ -226,6 +233,12 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
         if start not in {"transcribe", "flash"}:
             raise ValueError("--speaker-name requires starting at transcribe or flash")
         intent["speaker_name"] = speaker_name
+    if recovery:
+        if start != "timing" or prior is None:
+            raise ValueError("Saved short-window recovery requires restarting at timing")
+        short_windows, corrections = recovery
+        files = [corrections, prior / "layout.json", *sorted(short_windows.glob("*.json"))]
+        intent["refinement_recovery"] = {str(file.resolve()): file_sha(file) for file in files}
     path = out / "run.json"
     if path.exists() and read_json(path) != intent:
         raise ValueError("Output directory belongs to a different run")
@@ -256,6 +269,9 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
 
                 from backend.pipeline.transcript_word_timing import locate_starts_from_base, locate_paragraph_edges
                 refined = outputs["flash"]
+                if recovery:
+                    from backend.pipeline.transcript_refinement_recovery import recover
+                    refined = recover(refined, outputs["transcribe"], *recovery, prior / "layout.json")
                 # Older Flash checkpoints use cue IDs or provisional blocks.
                 turns = refined.get("turns") or refined.get("cues")
                 if turns is None:
@@ -283,7 +299,28 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             else:
                 blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
-                    value = speaker_roles([turn for block in blocks for turn in block["cues"]], media, out)
+                    turns = [turn for block in blocks for turn in block["cues"]]
+                    if recovery:
+                        prior_timing = read_json(prior / "timing.json")
+                        prior_speakers = read_json(prior / "speakers.json")
+                        if (prior_timing["input_sha256"] != object_sha({
+                                "identity": identity, "prior_stages": {
+                                    key: outputs[key] for key in ("transcribe", "flash")},
+                            }) or prior_timing["output_sha256"] != object_sha(prior_timing["value"])
+                            or prior_speakers["input_sha256"] != object_sha({
+                                "identity": identity, "prior_stages": {
+                                    **{key: outputs[key] for key in ("transcribe", "flash")},
+                                    "timing": prior_timing["value"]},
+                            }) or prior_speakers["output_sha256"] != object_sha(prior_speakers["value"])):
+                            raise ValueError("Invalid prior speaker checkpoint")
+                        value = prior_speakers["value"]
+                        expected = {turn["speaker"] for turn in turns if turn["end"] > turn["start"]
+                                    and turn["speaker"] not in {"unknown", "uncertain"}
+                                    and not turn["speaker"].endswith(":unknown")}
+                        if set(value) != expected:
+                            raise ValueError("Recovered turns use different speaker clusters")
+                    else:
+                        value = speaker_roles(turns, media, out)
                 elif stage == "repetitions":
                     value = repetition_proposals(blocks, out, protected)
                 else:
@@ -292,6 +329,10 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
                     if cues is None:
                         value.update(omissions_for_review=outputs["timing"]["omissions_for_review"],
                                      coverage=outputs["timing"]["coverage"])
+                        if "recovery_decisions" in outputs["timing"]:
+                            value["recovery_decisions"] = outputs["timing"]["recovery_decisions"]
+                        if outputs["timing"].get("unrefined_windows"):
+                            value["unrefined_windows"] = outputs["timing"]["unrefined_windows"]
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")
@@ -312,11 +353,16 @@ def main():
     parser.add_argument("--speaker-name", help="Known lecturer name for Flash, e.g. 王守仁（王教授）")
     parser.add_argument("--prior-run", type=Path)
     parser.add_argument("--protected", type=Path, help="JSON object mapping paragraph numbers to protected rows")
+    parser.add_argument("--short-refinement-windows", type=Path)
+    parser.add_argument("--context-corrections", type=Path)
     args = parser.parse_args()
+    if bool(args.short_refinement_windows) != bool(args.context_corrections):
+        parser.error("Provide both recovery inputs")
     result = run(read_json(args.cues) if args.cues else None, args.media, args.out,
                  start=args.from_stage, prior=args.prior_run, aligner=args.aligner_python,
                  protected=read_json(args.protected) if args.protected else None,
-                 speaker_name=args.speaker_name)
+                 speaker_name=args.speaker_name,
+                 recovery=(args.short_refinement_windows, args.context_corrections) if args.short_refinement_windows else None)
     print(json.dumps({"paragraphs": len(result["paragraphs"]), "repetitions_marked": result["repetitions_marked"]}))
 
 

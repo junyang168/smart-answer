@@ -225,7 +225,7 @@ def test_cleanup_reads_cross_window_teaching_context_and_retains_invalid_deletio
         assert '設備壞了。電腦的生活例子。' in request['prompt']
         assert '回到剛才電腦的例子' in request['prompt']
         return {}
-    monkeypatch.setattr(full,'VisionReviewer',Adapter);monkeypatch.setattr(full,'saved_call',saved)
+    monkeypatch.setattr(full,'TranscriptSubscriptionReviewer',Adapter);monkeypatch.setattr(full,'saved_call',saved)
     result=full.clean_full_transcript(tmp_path)
     assert len(result['withheld_deletions'])==1
     assert [p['text'] for p in result['paragraphs']]==['電腦的生活例子。','回到剛才電腦的例子，說明字義。']

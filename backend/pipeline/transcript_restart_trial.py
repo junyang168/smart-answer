@@ -13,7 +13,7 @@ import random
 from pathlib import Path
 
 from backend.pipeline.slide_change_pilot import read_json,save_json,file_sha,object_sha
-from backend.pipeline.slide_pilot_models import VisionReviewer
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.slide_visual_evidence import obj,check_schema
 from backend.pipeline.transcript_audio_pilot import saved_call
 from backend.pipeline.transcript_audio_correction import locate
@@ -95,8 +95,8 @@ def prepare(source,out):
 def run(out,capacity):
     manifest=read_json(out/'input.json')
     if file_sha(Path(manifest['source']))!=manifest['source_sha256']:raise ValueError('Manual source changed before trial')
-    adapter=VisionReviewer('openai',PROMPT,SCHEMA)
-    adapter.config['reasoning']={'effort':'medium'}
+    adapter=TranscriptSubscriptionReviewer(PROMPT,SCHEMA)
+    adapter.config['reasoning_effort']='medium'
     material={'cases':manifest['cases']}
     request=dict(stage='blind-speech-restart-trial.v1',model=adapter.model,prompt=PROMPT,config=adapter.config,
         material=material,input_sha256=file_sha(out/'input.json'))

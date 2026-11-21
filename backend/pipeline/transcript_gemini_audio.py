@@ -34,6 +34,10 @@ FLASH_SCHEMA = obj({
 })
 
 
+class FilteredRefinement(RuntimeError):
+    """A completed provider decision that supplied no usable refinement."""
+
+
 def extract(media, target, start, end):
     if target.exists():
         return
@@ -159,15 +163,14 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
 
     converter = OpenCC("s2t")
     turns = refinement_turns(transcription["words"])
-    base_turns = [dict(turn) for turn in turns]
+    base_turns, polished = [], []
     model = VisionReviewer("gemini", FLASH_PROMPT, FLASH_SCHEMA)
     model.config.update(max_output_tokens=9500, thinking_config={"thinking_level": "LOW"})
     omissions = []
-    for i, (_, window) in enumerate(groupby(turns, key=lambda turn: turn["speaker"].split(":", 1)[0])):
-        owned = list(window)
-        start = max(0, owned[0]["start"] - 1.2)
-        end = min(transcription["duration"], max(x["end"] for x in owned) + 1.2)
-        audio = folder / f"flash-{i}.mp3"
+    unrefined_windows = []
+
+    def refine_window(name, owned, start, end):
+        audio = folder / f"{name}.mp3"
         extract(media, audio, start, end)
         ids = {x["id"]: x for x in owned}
         packet = {"start": start, "end": end, "speaker_turns": owned,
@@ -176,7 +179,7 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
             packet["known_speaker_name"] = speaker_name
         parts = [types.Part.from_text(text=FLASH_PROMPT + "\n" + json.dumps(packet, ensure_ascii=False)),
                  types.Part.from_bytes(data=audio.read_bytes(), mime_type="audio/mp3")]
-        answer = saved_response(folder, f"flash-{i}", model, packet, lambda: model.generate(parts))
+        answer = saved_response(folder, name, model, packet, lambda: model.generate(parts))
         check_schema(answer, FLASH_SCHEMA)
         seen = set()
         for change in answer["edits"]:
@@ -186,8 +189,55 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
             seen.add(key)
             ids[key]["text"] = text
         omissions.extend(x for x in answer["omissions"] if start <= x["start"] < x["end"] <= end and x["text"].strip())
-    return {"duration": transcription["duration"], "turns": turns, "base_turns": base_turns, "omissions_for_review": omissions,
-            "coverage": transcription["coverage"]}
+
+    def retain(owned, original):
+        polished.extend(owned)
+        base_turns.extend(original)
+
+    def source_window(entry):
+        return entry["speaker"].split(":", 1)[0]
+
+    words_by_window = {}
+    for word in transcription["words"]:
+        words_by_window.setdefault(source_window(word), []).append(word)
+
+    for i, (window_id, window) in enumerate(groupby(turns, key=source_window)):
+        owned = list(window)
+        original = [turn.copy() for turn in owned]
+        start = max(0, owned[0]["start"] - 1.2)
+        end = min(transcription["duration"], max(x["end"] for x in owned) + 1.2)
+        try:
+            refine_window(f"flash-{i}", owned, start, end)
+        except FilteredRefinement as error:
+            buckets = {}
+            for word in words_by_window[window_id]:
+                minute = int((word["start"] + word["end"]) / 120)
+                buckets.setdefault(minute, []).append(word)
+            if len(buckets) <= 1:
+                unrefined_windows.append({"window": i, "start": owned[0]["start"],
+                                          "end": max(x["end"] for x in owned), "reason": str(error)})
+                retain(owned, original)
+                continue
+            for minute, words_in_minute in sorted(buckets.items()):
+                start, end = minute * 60, min((minute + 1) * 60, transcription["duration"])
+                name = f"flash-{i}-minute-{minute}"
+                chunk = refinement_turns(words_in_minute)
+                if not chunk:
+                    continue
+                for turn in chunk:
+                    turn["id"] = f'{name}-{turn["id"]}'
+                base = [turn.copy() for turn in chunk]
+                try:
+                    refine_window(name, chunk, start, end)
+                except FilteredRefinement as blocked:
+                    unrefined_windows.append({"window": i, "start": start, "end": end,
+                                              "reason": str(blocked)})
+                retain(chunk, base)
+        else:
+            retain(owned, original)
+    return {"duration": transcription["duration"], "turns": polished, "base_turns": base_turns,
+            "omissions_for_review": omissions, "coverage": transcription["coverage"],
+            "unrefined_windows": unrefined_windows}
 
 
 def alignment_worker(aligner, clips):

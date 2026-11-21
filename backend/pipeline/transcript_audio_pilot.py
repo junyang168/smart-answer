@@ -182,10 +182,6 @@ def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | No
         prior = read_json(out / 'asr.json')
         if prior['config'] != config or prior.get('vocabulary_hint') != binding.get('vocabulary_hint'):
             raise ValueError('ASR vocabulary/config changed; use a fresh output directory')
-    from dotenv import load_dotenv
-    from openai import OpenAI
-    load_dotenv(Path(__file__).resolve().parents[2] / '.env')
-    client = OpenAI(timeout=180, max_retries=0)
     manifest = read_json(out / 'audio_manifest.json')
     # A rough-stage cache retains its transport when the full pipeline reuses it.
     previous = read_json(out / 'asr.json') if (out / 'asr.json').exists() else {}
@@ -217,8 +213,7 @@ def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | No
         if old_chunk and old_chunk['request_sha256'] != object_sha(effective_request):
             raise ValueError('Saved ASR chunk input changed; do not resend')
         def invoke():
-            with upload.open('rb') as stream:
-                return client.audio.transcriptions.create(file=stream, **config).model_dump(mode='json')
+            raise ValueError('New audio transcription requires the Gemini 3.5 proofreading pipeline; legacy GPT audio is replay-only')
         response = saved_call(out, request, (chunk['end_ms'] - chunk['start_ms']) / 60000 * .01, invoke)
         if not isinstance(response.get('text'), str):
             raise ValueError('ASR response has no transcript')
@@ -246,7 +241,7 @@ def main():
     parser.add_argument('--aligner-python', type=Path, default=Path('.venv-align/bin/python'))
     parser.add_argument('--device', choices=['mps', 'cpu'], default='mps')
     parser.add_argument('--extract-visuals', action='store_true', help='After run, extract confirmed slide text and diagram primitives')
-    parser.add_argument('--visual-provider', choices=['gemini', 'openai'], default='gemini')
+    parser.add_argument('--visual-provider', choices=['gemini'], default='gemini')
     args = parser.parse_args()
     if args.stage in ('assemble', 'visual', 'run') and not args.slides:
         parser.error('assemble/visual/run requires --slides')

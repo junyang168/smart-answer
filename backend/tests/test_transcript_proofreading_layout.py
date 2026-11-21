@@ -41,3 +41,33 @@ def test_editor_uses_roles_and_keeps_unverified_speech_without_a_model_label():
     text, turns = proofreading_speaker_text(cues, {"w0:spk:0": "professor", "w0:spk:1": "audience"})
     assert text == "**教授**：先說。\n\n**聽眾**：請問？\n\n還有。"
     assert "".join(t["text"] for t in turns) == "".join(c["text"] for c in cues)
+
+
+def test_professor_only_paragraph_omits_tags_across_asr_window_boundaries():
+    from backend.pipeline.transcript_proofreading_layout import proofreading_speaker_text
+
+    cues = [{"speaker": "w15:spk:1", "text": "先說。"},
+            {"speaker": "w16:spk:0", "text": "接著說。"}]
+    text, turns = proofreading_speaker_text(cues, {cue["speaker"]: "professor" for cue in cues})
+    assert text == "先說。\n\n接著說。"
+    assert [turn["role"] for turn in turns] == ["professor", "professor"]
+
+
+def test_transcript_gpt_uses_subscription_client(monkeypatch):
+    from backend.pipeline import transcript_subscription_reviewer as module
+
+    class Subscription:
+        last_usage = None
+
+        def __init__(self, **options):
+            assert options["model"] == "gpt-6.1-sol"
+
+        def generate_json(self, prompt, text, schema):
+            assert (prompt, text, schema) == ("instructions", "transcript", {})
+            return {"edits": []}
+
+    monkeypatch.setattr(module, "CodexSubscriptionClient", Subscription)
+    reviewer = module.TranscriptSubscriptionReviewer("instructions", {})
+    raw = reviewer.generate([{"role": "user", "content": "transcript"}])
+    assert raw["backend"] == "codex_subscription"
+    assert reviewer.text(raw) == '{"edits": []}'
