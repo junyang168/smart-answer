@@ -46,8 +46,9 @@ def test_twenty_four_plus_four_verses_need_exactly_four_readers():
 def test_long_text_spans_pages_without_adding_readers():
     section=_section('列王紀上',19,1,18)
     for verse in section['verses']:verse['text']='這是需要舒適行距與分頁的完整經文。'*3
-    pages,_,assigned=service._prepare_scripture_sections([section],['甲','乙','丙'])
+    pages,summary,assigned=service._prepare_scripture_sections([section],['甲','乙','丙'])
     assert len(pages)>3 and assigned==['甲','乙','丙']
+    assert summary==[{'label':'列王紀上 19:1-6','reader':'甲'}, {'label':'列王紀上 19:7-12','reader':'乙'}, {'label':'列王紀上 19:13-18','reader':'丙'}]
     assert all(sum(len(page['lines']) for page in pages if page['reader']==name)==6 for name in assigned)
 
 

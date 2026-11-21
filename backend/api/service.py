@@ -2524,11 +2524,18 @@ def _prepare_scripture_sections(
         unique_readers.append(name)
 
     slide_entries: list[dict[str, object]] = []
+    summary: list[dict[str, str]] = []
     from backend.sunday_scripture_layout import reader_groups
     for group in reader_groups(sections, len(unique_readers)):
         section_index = group["section"]
         section = sections[section_index]
         verses = group["verses"]
+        first, last = verses[0], verses[-1]
+        summary.append({
+            "label": _format_scripture_section_label(section.get("book") or "",
+                first.get("chapter"), first.get("verse"), last.get("chapter"), last.get("verse")),
+            "reader": unique_readers[group["reader_index"]],
+        })
         section_slides = _split_scripture_section(verses)
         book_name = section.get("book") or ""
         for slide in section_slides:
@@ -2575,7 +2582,6 @@ def _prepare_scripture_sections(
     assigned_readers = list(dict.fromkeys(slide_readers))
 
     assigned_sections: list[dict[str, object]] = []
-    summary: list[dict[str, str]] = []
     for index, slide in enumerate(slide_entries):
         reader = slide_readers[index]
         assigned_sections.append(
@@ -2586,10 +2592,6 @@ def _prepare_scripture_sections(
                 "reference": slide.get("reference", ""),
             }
         )
-        entry = {"label": slide["label"]}
-        if reader:
-            entry["reader"] = reader
-        summary.append(entry)
 
     return assigned_sections, summary, assigned_readers
 

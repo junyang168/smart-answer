@@ -354,3 +354,10 @@ schedule change instead of silently breaking the limits. The handover cue appear
 only on the last slide before a different reader; the final reader has no cue.
 The renderer fingerprint includes the layout modules so a cached older draft
 cannot be reported as newly prepared after these rules change.
+
+The scripture overview table lists one row per reader's complete assigned verse
+range, independent of how many body slides that reader needs. For 1 Kings
+19:1–18, three six-verse assignments remain three overview rows and six body
+slides. Reader labels and static overview guidance are rendered in traditional
+Chinese without changing stored identities or template run styling. A rendered
+regression checks that the overview table ends above the handover footer.
