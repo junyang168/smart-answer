@@ -72,7 +72,7 @@ class PptReady:
             return None, missing
         # Template/renderer changes require a new output even if the form is identical.
         renderer_files = [Path(__file__).parents[1] / 'api' / name for name in ('service.py', 'ppt_generator.py')]
-        renderer_files += [Path(__file__).parents[1] / name for name in ('sunday_song_performance.py', 'ppt_text_layout.py', 'sunday_scripture_layout.py')]
+        renderer_files += [Path(__file__).parents[1] / name for name in ('sunday_song_performance.py', 'ppt_text_layout.py', 'sunday_scripture_layout.py', 'sunday_report_layout.py')]
         renderer_files.append(Path(__file__))
         from backend.api.scripture import BIBLE_API_TRANSLATION_ZH
         fellowship = []

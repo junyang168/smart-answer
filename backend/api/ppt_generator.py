@@ -13,6 +13,7 @@ from pptx.util import Pt
 from pptx.oxml.xmlchemy import OxmlElement
 
 from backend.ppt_text_layout import prepare_frame, format_paragraph, format_run
+from backend.sunday_report_layout import report_blocks, flow_report_blocks
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{([^{}]+)\}")
 
@@ -40,7 +41,9 @@ def generate_presentation_from_template(
         _remove_slides_by_note_keyword(presentation, "守聖餐")
     _hide_slides_by_number(presentation, hidden_slide_numbers or [])
 
+    reports = list(report_blocks(presentation))
     _apply_replacements(presentation, normalized)
+    flow_report_blocks(reports)
     presentation.save(output_path)
     return output_path
 
