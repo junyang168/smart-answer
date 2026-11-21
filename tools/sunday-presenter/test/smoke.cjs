@@ -328,34 +328,6 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(await endFrame.executeJavaScript('steps'), 1, 'advance after returning');
     assert.equal(await endFrame.executeJavaScript('exited'), false);
     stage.remove(ending.id); wc(ending).close();
-    // A second window owns OS focus throughout each background delivery.
-    const other = new (require('electron').BrowserWindow)({width:400,height:300,show:true});
-    try {
-      await other.loadURL('data:text/html,<h1>Other app focus fixture</h1>');
-      for (const embedded of [false,true]) {
-        const backgroundPage = await load('sermon');
-        if (embedded) {
-          await wc(backgroundPage).loadURL(origin+'/embedded');
-          await until(()=>wc(backgroundPage).mainFrame.frames.length===1,'background iframe ready');
-          await until(()=>backgroundPage.loaded && !wc(backgroundPage).isLoading(),'background document loaded');
-          await act('prepare',{id:backgroundPage.id});
-          await act('hide-panel');
-          await act('arm',{id:backgroundPage.id});
-        }
-        await act('take',{deck:'sermon'});
-        const target = embedded ? wc(backgroundPage).mainFrame.frames[0] : wc(backgroundPage).mainFrame;
-        await target.executeJavaScript('window.focus()');
-        other.show(); other.focus(); await until(()=>other.isFocused(),'other window focused');
-        for (const key of ['Right','Left','Right']) {
-          await act('key',{key,background:true});
-          assert.equal(other.isFocused(),true,'background delivery must retain other window focus');
-          assert.equal(output.isFocused(),false,'output must not steal focus');
-        }
-        assert.equal(await target.executeJavaScript('steps'),2);
-        assert.deepEqual(await target.executeJavaScript('keyLog'),['ArrowRight','ArrowLeft','ArrowRight']);
-        stage.remove(backgroundPage.id); wc(backgroundPage).close();
-      }
-    } finally { other.destroy(); }
     if (process.argv.includes('--clicker-interactive')) {
       const doneFile = path.join(evidence,'clicker-done');
       fs.rmSync(doneFile, {force:true});
@@ -381,7 +353,6 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       output.removeListener('blur',blur); output.removeListener('focus',focus);
     }
     const result = { platform: process.platform, versions: process.versions,
-      backgroundKeysPreserveOtherWindowFocus: true, backgroundIframeKeysAppliedOnce: true,
       switches: 20, steps: [10, 10], stableOutput: true, popupOpener: true,
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
       navigationAndCrashBlackout: true, popupPostPreserved: true, fullscreenOutput: true,

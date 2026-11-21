@@ -434,7 +434,7 @@ async function act(action, args = {}) {
     case 'key': {
       if (!['Right', 'Left'].includes(args.key)) throw Error('Unknown key');
       const active = stage.active;
-      const task = keyQueue.then(() => sendSlideKey(args.key, active, args.valid, args.background));
+      const task = keyQueue.then(() => sendSlideKey(args.key, active, args.valid));
       keyQueue = task.catch(() => {});
       await task;
       break;
@@ -446,29 +446,10 @@ async function act(action, args = {}) {
   return snapshot();
 }
 
-async function sendSlideKey(key, expectedActive, valid = () => true, background = false) {
+async function sendSlideKey(key, expectedActive, valid = () => true) {
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
       if (stage.active === null) throw Error('尚未播放簡報。');
       const wc = stage.get(stage.active).view.webContents;
-      if (background) {
-        // CDP delivers trusted input to this document without activating the Mac
-        // app. sendInputEvent requires window focus and the Remote path raises it.
-        if (wc.debugger.isAttached()) throw Error('請先關閉此簡報的開發工具，再試一次。');
-        wc.debugger.attach('1.3');
-        try {
-          await wc.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {enabled:true});
-          if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
-          const code = key === 'Right' ? 'ArrowRight' : 'ArrowLeft', vk = key === 'Right' ? 39 : 37;
-          await wc.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown',key:code,code,windowsVirtualKeyCode:vk});
-          await wc.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp',key:code,code,windowsVirtualKeyCode:vk});
-        } finally {
-          if (wc.debugger.isAttached()) {
-            try { await wc.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {enabled:false}); }
-            finally { if (wc.debugger.isAttached()) wc.debugger.detach(); }
-          }
-        }
-        return;
-      }
       const focusedFrame = wc.focusedFrame;
       app.focus({ steal: true });
       output.show();
@@ -607,7 +588,7 @@ app.whenReady().then(async () => {
       keyQueue = task.catch(() => {}); return task;
     } });
   if (identityError) remoteControl.error = identityError;
-  clicker = new Clicker({ shortcuts: globalShortcut, changed, send: (key, valid) => act('key', { key, valid, background:true }) });
+  clicker = new Clicker({ shortcuts: globalShortcut, changed, send: (key, valid) => act('key', { key, valid }) });
   controller.on('show', () => { clicker.release(); setImmediate(() => changed()); }); controller.on('hide', () => changed());
   preparation.on('show', () => { clicker.release(); setImmediate(() => changed()); }); preparation.on('hide', () => changed());
   stage.layout();
