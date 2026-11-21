@@ -375,3 +375,41 @@ def test_video_slots_ready_without_catalog_or_lyrics_and_url_changes_version(rea
     entry.response_hymn_youtube_url=None
     ppt.tick(now)
     assert len(calls)==2 and agent.store.get('ppt_readiness')['missing']
+
+
+def test_long_passage_repairs_legacy_single_reader_to_one_per_slide(agent):
+    from backend.api.service import _prepare_scripture_sections
+    from backend.sunday_assistant.role_assignment import reading_page_count
+    day = '2026-11-22'
+    for name in ['甲', '乙', '丙', '丁']:
+        agent.repository.workers[name] = SundayWorker(name=name, preferredRoles=['讀經經文'])
+    agent.repository.services[day] = SundayServiceEntry(
+        date=day, scripture=['1ki-19-1-18'], scriptureReaders=['甲'], presider='丁',
+    )
+    agent.store.put('auto_scriptureReaders:' + day, {
+        'after': ['甲'], 'scripture': ['1ki-19-1-18'], 'status': 'applied',
+    })
+    assign_readers(agent.repository, agent.store, [day])
+    saved = agent.repository.services[day]
+    assert saved.scripture == ['1ki-19-1-18']
+    assert len(set(saved.scripture_readers)) == reading_page_count(saved.scripture) == 3
+    assert '丁' not in saved.scripture_readers
+    sections = [{
+        'book': '列王紀上', 'display': '列王紀上 19:1-18',
+        'verses': [{'chapter': 19, 'verse': n, 'text': '經文'} for n in range(1, 19)],
+    }]
+    slides, summary, readers = _prepare_scripture_sections(sections, saved.scripture_readers)
+    assert len(slides) == 3 and readers == saved.scripture_readers
+    assert len(summary) == 3
+    assign_readers(agent.repository, agent.store, [day])
+    assert agent.repository.services[day].scripture_readers == saved.scripture_readers
+
+
+def test_reader_page_shortage_blocks_readiness(ready):
+    agent, ppt, day, _, _ = ready
+    entry = agent.repository.services[day]
+    agent.repository.services[day] = entry.model_copy(update={
+        'scripture': ['1ki-19-1-18'], 'scripture_readers': ['讀經甲'],
+    })
+    _, missing = ppt.snapshot(day)
+    assert '自動安排讀經同工' in missing

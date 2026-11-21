@@ -9,7 +9,7 @@ from pptx import Presentation
 
 from backend.sunday_data_lock import sunday_data_lock
 from backend.sunday_service_skeletons import skeleton_status, maintain_skeletons
-from .role_assignment import assign_readers
+from .role_assignment import assign_readers, reading_page_count
 from .models import FRIDAY_FIELDS, ZONE
 from .store import dump, now_text
 
@@ -46,7 +46,7 @@ class PptReady:
         if current.get('donationAmount') is None:
             missing.append('本週奉獻總額')  # zero is a valid explicitly saved amount
         reader_names = [name.strip() for name in entry.scripture_readers if name.strip()]
-        if len(set(reader_names)) < len(entry.scripture) or len(reader_names) != len(set(reader_names)):
+        if len(set(reader_names)) < reading_page_count(entry.scripture) or len(reader_names) != len(set(reader_names)):
             missing.append('自動安排讀經同工')
         songs = []
         catalog = self.agent.repository.list_sunday_songs()

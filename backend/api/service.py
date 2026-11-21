@@ -2570,7 +2570,7 @@ def _prepare_scripture_sections(
         verses = section.get("verses") or []
         if not verses:
             continue
-        section_slides = _split_scripture_section(verses, max_segments=len(readers) if readers else None)
+        section_slides = _split_scripture_section(verses)
         book_name = section.get("book") or ""
         for slide in section_slides:
             if not slide:
