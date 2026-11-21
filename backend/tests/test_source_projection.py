@@ -509,3 +509,20 @@ def test_visual_source_rejects_external_css(svg: str) -> None:
     visual = visual_source_blocks(svg, segment_index="S0001")[0]
     assert visual.readable is False
     assert "external CSS" in str(visual.parse_error)
+
+
+def test_a_transcript_quote_line_counts_as_speech_only_when_it_is_cuv_scripture(tmp_path, monkeypatch):
+    import json as _json
+    from backend.pipeline import source_projection as sp
+    (tmp_path / "MAT").mkdir()
+    (tmp_path / "MAT" / "13.json").write_text(_json.dumps(
+        {"17": "我實在告訴你們，從前有許多先知和義人要看你們所看見的，卻沒有看見；要聽你們所聽見的，卻沒有聽見。"}),
+        encoding="utf-8")
+    monkeypatch.setattr("backend.bible_study.paths.cuv_dir", lambda: tmp_path)
+    sp._CUV_CHAPTERS.clear()
+    verse = "耶穌說：\n>「我實在告訴你們,從前有許多先知和義人要看你們所看見的，卻沒有看見；\n\n那個「實在」是 Amen。"
+    excerpt = "「我實在告訴你們,從前有許多先知和義人要看你們所看見的"
+    assert sp.excerpt_overlaps_inline_markup(verse, excerpt)  # default: every quote line is blocked
+    assert not sp.excerpt_overlaps_inline_markup(verse, excerpt, spoken_scripture_quotes=True)
+    slide = "他說：\n>本講重點：律法的正當要求就是基督的律法，不是摩西的律法\n\n然後"
+    assert sp.excerpt_overlaps_inline_markup(slide, "本講重點：律法的正當要求", spoken_scripture_quotes=True)

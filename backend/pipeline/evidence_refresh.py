@@ -398,7 +398,8 @@ def commit_verified(store, root, *, source_fragments_only=False):
     updates, fragments = result['updates'], result['new_fragments']
     retiring = result.get('retiring_keys', [])
     source_kind = result['version']
-    if source_fragments_only and (updates or retiring or any(not k.startswith('source_fragments/') for k in fragments)):
+    # Source-only work may create or mark SourceFragments, never touch the layers above.
+    if source_fragments_only and (retiring or any(not k.startswith('source_fragments/') for k in {**updates, **fragments})):
         raise ValueError('source-only commit cannot write or retire upper-layer records')
     if result['status'] == 'verified' and (updates or retiring or source_fragments_only and fragments):
         if (root / 'commit.json').exists():
@@ -458,15 +459,8 @@ def readback(store, result):
             raise ValueError('relation retirement was not saved: ' + key)
 
 
-class Models:
-    """Thin provider calls; retry only a TLS handshake timeout before a request is sent."""
-    def __init__(self, gpt, root, *, capacity=None):
-        if gpt.backend != 'codex_subscription':
-            raise ValueError('Evidence repair requires the authorized GPT subscription')
-        self.gpt = gpt
-        self.root, self.capacity = Path(root), capacity
-        self.identity = {'jev': MODEL, 'gpt': {'backend': gpt.backend,
-                         'model': gpt.model, 'effort': gpt.reasoning_effort}}
+class JevPort:
+    """Call Jev without requiring a GPT session."""
 
     def judge(self, request):
         self.judge_preflight()
@@ -497,6 +491,17 @@ class Models:
     def judge_preflight(self):
         if not os.environ.get('TYPESAFE_API_KEY'):
             raise ValueError('TYPESAFE_API_KEY is required; no request sent')
+
+class Models(JevPort):
+    """Evidence refresh model ports."""
+
+    def __init__(self, gpt, root, *, capacity=None):
+        if gpt.backend != 'codex_subscription':
+            raise ValueError('Evidence repair requires the authorized GPT subscription')
+        self.gpt = gpt
+        self.root, self.capacity = Path(root), capacity
+        self.identity = {'jev': MODEL, 'gpt': {'backend': gpt.backend,
+                         'model': gpt.model, 'effort': gpt.reasoning_effort}}
 
     def preflight(self):
         self.gpt._verify_chatgpt_login()

@@ -75,11 +75,17 @@ def items(catalog: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, A
             "id": transcript_id,
             "title": str(record.get("title") or transcript_id),
             "date": record.get("deliver_date"),
+            "series_id": record.get("series_id"),
+            "series_order": record.get("series_order"),
+            "scripture": (record.get("catalog_primary_passage") or {}).get("display"),
             "href": f"/resources/sermons/{quote(transcript_id, safe='')}",
             "chapters": chapters,
         })
     for entry in coverage.get("source_directory") or []:
-        if entry.get("source_category") != "notes_to_manuscript" or not entry.get("assigned_chapters"):
+        if entry.get("source_category") != "notes_to_manuscript":
+            continue
+        assigned = entry.get("assigned_chapters") or []
+        if not assigned and not (entry.get("lecture_title") and entry.get("source_url")):
             continue
         out.append({
             "source": NOTES,
@@ -88,7 +94,8 @@ def items(catalog: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, A
             "title": str(entry.get("title") or "").strip(),
             "date": None,
             "href": entry.get("source_url"),
-            "chapters": {("mat", int(chapter)) for chapter in entry["assigned_chapters"]},
+            "chapters": {("mat", int(chapter)) for chapter in assigned},
+            "lecture_title": entry.get("lecture_title"),
         })
     return out
 
@@ -182,6 +189,56 @@ def notes_pages() -> dict[tuple[str, int], dict[str, Any]]:
     return pages
 
 
+def _matthew_navigation(materials: list[dict[str, Any]], chapters: list[dict[str, Any]]) -> dict[str, Any]:
+    series = []
+    related = []
+    grouped = set()
+    for key, source in (("nysc", "紐約靈命進深會"), ("notes", NOTES)):
+        available = [row["chapter"] for row in chapters if any(s["name"] == source for s in row["sources"])]
+        if available:
+            series.append({"id": key, "source": source, "chapters": available})
+            grouped.update(item["id"] for item in materials if item["source"] == source)
+
+    def public_talk(item: dict[str, Any]) -> dict[str, Any]:
+        return {key: item[key] for key in ("title", "href", "source", "scripture")}
+
+    for key, series_id, source, output in (
+        ("matthew-2007", "马太福音 24-28 释经", "其他教會（名稱未記錄）", series),
+        ("dallas-matthew-24", "馬太福音24 章 釋經", "達拉斯聖道教會", related),
+    ):
+        members = [
+            item for item in materials if item["kind"] == "sermon" and (
+                item["series_id"] == series_id  # A recorded series remains intact across catalog chapters.
+                or (key == "dallas-matthew-24" and item["id"] == "S 200531")
+            ) and item["source"] == source
+        ]
+        if members:
+            members.sort(key=lambda item: (item["series_order"] or float("inf"), item["date"] or "", item["id"]))
+            group = {"id": key, "source": source, "items": [public_talk(item) for item in members]}
+            if key == "matthew-2007":
+                group["available"] = False  # No reviewed PPT release for this series yet.
+            output.append(group)
+            grouped.update(item["id"] for item in members)
+    talks = sorted(
+        (item for item in materials if item["kind"] == "sermon" and item["id"] not in grouped
+         and any(book == "mat" for book, _ in item["chapters"])),
+        key=lambda item: (item["source"], item["title"]),
+    )
+    # Structural notes belong to their course topic even without a single chapter assignment.
+    notes_overviews: dict[str, list[dict[str, str]]] = {}
+    for item in materials:
+        if item["kind"] == "notes" and not item["chapters"]:
+            notes_overviews.setdefault(item["lecture_title"], []).append({
+                "title": item["title"], "href": item["href"],
+            })
+    return {
+        "series": series, "related": related, "talks": [public_talk(item) for item in talks],
+        "notes_overviews": [
+            {"title": title, "items": entries} for title, entries in notes_overviews.items()
+        ],
+    }
+
+
 def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
     """第二层：这卷书有讲道的章，各来源各几篇，有什么页面，有没有综合文章。"""
 
@@ -192,28 +249,32 @@ def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dic
         for book, chapter in item["chapters"]:
             if book == slug:
                 by_chapter.setdefault(chapter, []).append(item)
-    return {
-        "slug": slug,
-        "name": _NAME[slug],
-        # 一篇讲几章只算一次。
-        "sources": _count(list({(i["kind"], i["id"]): i for rows in by_chapter.values() for i in rows}.values())),
-        "chapters": [
-            {
-                "chapter": chapter,
-                "sources": _count(by_chapter[chapter]),
-                "page": {k: v for k, v in pages[(slug, chapter)].items() if k != "passages"}
-                if (slug, chapter) in pages else None,
-                # 别的来源也有按章页面时（教授釋經筆記的 AI 朗读），书卷页按选的来源找。
-                "pages": [
-                    {k: v for k, v in page.items() if k != "passages"}
-                    for page in (pages.get((slug, chapter)), notes.get((slug, chapter)))
-                    if page
-                ],
-                "articles": [a for a in articles if (slug, chapter) in a["chapters"]],
-            }
-            for chapter in sorted(by_chapter)
-        ],
-    }
+    numbers = set(by_chapter)
+    if slug == "mat":
+        numbers.update(number for book, number in notes if book == slug)
+    rows = []
+    for number in sorted(numbers):
+        key = slug, number
+        sources = _count(by_chapter.get(number, []))
+        if key in notes and not any(source["name"] == NOTES for source in sources):
+            sources.append({"name": NOTES, "count": 0, "unit": "講"})
+        rows.append({
+            "chapter": number,
+            "sources": sources,
+            "page": {k: v for k, v in pages[key].items() if k != "passages"} if key in pages else None,
+            "pages": [
+                {k: v for k, v in page.items() if k != "passages"}
+                for page in (pages.get(key), notes.get(key)) if page
+            ],
+            "articles": [] if slug == "mat" else [article for article in articles if key in article["chapters"]],
+        })
+    sources = _count(list({(i["kind"], i["id"]): i for rows in by_chapter.values() for i in rows}.values()))
+    if slug == "mat" and any(book == slug for book, _ in notes) and not any(s["name"] == NOTES for s in sources):
+        sources.append({"name": NOTES, "count": 0, "unit": "講"})
+    result = {"slug": slug, "name": _NAME[slug], "sources": sources, "chapters": rows}
+    if slug == "mat":
+        result["navigation"] = _matthew_navigation(materials, rows)
+    return result
 
 
 def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -237,6 +298,8 @@ def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: l
         elif entry["name"] == NOTES and (slug, number) in notes:
             source["page"] = notes[(slug, number)]
         sources.append(source)
+    if slug == "mat" and (slug, number) in notes and not any(source["name"] == NOTES for source in sources):
+        sources.append({"name": NOTES, "count": 0, "unit": "講", "items": [], "page": notes[(slug, number)]})
     if not sources:
         raise HTTPException(status_code=404, detail="這一章還沒有講道。")
     return {
@@ -283,15 +346,68 @@ def _book(slug: str) -> str:
     return slug
 
 
+# Books with known exposition series in the current reader catalog.
+_READER_EXPOSITION_BOOKS = ("mat", "jhn", "rom", "1co", "2co", "1ti", "2ti", "tit")
+
+
+def has_current_reader_slides(data_root: Path, passage: str) -> bool:
+    """Check the same released plan and source-bound slides used by the listener."""
+    from backend.pipeline import chapter_listening_catalog, chapter_listening_units, chapter_unit_publish
+
+    path = chapter_unit_publish.path_for(data_root, passage)
+    try:
+        plan = _read(path)
+        if plan.get("status") != "published" or plan.get("catalog_mode") != "units_only":
+            return False
+        if not all(entry.get("changeset") for entry in plan["inputs"]):
+            return False
+        reviewed_units = {key for key, unit in plan["units"].items() if unit.get("reviewed_slide_bundle")}
+        reviewed_subunits = {
+            (key, sub["id"])
+            for key, unit in plan["units"].items()
+            for sub in unit["sub_units"]
+            if sub.get("reviewed_slide_bundle")
+        }
+        if not (reviewed_units or reviewed_subunits) or not chapter_unit_publish.load_summary(data_root, passage):
+            return False
+        index = chapter_listening_units.build(data_root, passage, plan=plan)
+        for section in index["sections"]:
+            parent = chapter_listening_catalog.parent_passage(section)
+            if parent not in reviewed_units and (parent, section.get("sub_unit_id")) not in reviewed_subunits:
+                continue
+            if any(recording.get("media_url") and recording.get("seconds", 0) > 0 and recording.get("slides")
+                   for recording in section["sermons"]):
+                return True
+        return False
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def reader_exposition_books(data_root: Path) -> list[dict[str, Any]]:
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    ready: set[str] = set()
+    for passage in reversed(tuple(CHAPTERS)):
+        slug = passage.split("-", 1)[0]
+        if slug in _READER_EXPOSITION_BOOKS and slug not in ready and has_current_reader_slides(data_root, passage):
+            ready.add(slug)
+    return [
+        {"slug": slug, "name": _NAME[slug], "available": slug in ready}
+        for slug in _READER_EXPOSITION_BOOKS
+    ]
+
+
 @router.get("/books")
 def get_books() -> dict[str, Any]:
-    return books(_materials())
+    from backend.api.config import DATA_BASE_PATH
+
+    return {**books(_materials()), "exposition_books": reader_exposition_books(Path(DATA_BASE_PATH))}
 
 
 @router.get("/books/{slug}")
 def get_book(slug: str) -> dict[str, Any]:
     slug = _book(slug)
-    result = book_chapters(_materials(), slug, _articles())
+    result = book_chapters(_materials(), slug, [] if slug == "mat" else _articles())
     if not result["chapters"]:
         raise HTTPException(status_code=404, detail="這卷書還沒有講道。")
     for row in result["chapters"]:

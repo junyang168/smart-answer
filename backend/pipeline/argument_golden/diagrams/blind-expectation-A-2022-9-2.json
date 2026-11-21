@@ -1,0 +1,23 @@
+{
+ "schema": "diagram-gold-key-blind-expectation.v1",
+ "written": "2026-11-17, before any model call for this lecture (Claude read only his transcript)",
+ "key": "A", "lecture": "2022年 NYSC 專題 馬太福音釋經（九）王守仁 教授 第二堂",
+ "how_he_uses_it": "the 宗主國／附庸國 covenant answers 「保羅對摩西律法好像有矛盾的看法」: Paul celebrates release from the law, yet calls it good. Spread over S0015, S0028–S0040 and, after the break, S0058–S0064.",
+ "parts": [
+  {"part": "1 神先施恩，再提出要求", "must_have": true, "taught": "in substance, not in these words",
+   "his_words": ["S0058 摩西律法是神和以色列所立的宗主國附庸國之約的要求-Stipulation", "S0059 以色列人藉着接受宗主國／附庸國的約和神建立好關係", "S0064 新約的人必須先由耶穌在十字架為罪人贖罪，人才能和神建立、維持好關係（林後5:21）"],
+   "note": "he never says 施恩; the relationship given first is 'entering the covenant' (old) and 'Christ's atonement' (new). A Claim saying the relationship comes first, the law is its requirement, is the same point."},
+  {"part": "3 遵行只能維持好關係，不能建立；不遵行則約破裂", "must_have": true, "taught": true,
+   "his_words": ["S0038 你跟神建立好關係之後，你來遵守摩西律法，你就可以維持", "S0039–S0040 雖然遵循律法不能使人和神建立好關係，但……可以維持立約的時候已經建立好的宗主國附庸國的好關係", "S0059 遵守摩西律法不能使以色列人和神建立好關係……若不遵行律法這好關係就破裂", "S0061"]},
+  {"part": "4 舊約的要求是摩西律法", "must_have": true, "taught": true, "his_words": ["S0015 认识摩西律法为宗主国约法……的「要求」", "S0058"]},
+  {"part": "5 新約的要求是基督的律法", "must_have": true, "taught": true,
+   "his_words": ["S0034 我們現在可以因著信跟神建立好關係，因著遵行基督的律法可以維持跟神的好關係", "S0003 靠著聖靈能力可以遵守基督的律法"]},
+  {"part": "A3a 條文 vs 一般原則", "must_have": false, "taught": false,
+   "note": "not taught here. S0003–S0004 contrast scope (Christ's law smaller) and depth (decision, not only the act): another contrast, not this one"},
+  {"part": "A3b 字句 vs 聖靈", "must_have": true, "taught": "partly",
+   "his_words": ["S0029 羅7:6 合本「心靈的新樣」應是「聖靈的新樣，不按照以往的舊樣」", "S0036 加5:18 被聖靈引導就不在摩西律法以下", "S0060 摩西律法廢棄之後，聖靈才來幫助基督徒得新生命"],
+   "note": "he does not name 字句／gramma; the old way vs the Spirit's new way is the same contrast"}
+ ],
+ "also_expected": "the answer to the apparent contradiction: Paul celebrates release (Christ finished redemption, the Spirit leads) and calls the law good (keeping it maintained the covenant relationship) — S0039–S0040",
+ "run_scope": "--only-paragraphs S0015,S0034,S0039,S0059,S0064"
+}

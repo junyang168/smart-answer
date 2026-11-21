@@ -1,14 +1,15 @@
 // app/resources/series/[seriesId]/page.tsx
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
-import { StaffOnly } from '@/app/components/common/StaffOnly';
+import { requireSermonEditing } from '@/app/utils/requireSermonEditing';
 import { SeriesPlayerView } from '@/app/components/series/SeriesPlayerView';
 import { Suspense } from 'react';
 
-export default function SeriesDetailPage() {
+export default async function SeriesDetailPage() {
+  await requireSermonEditing();
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: 'AI 輔助查經', href: '/resources' },
-    { name: '講道中心', href: '/resources/sermons' },
+    { name: '聖經學習資源', href: '/resources' },
+    { name: '講道校對與編輯', href: '/resources/sermons' },
     { name: '講道系列', href: '/resources/series' },
   ];
 
@@ -16,11 +17,9 @@ export default function SeriesDetailPage() {
     <div className="min-h-screen bg-stone-50">
       <div className="container mx-auto max-w-5xl px-6 py-12">
         <Breadcrumb links={breadcrumbLinks} />
-        <StaffOnly>
           <Suspense fallback={null}>
             <SeriesPlayerView />
           </Suspense>
-        </StaffOnly>
       </div>
     </div>
   );

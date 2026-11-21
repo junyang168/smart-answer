@@ -1,0 +1,114 @@
+{
+ "purpose": "Test inputs for the faithfulness prefilter only: each is a real record's statement changed on purpose. Never written to any database or shown to readers.",
+ "written_by": "Claude, 2026-11-17",
+ "planted": [
+  {
+   "lecture": "L1",
+   "id_suffix": "CL0001",
+   "error": "reversed",
+   "statement": "登山寶訓先教導門徒應有的回應，再顯明彌賽亞的身份。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "CL0006",
+   "error": "reversed",
+   "statement": "八福以「天國是他們的」首尾呼應，但中間的哀慟與得安慰與天國無關，是指一般遭遇痛苦便會得到人的安慰。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "CL0016",
+   "error": "broadened",
+   "statement": "讀聖經只能靠理性分析，不需要聖靈的幫助。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "P02-ST02",
+   "error": "more_certain",
+   "statement": "八福的開頭與結尾都說天國是他們的；這個結構證明八福的每一項祝福都只在天國實現，在今世完全沒有。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "P02-ST04",
+   "error": "reversed",
+   "statement": "第一福與最後一福的「是」用將來式，表示天國要到將來才是他們的；中間各福用現在式。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "P04-ST06",
+   "error": "added_reason",
+   "statement": "彼得在約帕看見異象，聲音說神所潔淨的不可看作不潔淨。這表示此後不必再遵守摩西律法對食物的分別，因為這些規定本來就是為了衛生。"
+  },
+  {
+   "lecture": "L1",
+   "id_suffix": "P02-ST14",
+   "error": "wrong_view",
+   "statement": "耶穌雖然是神，卻從來沒有成為彌賽亞。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "CL0001",
+   "error": "broadened",
+   "statement": "基督徒已在新約之下，舊約聖經對基督徒已經沒有任何教導價值。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "CL0012",
+   "error": "broadened",
+   "statement": "所有外邦基督徒今天都不可吃血，因為吃血是罪。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "CL0017",
+   "error": "reversed",
+   "statement": "覺得異性漂亮就已經是心裡犯姦淫，要立刻認罪。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "CL0022",
+   "error": "reversed",
+   "statement": "真正的基督徒生活是完全交給聖靈，自己什麼都不必做，被動才是屬靈。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P01-ST14",
+   "error": "reversed",
+   "statement": "有些安息日會的人來問教授是否仍要遵守十條誡；教授回答十條誡仍要遵守，只有獻祭與食物的規定不必管。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P02-ST05",
+   "error": "added_judgement",
+   "statement": "神在摩西律法中禁止猶太人吃沒有鱗的海鮮，因為這些海鮮本身是污穢的，今天的基督徒也最好不吃。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P03-ST08",
+   "error": "more_certain",
+   "statement": "今天我們已經不需要再獻贖罪祭，舊約所有的祭祀規定也都完全廢除，沒有任何部分與基督的律法重疊。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P07-ST09",
+   "error": "wrong_subject",
+   "statement": "保羅說聖靈很多時候藉著聖經的教導引導人，所以基督徒每天必須讀經一小時。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P02-ST02",
+   "error": "wrong_view",
+   "statement": "外邦人只要受割禮，不必信耶穌基督也能得救。"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P06-ST03",
+   "error": "added_premise",
+   "statement": "既然文士和法利賽人的義已經是最高的標準，基督徒為什麼還要守律法？"
+  },
+  {
+   "lecture": "L2",
+   "id_suffix": "P07-ST01",
+   "error": "wrong_subject",
+   "statement": "教授問會眾：聖靈的感動是否比聖經更可靠？"
+  }
+ ]
+}

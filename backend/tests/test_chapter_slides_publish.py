@@ -77,3 +77,56 @@ def test_publish_blocks_confirmed_timing_findings_even_if_reviewer_flag_is_false
     with pytest.raises(ValueError, match="no matching nonblocking review"):
         publish(trial, live)
     assert target.read_bytes() == before
+
+
+def test_owner_override_publishes_over_a_blocking_review_only_when_bound(tmp_path, monkeypatch):
+    live, trial = setup_trial(tmp_path, monkeypatch)
+    target = cs.record_path(live, CHAPTER.passage, "L")
+    source = cs.record_path(trial / "data", CHAPTER.passage, "L")
+    path = cs.review_path(trial / "data", CHAPTER.passage, "L", 0)
+    review = json.loads(path.read_text()); review["blocking"] = True
+    review["findings"] = [{"slide": "S0001", "kind": "出現時間", "problem": "p", "fix": "f"}]
+    path.write_text(json.dumps(review))
+    override = trial / "override.json"
+    override.write_text(json.dumps({"authority": "owner_override_review", "ruling": "go",
+                                    "review_sha256": "0" * 64, "slides_sha256": ce.file_sha256(source)}))
+    before = target.read_bytes()
+    with pytest.raises(ValueError, match="not bound"):
+        publish(trial, live, owner_override=override)
+    assert target.read_bytes() == before
+    override.write_text(json.dumps({"authority": "owner_override_review", "ruling": "go",
+                                    "review_sha256": ce.file_sha256(path), "slides_sha256": ce.file_sha256(source)}))
+    receipt = publish(trial, live, owner_override=override)
+    assert receipt["owner_override_review"]["ruling"] == "go"
+    assert receipt["remaining_findings"] == review["findings"]
+    assert json.loads(target.read_text())["publication"]["owner_override_review"]["ruling"] == "go"
+
+
+def test_publish_and_readback_reuse_same_semantic_eval(tmp_path, monkeypatch):
+    from backend.pipeline import chapter_slide_eval as ev
+
+    live, trial = setup_trial(tmp_path, monkeypatch)
+    selection = ce.record_path(trial / 'data', CHAPTER.passage, 'L')
+    source = cs.record_path(trial / 'data', CHAPTER.passage, 'L')
+    record = json.loads(source.read_text())
+    record['semantic_eval'] = ev.SEMANTIC_SCHEMA_VERSION
+    source.write_text(json.dumps(record))
+    cs.review_path(trial / 'data', CHAPTER.passage, 'L', 0).unlink()
+    # The exact candidate must have semantic evidence before a switch is possible.
+    with pytest.raises(ValueError, match='Missing or unreadable semantic Eval'):
+        publish(trial, live)
+    evidence = source.with_suffix('.semantic-eval.json')
+    evidence.write_text(json.dumps(ev.with_run({
+        'schema_version': ev.SEMANTIC_SCHEMA_VERSION,
+        'slides_sha256': ev.semantic_slide_sha256(source),
+        'selection_sha256': ce.file_sha256(selection),
+        'checks': [
+            {'slide': slide['first'], 'criterion': name, 'passed': True, 'evidence': 'The saved source supports this check.'}
+            for slide in record['slides'] for name in ev.SEMANTIC_CRITERIA
+        ],
+    })))
+    receipt = publish(trial, live)
+    actual = cs.record_path(live, CHAPTER.passage, 'L')
+    assert receipt['semantic_eval_sha256'] == ce.file_sha256(evidence)
+    assert ev.semantic_eval_problems(actual, ce.record_path(live, CHAPTER.passage, 'L'),
+                                     actual.with_suffix('.semantic-eval.json')) == []

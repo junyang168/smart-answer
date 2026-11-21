@@ -1,0 +1,49 @@
+{
+ "schema": "slide-diagram-placement-key.v1",
+ "authority": "Where each diagram must and must not appear when the 太5 slides are rebuilt (owner 2026-11-18: slides use these diagrams; editorial ones labelled 整理).",
+ "must": [
+  {
+   "lecture": "nysc-2011-2-2",
+   "point": "CL0002 (舊約／新約都是約)",
+   "diagram": "A",
+   "label": "王教授 2019-3-24 羅馬書三章 投影片",
+   "via": "CVP"
+  },
+  {
+   "lecture": "nysc-2011-2-2",
+   "point": "CL0004 (兩律法有重疊)",
+   "diagram": "B",
+   "label": "王教授 2019-3-31 宗主國與附庸國的約 投影片",
+   "via": "CVP"
+  },
+  {
+   "lecture": "nysc-2011-2-1",
+   "point": "CL0001 (兩大段)",
+   "diagram": "D",
+   "label": "王教授 釋經筆記講義",
+   "via": "CVP"
+  },
+  {
+   "lecture": "nysc-2011-2-1",
+   "point": "CL0001",
+   "diagram": "C",
+   "label": "整理",
+   "via": "editorial link"
+  }
+ ],
+ "must_not": [
+  {
+   "rule": "C never without the 整理 label"
+  },
+  {
+   "rule": "A, B, D never shown as if shown in this lecture (no source caption)"
+  },
+  {
+   "rule": "no diagram on a point that is not linked (e.g. lecture 2 blood / 姦淫 points)"
+  },
+  {
+   "rule": "no diagram reached when the CVP link is missing; the slide shows none rather than a guess"
+  }
+ ],
+ "note": "The 太6/太7 pages get C on L5 point 12 and L6 points 15, 16, 18 when they are rebuilt; not part of the 太5 check."
+}

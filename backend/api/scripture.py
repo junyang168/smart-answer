@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+from html import escape
 from typing import Dict, Optional
 from urllib.parse import quote_plus
 
@@ -484,6 +486,10 @@ for slug, name in CHINESE_BOOKS:
     BOOK_NAME_TO_SLUG[slug.upper()] = slug
     alias = SLUG_ALIASES.get(slug)
     if alias:
+        osis = BOOK_TO_OSIS.get(alias)
+        if osis:
+            BOOK_NAME_TO_SLUG.setdefault(osis, slug)
+            BOOK_NAME_TO_SLUG.setdefault(osis.lower(), slug)
         english = ALIAS_TO_API_BOOK.get(alias)
         if english:
             BOOK_NAME_TO_SLUG[english] = slug
@@ -627,6 +633,27 @@ def reference_slugs(text: str) -> list[str]:
     return found
 
 
+def slide_reference_slugs(text: str) -> list[str]:
+    """Recognize a complete structured slide reference, including same-chapter lists."""
+    match = _SINGLE_REFERENCE_PATTERN.match(text)
+    if not match:
+        return []
+    slugs = reference_slugs(match[0])
+    if not slugs:
+        return []
+    rest = text[match.end():].strip()
+    if not rest:
+        return slugs
+    if not re.fullmatch(r"(?:[、,，]\s*\d+(?:\s*[-–—~～至]\s*\d+)?\s*)+", rest):
+        return []
+    book, chapter, *_ = slugs[0].split("-")
+    for start, end in re.findall(r"[、,，]\s*(\d+)(?:\s*[-–—~～至]\s*(\d+))?", rest):
+        slug = f"{book}-{chapter}-{start}" + (f"-{end}" if end else "")
+        if slug not in slugs:
+            slugs.append(slug)
+    return slugs
+
+
 #: 教授口里的书名简称。
 #:
 #: 他讲课说「馬太十六章十八節」「約翰二十章二十三節」，不说全名。书名表收的是
@@ -641,6 +668,11 @@ SPOKEN_BOOK_ALIASES: Dict[str, str] = {
     "羅馬": "rom", "罗马": "rom",
     "希伯來": "heb", "希伯来": "heb",
     "啟示錄": "rev", "启示录": "rev",
+    # 先知書也常省「書」：「以賽亞六十一章第七節」（2011（二）1）。
+    "以賽亞": "isa", "以赛亚": "isa",
+    "耶利米": "jer",
+    "以西結": "ezk", "以西结": "ezk",
+    "但以理": "dan",
 }
 
 _CHINESE_DIGITS: Dict[str, int] = {c: i for i, c in enumerate("零一二三四五六七八九")}
@@ -923,16 +955,28 @@ async def fetch_bible_api(
 async def get_scripture_basic(reference: str):
     info = parse_reference(reference)
     passages: Dict[str, str] = {"zh": "", "en": ""}
+    if BIBLE_API_TRANSLATION_ZH == "cuv":
+        from backend.bible_study.paths import cuv_dir
+
+        path = cuv_dir() / info["slug_book"].upper() / f"{info['chapter']}.json"
+        try:
+            chapter = json.loads(path.read_text(encoding="utf-8"))
+            verses = [chapter.get(str(verse), "").strip() for verse in range(info["start"], info["end"] + 1)]
+            if verses and all(verses):
+                passages["zh"] = "<p>" + "<br/>".join(escape(verse) for verse in verses) + "</p>"
+        except (OSError, ValueError, AttributeError):
+            pass
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            passages["zh"] = await fetch_bible_api(
-                client,
-                info["slug_book"],
-                info["chapter"],
-                info["start"],
-                info["end"],
-                BIBLE_API_TRANSLATION_ZH,
-            )
+            if not passages["zh"]:
+                passages["zh"] = await fetch_bible_api(
+                    client,
+                    info["slug_book"],
+                    info["chapter"],
+                    info["start"],
+                    info["end"],
+                    BIBLE_API_TRANSLATION_ZH,
+                )
         except httpx.HTTPError as exc:
             print(f"Failed to fetch Chinese passage: {exc}")
         try:

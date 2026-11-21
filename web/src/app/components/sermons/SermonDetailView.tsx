@@ -1,6 +1,6 @@
 // components/sermons/SermonDetailView.tsx
 "use client";
-import { hasEditorAccess } from "@/app/utils/roles";
+import { canUseSermonEditing, hasEditorAccess } from "@/app/utils/roles";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, notFound, useSearchParams } from 'next/navigation';
@@ -237,14 +237,15 @@ export const SermonDetailView = () => {
     ? seriesSermons[currentSeriesIndex + 1]
     : null;
   // 系列的排列只給同工看（負責人 2026-11-06）；信眾從講論文庫按書卷、章節來。
-  const seriesHref = isEditor && sermon.series_id
+  const showEditing = canUseSermonEditing(userRole);
+  const seriesHref = showEditing && sermon.series_id
     ? `/resources/series/${encodeURIComponent(sermon.series_id)}?sermon=${encodeURIComponent(sermon.id)}`
     : undefined;
 
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: 'AI 輔助查經', href: '/resources' },
-    { name: '講道中心', href: '/resources/sermons' },
+    { name: '聖經學習資源', href: '/resources' },
+    ...(showEditing ? [{ name: '講道校對與編輯', href: '/resources/sermons' }] : []),
     ...(seriesHref ? [{ name: sermon.series_title || '講道系列', href: seriesHref }] : []),
     { name: sermon.title }, // 當前講道標題，沒有 href
   ];
@@ -356,7 +357,7 @@ export const SermonDetailView = () => {
       {/* 右側邊欄 */}
       <SermonDetailSidebar
         sermon={sermon}
-        showSeries={isEditor}
+        showSeries={showEditing}
         authenticated={status === "authenticated"}
         canReviewRepository={isEditor}
       />

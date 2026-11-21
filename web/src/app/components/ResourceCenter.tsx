@@ -1,161 +1,52 @@
-// app/resources/page.tsx
-"use client";
-
-import { useState, useEffect, useMemo } from 'react';
-import { FaithQA, Sermon } from '@/app/interfaces/article';
-
-
+import { BookOpen, FilePenLine, Library, MessagesSquare } from 'lucide-react';
+import { getServerSession } from 'next-auth';
 import ResourceCard from '@/app/components/resources/ResourceCard';
-import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
-import FeaturedPostItem from '@/app/components/resources/FeaturedPostItem';
-
-import { BookOpen, BrainCircuit, Mic, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio, Video } from 'lucide-react';
-
-import type { NextPage } from 'next';
-import { apiToUiSermon} from '@/app/utils/converter'
-import { Breadcrumb } from '@/app/components/common/Breadcrumb';
-import Image from 'next/image';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useStaffAccess } from '@/app/utils/useStaffAccess';
-
-// --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
-
-
+import { authConfig } from '@/app/utils/auth';
+import { canUseSermonEditing, canViewStudyDemo } from '@/app/utils/roles';
 
 const resourceCardsData = [
   {
     icon: BookOpen,
-    title: '王守仁教授聖經講論文庫',
-    description: `按聖經經卷或講論主題閱讀正式釋經文章，也可進入信仰問答；文章支援在完整閱讀與原聲講解之間隨時切換。`,
-    link: '/resources/wang-repository',
-    linkLabel: '進入聖經講論文庫',
+    title: '查經資料',
+    description: '查找經文的研讀資料',
+    link: '/demos/scripture-study.html',
+    linkLabel: '選擇經文',
+    visibleTo: canViewStudyDemo,
   },
   {
-    icon: Users,
+    icon: Library,
+    title: '釋經講道系列',
+    description: `聆聽王守仁教授的原聲講道，字幕同步，投影片列出要點與經文。`,
+    link: '/resources/wang-repository',
+    linkLabel: '瀏覽系列',
+  },
+  {
+    icon: MessagesSquare,
     title: '團契查經回顧',
     description: `回顧雙週團契查經的主題、學習重點與來源連結，也讓新朋友認識我們如何一起查考聖經。`,
     link: '/resources/fellowship',
     linkLabel: '查看回顧',
   },
   {
-    icon: Mic,
-    title: '講道中心',
-    description: `同工利用 AI 整理、校對教授的音頻、視頻與筆記轉成的文字。`,
+    icon: FilePenLine,
+    title: '講道校對與編輯',
+    description: `認領逐字稿，校對講道內容，查看編輯與發布進度。`,
     link: '/resources/series',
-    linkLabel: '進入講道中心',
-    staffOnly: true, // 講道中心是同工的編輯入口（負責人 2026-11-06）
-  },
-  {
-    icon: Video,
-    title: '微講道',
-    description: `用簡短、清晰的內容，幫助你理解神的話語，並在生活中經歷祂的同在。這是一個安靜、專注的靈修空間。`,
-    link: '/resources/micro-sermon',
-    linkLabel: '開始觀看',
-  },
-  {
-    icon: Radio,
-    title: '信仰的深度',
-    description: `透過網播隨時隨地聆聽王守仁教授的聖經教導，讓信仰在日常生活中扎根、深化。`,
-    link: '/resources/depth_of_faith',
-    linkLabel: '開始聆聽',
+    linkLabel: '校對編輯',
+    visibleTo: canUseSermonEditing,
   },
 ];
 
-
-// --- 頁面組件本身 ---
-
-export const ResourceCenter = () => {
-  // --- State Management ---
-  const [topSermons, setTopSermons] = useState<Sermon[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { isStaff } = useStaffAccess();
-
-
-
-  // --- Data Fetching ---
-  useEffect(() => {
-    // 這個 useEffect 只在組件首次掛載到瀏覽器時運行一次
-    const fetchAllSermons = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        // ✅ fetch 在瀏覽器中運行，可以使用相對路徑或絕對路徑
-        const res = await fetch('/api/sc_api/top_sermon_articles/2');
-        const apiData = await res.json();
-        const transformedSermons = apiData.sermons.map(apiToUiSermon);
-        setTopSermons(transformedSermons);
-
-      } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchAllSermons();
-  }, []); // 空依賴數組確保只運行一次
-
-
+export async function ResourceCenter() {
+  const session = await getServerSession(authConfig);
+  const cards = resourceCardsData.filter(card => !card.visibleTo || card.visibleTo(session?.user?.role));
+  const columns = cards.length === 3 ? "md:grid-cols-2 lg:grid-cols-3 max-w-6xl" : "md:grid-cols-2 max-w-4xl";
   return (
-    <div className="bg-gray-50">
-      {/* 1. 英雄區 */}
-      <section className="relative bg-gray-900 text-white py-20 md:py-32 text-center overflow-hidden">
-        <Image src="/images/ai-background.jpeg" alt="資源庫背景" layout="fill" objectFit="cover" className="opacity-30" />
-        <div className="container mx-auto px-6 relative z-10">
-          <h1 className="text-4xl md:text-5xl font-bold">探索真理的寶庫</h1>
-      {/* ✅ 添加了与事工相关的介绍 */}
-      <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
-        我們致力於使用 AI 人工智能技術，將資深神學教育家
-        <Link 
-            href="/about/pastor-profile?from=resources&from_title=AI 輔助查經" 
-            className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
-        >
-            王守仁教授
-        </Link>
-        歷年忠於聖經的深度教導，轉化為您眼前这些可供探索、搜索和學習的寶貴屬靈資源。
-      </p>
-      <div className="mt-8">
-          <Link 
-              href="/ministries" // 链接到事工介绍页面
-              className="inline-block bg-white text-gray-800 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105 shadow-lg"
-          >
-              事工介紹
-          </Link>
-      </div>      
-        </div>
-      </section>
-
-      <section className="bg-gray-50 py-8 md:py-12">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
-            {resourceCardsData.filter((card) => !card.staffOnly || isStaff).map((card) => (
-              <ResourceCard
-                key={card.title}
-                icon={card.icon}
-                title={card.title}
-                description={card.description}
-                link={card.link}
-                linkLabel={card.linkLabel}
-              />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="py-8 md:py-12">
-
-        {/* 最新講道區 */}
-        <div className="container mx-auto px-6 mb-16">
-            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新講道速覽</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {topSermons.map(sermon => <LatestSermonCard key={sermon.title} sermon={sermon} />)}
-            </div>
-        </div>
-
-      </section>
-      
-    </div>
+    <section className="bg-gray-50 px-4 py-5 sm:px-6 sm:py-8">
+      <h1 className="sr-only">聖經學習資源</h1>
+      <div className={`mx-auto grid grid-cols-1 gap-3 text-left sm:gap-5 ${columns}`}>
+        {cards.map(card => <ResourceCard key={card.link} {...card} />)}
+      </div>
+    </section>
   );
-};
+}

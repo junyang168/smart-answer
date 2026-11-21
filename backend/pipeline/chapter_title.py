@@ -123,6 +123,12 @@ def check(title: str) -> list[str]:
 def load(data_base_dir: Path, passage: str, source: str = "") -> str | None:
     """存档的一句；哪一堂投影片重做过、或没有存档，就是 None。"""
 
+    if not _notes(source):
+        from backend.pipeline.chapter_unit_publish import load_summary
+
+        title = load_summary(data_base_dir, passage)
+        if title is not None:
+            return title
     chapter = chapters(data_base_dir, source).get(passage)
     path = record_path(data_base_dir, passage, source)
     if chapter is None or not path.exists():

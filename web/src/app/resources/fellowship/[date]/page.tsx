@@ -8,7 +8,7 @@ export default async function FellowshipDetailPage(props: { params: Promise<{ da
   const params = await props.params;
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
-    { name: "AI 輔助查經", href: "/resources" },
+    { name: "聖經學習資源", href: "/resources" },
     { name: "團契查經回顧", href: "/resources/fellowship" },
     { name: params.date },
   ];

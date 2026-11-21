@@ -1,0 +1,188 @@
+{
+ "schema": "editorial-diagram.v1",
+ "kind": "editorial",
+ "svg": {
+  "path": "full_article/images/sermon-on-the-mount-structure.svg",
+  "sha256": "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17"
+ },
+ "title": "登山寶訓的文學結構",
+ "label": "整理",
+ "source_note": "由 NYSC 2011（二）第一、五、六講與釋經筆記母本《登山寶訓的文學結構》整理而成；不是教授畫的圖。",
+ "viewpoint": "登山寶訓的結構",
+ "boxes": [
+  {
+   "text": "太 5:3–12 彌賽亞的身份（八福的 inclusio）",
+   "claims": [
+    {
+     "claim_id": "DK-802058282cab3b47de21-CL0001",
+     "revision": 1
+    },
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0014",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "L1 CL0001 與 L6 CL0014：五章三至十二節講明彌賽亞的身份。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "門徒的使命",
+   "claims": [
+    {
+     "claim_id": "DK-802058282cab3b47de21-CL0001",
+     "revision": 1
+    },
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0014",
+     "revision": 2
+    },
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0015",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "五章十三節至七章二十九節是門徒的使命；認出彌賽亞就連著門徒的責任。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "太 5:13–16 總綱：鹽與光",
+   "claims": [
+    {
+     "claim_id": "DK-802058282cab3b47de21-CL0003",
+     "revision": 1
+    },
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0016",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "五章十三至十六節作綜合說明（L1 CL0003、L6 CL0016）。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "太 5:17 – 7:12 Inclusio：門徒與舊約（律法和先知）的關係",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0017",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "七章十二節以「律法和先知」呼應五章十七節，首尾呼應，總結基督徒與舊約的關係。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "5:17–48",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0017",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "CL0017：五章十七至四十八節講勝過文士和法利賽人的義。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "門徒的義（勝過法利賽人）",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0017",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "CL0017：門徒的義要勝過文士和法利賽人的義。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "6:8–7:11 inclusio",
+   "claims": [
+    {
+     "claim_id": "DK-4f0b60ff1c8b7adbd408-CL0014",
+     "revision": 1
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "L5 CL0014：六章八節至七章十一節以禱告首尾呼應。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "門徒義的實踐（施捨，禱告等）",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0017",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "CL0017：六章一節至七章十一節講門徒的義，包括施捨和禱告。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "7:12 小結：律法與先知的總結（黃金律）",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0016",
+     "revision": 2
+    },
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0017",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "七章十二節總結門徒與舊約的關係（「律法和先知」）。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "7:13–27 門徒使命的結論（兩條路）",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0016",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "CL0016：七章十三至二十七節總結整個門徒的使命。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  },
+  {
+   "text": "7:28–29 敘事結尾",
+   "claims": [
+    {
+     "claim_id": "DK-7f15061f63954913856f-CL0014",
+     "revision": 2
+    }
+   ],
+   "ruling": {
+    "verdict": "holds",
+    "reason": "CL0014（負責人 2026-11-18 裁定後重述）：七章二十八至二十九節是整個登山寶訓的結論，在門徒的使命之內。",
+    "by": "Claude 2026-11-18 (key C grading, grade-C-20261118.md)"
+   }
+  }
+ ]
+}

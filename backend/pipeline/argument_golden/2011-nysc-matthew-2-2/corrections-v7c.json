@@ -1,0 +1,24 @@
+{
+ "lecture": "2011 NYSC 專題：馬太福音釋經（二）2",
+ "run": "gpt-20261117-lecture2-v7",
+ "corrections": [
+  {
+   "op": "drop_claim",
+   "short": "CL0003",
+   "ruling": "Owner 2026-11-17 (「agreed」): 林前9:20 「翻錯了，應該是『我乃在基督律法之下』」 is his reason, 「所以啊，基督徒乃在基督的律法底下」 his point. One Claim (CL0001); the translation step stays as its Evidence."
+  },
+  {
+   "op": "position_to_question",
+   "short": "P07-ST01",
+   "answer_claim_id": "CL0023",
+   "ruling": "Owner 2026-11-17: 「this is surely a question, although his answer made it feel like he thinks she just use her own idea」. The audience's question, answered by CL0023."
+  },
+  {
+   "op": "restate_claim",
+   "short": "CL0010",
+   "statement": "使徒行傳十五章禁戒祭偶像之物、血、勒死的牲畜和姦淫，是為使安提阿、敘利亞、基利家的外邦信徒不使當地的猶太人跌倒，維持交往與傳福音的機會；應按這個目的理解它們的適用範圍。",
+   "basis_fragment_id": "FR-nysc_2011_2_2-debf2ccdd72f-DK-184168a2dcb90158220f-P03-ST02-01",
+   "ruling": "Owner 2026-11-18 「yes」 to Claude's proposed text: the point names the four prohibitions and the recipients, from his 「禁戒祭偶像之物、血，並勒死的牲畜和姦淫」 and 「寫給安提阿、敘利亞、基利家的外邦弟兄」. Reruns r8 and r9 answered it but broke owner rulings; v7 is kept."
+  }
+ ]
+}

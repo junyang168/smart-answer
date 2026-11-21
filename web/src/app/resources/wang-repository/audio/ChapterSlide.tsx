@@ -19,13 +19,60 @@ export function shouldShowSlideItem(at: number, seconds: number, clipEnd: number
   return at < clipEnd && at <= seconds + POINT_PREVIEW_SECONDS;
 }
 
+type InlineNote = {
+  at: number;
+  scripture: string;
+  verse: number;
+  span: string;
+  original: string;
+  reading: string;
+  explanation: string;
+};
+
+function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) {
+  const matched = notes.filter(({ span }) => span && text.indexOf(span) >= 0 && text.indexOf(span) === text.lastIndexOf(span));
+  const spans = [...new Set(matched.map(({ span }) => span))]
+    .map((span) => ({ span, start: text.indexOf(span) }))
+    .sort((a, b) => a.start - b.start || b.span.length - a.span.length);
+  let cursor = 0;
+  const parts = spans.map(({ span, start }) => {
+    if (start < cursor) return null;
+    const before = text.slice(cursor, start);
+    cursor = start + span.length;
+    return <span key={span}>{before}<mark className="rounded bg-amber-300/25 text-amber-100">{span}</mark></span>;
+  });
+  return (
+    <div>
+      {parts}{text.slice(cursor)}
+      {matched.filter(({ original, explanation }) => original || explanation).map((note, index) => (
+        <div key={index} className="text-xs leading-4 text-amber-100/70">
+          {[note.original, note.explanation].filter(Boolean).join(" · ")}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type SlideDiagram = {
+  at: number;
+  title: string;
+  sha256: string;
+  image_src: string;
+  layout?: "covenants" | "overlap" | "literary_structure" | "overview";
+  labels?: string[];
+};
+
 export type ChapterSlideData = {
   at: number;
   seconds: number;
   title: string;
   /** at 是他开始讲这条要点的时间。 */
   points: { at: number; text: string }[];
+  /** 本堂地圖：預告，要點一起出現，不逐條亮。 */
+  overview?: boolean;
   verses: string[];
+  inline_notes?: InlineNote[];
+  diagram?: SlideDiagram;
   scriptures: { at: number; scripture: string; label: string }[];
 };
 
@@ -76,10 +123,24 @@ const HANDS_OFF_MS = 6000;
  * 把一个元素转到投影片框里看得见的地方。只滚投影片自己的框（`data-slide-scroll`），
  * 不动整页；不在聆听模式里（没有这个框）就什么都不做。
  */
-function bringIntoView(element: HTMLElement | null) {
+const wanted = new WeakMap<HTMLElement, HTMLElement>();
+
+function bringIntoView(element: HTMLElement | null, { yieldToReading = false } = {}) {
   const frame = element?.closest<HTMLElement>("[data-slide-scroll]");
   if (!element || !frame) return;
-  if (Date.now() - Number(frame.dataset.handsOff ?? 0) < HANDS_OFF_MS) return;
+  // 他正在念的經節優先：念到太5:10 時新出的要點不把那一節捲走（負責人 2026-11-16）。
+  if (yieldToReading && frame.dataset.reading) return;
+  // 手指剛碰過：先記下這時該看的，等手放開後再轉過去——不然他這期間出的要點
+  // 會一直留在框外（負責人 2026-11-16，iPhone 上 inclusio 那條被捲出視野）。
+  wanted.set(frame, element);
+  const wait = HANDS_OFF_MS - (Date.now() - Number(frame.dataset.handsOff ?? 0));
+  if (wait > 0) {
+    window.setTimeout(() => {
+      if (wanted.get(frame) === element) bringIntoView(element, { yieldToReading });
+    }, wait + 50);
+    return;
+  }
+  if (!element.isConnected) return;
   const top = element.getBoundingClientRect().top - frame.getBoundingClientRect().top + frame.scrollTop;
   frame.scrollTo({ top: Math.max(0, top - frame.clientHeight / 4), behavior: "smooth" });
 }
@@ -90,10 +151,12 @@ function Verse({
   label,
   latest,
   sentence,
+  notes,
 }: {
   slug: string;
   label: string;
   latest: boolean;
+  notes: InlineNote[];
   /** 逐字稿此刻这一句；只给最新的一段，用来跟着他念到的那一节走。 */
   sentence?: string;
 }) {
@@ -112,13 +175,24 @@ function Verse({
   // 手机上一段经文常比投影片框高：他念到哪一节，就亮那一节、滚到那一节（负责人 2026-11-09）。
   const reading = latest && texts && sentence ? verseBeingRead(sentence, texts) : -1;
   const readingLine = useRef<HTMLLIElement | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    if (!frame || sentence === undefined) return;
+    frame.dataset.reading = reading >= 0 ? "1" : "";
     if (reading >= 0) bringIntoView(readingLine.current);
   }, [reading, slug]);
+  useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    return () => {
+      if (frame && sentence !== undefined) frame.dataset.reading = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
+    <div ref={box} className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
       <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
-      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200" : "text-[0.9rem] leading-6 text-slate-500"}`}>
+      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200 lg:text-xl lg:leading-9" : "text-[0.9rem] leading-6 text-slate-500 lg:text-base lg:leading-7"}`}>
         {verses.map((verse, index) => (
           <li
             key={verse.slug}
@@ -130,7 +204,9 @@ function Verse({
                 {verse.number}
               </span>
             )}
-            <span>{texts ? texts[index] : "……"}</span>
+            {texts ? (
+              <AnnotatedVerse text={texts[index]} notes={notes.filter((note) => note.verse === Number(verse.number))} />
+            ) : <span>……</span>}
           </li>
         ))}
       </ol>
@@ -138,52 +214,196 @@ function Verse({
   );
 }
 
+const diagramBox = "rounded-lg border border-slate-600 bg-slate-900/60 p-2 [@media(max-width:389px)]:p-1";
+const diagramHeading = "font-semibold text-amber-200";
+
+function Diagram({ diagram }: { diagram: SlideDiagram }) {
+  const text = diagram.labels ?? [];
+  let content;
+  switch (diagram.layout) {
+    case "covenants":
+      content = (
+        <>
+          <div className="text-center font-semibold text-amber-200">{text[0]}</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[text.slice(1, 7), text.slice(7, 13)].map(([title, grace, demand, law, terms, spirit]) => (
+              <div key={title} className={diagramBox}>
+                <div className={diagramHeading}>{title}</div>
+                <div>{grace}</div><div>{demand}{law}</div>
+                <div>{terms}</div><div>{spirit}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      );
+      break;
+    case "overlap":
+      content = (
+        <div className="relative grid min-h-24 grid-cols-[1fr_auto_1fr] items-center text-center">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-[60%] rounded-[50%] border border-emerald-400" />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-[60%] rounded-[50%] border border-sky-400" />
+          <span className="pl-2 text-emerald-200">{text[2]}</span>
+          <strong className="mx-1 text-amber-200">{text[0]}{text[1]}</strong>
+          <span className="pr-2 text-sky-200">{text[3]}</span>
+        </div>
+      );
+      break;
+    case "literary_structure":
+      content = (
+        <>
+          <div className={diagramBox}>{text[0]}</div>
+          <div className={diagramBox}>
+            <div className={diagramHeading}>{text[1]}</div>
+            <div className="mt-1 border-l border-slate-500 pl-2 [@media(max-width:389px)]:pl-1">
+              <div>{text[2]}</div>
+              <div className="my-1 rounded border border-slate-600 p-2 [@media(max-width:389px)]:my-0 [@media(max-width:389px)]:p-0">
+                <div>{text[3]}</div>
+                <div className="mt-1 grid grid-cols-2 gap-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">
+                  <div>{text[4]} {text[5]}</div>
+                  <div>{text[6]} {text[7]}</div>
+                </div>
+                <div className="mt-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">{text[8]}</div>
+              </div>
+              <div>{text[9]}</div>
+            </div>
+          </div>
+          <div className={diagramBox}>{text[10]}</div>
+        </>
+      );
+      break;
+    case "overview":
+      content = (
+        <>
+          <div className="text-center font-semibold text-amber-200">{text[0]}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className={diagramBox}>
+              <div className={diagramHeading}>{text[1]}</div>
+              <div>{text[2]}</div>
+            </div>
+            <div className={diagramBox}>
+              <div className={diagramHeading}>{text[3]}</div>
+              <div>{text[4]}</div><div>{text[5]}</div>
+            </div>
+          </div>
+        </>
+      );
+      break;
+    default:
+      if (!diagram.image_src.startsWith("data:image/svg+xml;base64,")) return null;
+      content = (
+        // eslint-disable-next-line @next/next/no-img-element -- Verified SVG in image mode.
+        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block max-h-[45dvh] w-full object-contain invert hue-rotate-180 mix-blend-screen max-sm:max-h-[min(45dvh,max(0px,calc(100cqh_-_7rem)))]" />
+      );
+  }
+  return (
+    <figure aria-label={diagram.title} className={[
+      "isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 max-sm:space-y-1 [@media(max-width:389px)]:leading-[1.1]",
+      diagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:space-y-0" : "",
+    ].join(" ")}>
+      {content}
+    </figure>
+  );
+}
+
 export default function ChapterSlide({
   slide,
   seconds,
+  clipStart,
   clipEnd,
   className = "min-h-[20rem]",
   sentence,
 }: {
   slide: ChapterSlideData;
   seconds: number;
+  clipStart: number;
   clipEnd: number;
   /** 聆听模式：逐字稿此刻这一句，投影片跟着他念到的经节走。 */
   sentence?: string;
   /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
   className?: string;
 }) {
+  const diagram = slide.diagram;
+  const currentDiagram = diagram && clipStart <= diagram.at && diagram.at < clipEnd && diagram.at <= seconds
+    ? diagram : undefined;
   // The speech anchor stays exact while points get a short reading lead.
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
-  const activePoint = points.filter((item) => item.at <= seconds).at(-1);
+  const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
-  const shown = [...read].reverse();
+  // 他開始新要點後又念新經文，前面要點的經文就收起，免得看起來屬於現在講的。
+  const current = read.filter((item) => !read.some((later) => slide.points.some(
+    (point) => item.at < point.at && point.at <= later.at)));
+  // 同一段經文再念一次，只留最近的那一次。
+  const shown = [...current].reverse().filter((item, index, all) =>
+    all.findIndex((other) => other.scripture === item.scripture) === index);
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
+  const slidePanel = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (activePoint) bringIntoView(newestPoint.current);
-  }, [activePoint, slide.at]);
+    const frame = slidePanel.current?.closest<HTMLElement>("[data-slide-scroll]");
+    if (currentDiagram && frame) frame.scrollTop = 0;
+  }, [currentDiagram]);
+  useEffect(() => {
+    if (!activePoint || !newestPoint.current) return;
+    const point = newestPoint.current;
+    if (!currentDiagram) {
+      bringIntoView(point, { yieldToReading: true });
+      return;
+    }
+    const column = point.closest<HTMLElement>("[data-diagram-points]");
+    if (column && column.scrollHeight > column.clientHeight) {
+      // Move only the point list and leave preceding points in view when they fit.
+      const pointBounds = point.getBoundingClientRect();
+      const windowBounds = column.getBoundingClientRect();
+      if (pointBounds.top < windowBounds.top) {
+        column.scrollTop += pointBounds.top - windowBounds.top;
+      } else if (pointBounds.bottom > windowBounds.bottom) {
+        column.scrollTop += pointBounds.bottom - windowBounds.bottom;
+      }
+    }
+  }, [activePoint, currentDiagram, slide.at]);
   return (
-    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6`}>
-      <header>
-        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
-        {points.length > 0 && (
-          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed">
-            {points.map((point, index) => (
-              <li
-                key={point.text}
-                ref={point === activePoint ? newestPoint : undefined}
-                className={`flex gap-3 ${point === activePoint ? "text-white" : "text-slate-400"}`}
-              >
-                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
-                  {index + 1}
-                </span>
-                <span>{point.text}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </header>
+    <section ref={slidePanel} className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10 ${currentDiagram
+      ? "max-sm:gap-3 max-sm:p-3 [@media(max-width:374px)_and_(max-height:620px)]:p-2" : ""}`}>
+      <div className={currentDiagram
+        ? "grid items-start gap-1 max-sm:sticky max-sm:top-0 max-sm:z-10 max-sm:bg-slate-950 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8"
+        : undefined}>
+        <header className={currentDiagram ? "min-w-0" : undefined}>
+          <h2 className={["font-serif font-semibold leading-snug text-white sm:text-2xl lg:text-4xl",
+            currentDiagram ? "text-base" : "text-xl",
+            currentDiagram?.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:sr-only" : "",
+          ].join(" ")}>{slide.title}</h2>
+          {(currentDiagram || points.length > 0) && (
+            <ol data-diagram-points={currentDiagram ? "" : undefined}
+              tabIndex={currentDiagram ? 0 : undefined}
+              aria-label={currentDiagram ? "講道要點" : undefined}
+              className={currentDiagram
+                ? [
+                    "mt-1 space-y-1 text-sm leading-snug max-sm:h-[min(4.5rem,21cqh)] max-sm:overflow-y-auto max-sm:overscroll-contain motion-safe:max-sm:scroll-smooth sm:mt-3 sm:space-y-2 sm:text-[1.05rem] sm:leading-relaxed lg:text-2xl",
+                    currentDiagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:h-9" : "",
+                  ].join(" ")
+                : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
+              {points.map((point, index) => (
+                <li
+                  key={point.text}
+                  ref={point === activePoint ? newestPoint : undefined}
+                  aria-current={point === activePoint ? "true" : undefined}
+                  className={["flex gap-3", point === activePoint || slide.overview ? "text-white" : "text-slate-400",
+                    currentDiagram && point.at > seconds ? "max-sm:hidden" : "",
+                  ].join(" ")}
+                >
+                  <span className={["w-4 shrink-0 text-right font-mono text-sm text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]",
+                    currentDiagram ? "sm:leading-[1.75rem]" : "leading-[1.75rem]",
+                  ].join(" ")}>
+                    {index + 1}
+                  </span>
+                  <span>{point.text}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </header>
+        {currentDiagram && <Diagram key={currentDiagram.sha256} diagram={currentDiagram} />}
+      </div>
       {shown.length > 0 && (
         <div className="flex flex-col gap-3">
           {shown.map((item, index) => (
@@ -192,6 +412,8 @@ export default function ChapterSlide({
               slug={item.scripture}
               label={item.label}
               latest={index === 0}
+              notes={(slide.inline_notes ?? []).filter((note) =>
+                note.scripture === item.scripture && note.at < clipEnd && note.at <= seconds)}
               sentence={index === 0 ? sentence : undefined}
             />
           ))}

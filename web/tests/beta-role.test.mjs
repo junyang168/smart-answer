@@ -72,3 +72,11 @@ test("changing a role removes all stale duplicate beta grants", async () => {
     ],
   );
 });
+
+test("resource center restricts the study demo and proofreading workspace independently", async () => {
+  const { canViewStudyDemo, canUseSermonEditing } = await import("../src/app/utils/roles.ts");
+  for (const role of [undefined, "reader", "reviewer", "member", "viewer", "admin", "unknown", "editor", "beta_tester"]) {
+    assert.equal(canViewStudyDemo(role), role === "beta_tester");
+    assert.equal(canUseSermonEditing(role), ["editor", "beta_tester"].includes(role));
+  }
+});

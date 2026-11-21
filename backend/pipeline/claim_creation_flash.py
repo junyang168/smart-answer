@@ -3,7 +3,9 @@
 Reuse the extraction schema, literal validation, sentence ledger and compiler;
 this module only separates producer tasks and joins their answers.
 """
+from collections import defaultdict
 from copy import deepcopy
+from dataclasses import replace
 import fcntl
 import hashlib
 import json
@@ -15,13 +17,20 @@ from backend.pipeline import detailed_knowledge_extraction_runner as x
 from backend.pipeline import extraction_sections as sections
 from backend.pipeline import evidence_refresh as e, claim_flash_common as f
 from backend.pipeline.claim_flash_grouping import SemanticGroups, _ranges
-from backend.pipeline.source_projection import project_script
+from backend.pipeline.source_projection import project_script, validate_visual_source_attestations
 from backend.pipeline.knowledge_package_merge import validate_merged_package
 
 VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v5_not_claims'
+# What the sentence-by-sentence pass may say about an entry on the Claim list it was given.
+NOT_CLAIM_KINDS = ('evidence', 'digression', 'restates')
+# 題外話 (owner 2026-11-16): an attack on others with no scripture or reasoning,
+# and a personal story told to back such a comment. Proposals only: a 同工
+# approves each before it changes slides or playback.
+DIGRESSION_KINDS = ('unsupported_comment', 'personal_story')
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -51,7 +60,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     claim['properties'].update(related_ranges=array(object_schema({
         'first': {'type': 'string'}, 'last': {'type': 'string'}})),
         conclusion_anchor=deepcopy(d.ANCHOR_SCHEMA), support_hint={'type': 'string'},
-        existing_claim_id={'type': ['string', 'null']})
+        existing_claim_id={'type': ['string', 'null']}, answers_question={'type': 'string'})
     claim['required'] = list(claim['properties'])
     materials = {k: deepcopy(BASE[k]) for k in ('questions', 'positions', 'observations', 'evidence_steps', 'sentence_audit')}
     for col, field in (('questions', 'answer_claim_ids'), ('evidence_steps', 'produced_claim_ids')):
@@ -64,6 +73,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
         materials['coverage_by_record']=array(object_schema({'record_id':{'type':'string'},
             'sentence_ids':array(deepcopy(audit['sentence_id']))}))
         materials['excluded_sentences']=array(object_schema({'sentence_id':deepcopy(audit['sentence_id']),
+            'duplicate_of_record_id':{'type':['string','null']},
             'reason_code':{'type':'string','enum':sorted(d.REASON_CODES)},'reason':deepcopy(audit['reason'])}))
     connection = object_schema({'from_id': {'type': 'string'}, 'to_id': {'type': 'string'},
         'relation_type': {'type': 'string', 'enum': d.RELATION_TYPES}, 'reason': {'type': 'string'}})
@@ -71,7 +81,24 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     if single_pass:
         candidate=deepcopy(claim);candidate['properties']['claim_id']={'type':'string'}
         candidate['required'].append('claim_id');materials['candidates']=array(candidate)
-    return {'claims': schema('claims', {'candidates': array(claim)}),
+    sid=deepcopy(BASE['sentence_audit']['items']['properties']['sentence_id'])
+    steps=schema('argument_steps',{
+        'steps':array(object_schema({'step_id':{'type':'string'},'line':{'type':'string'},
+            'sentence_ids':array(deepcopy(sid)),'supports':array({'type':'string'})})),
+        'claim_text':array(object_schema({'claim_id':{'type':'string'},'sentence_ids':array(deepcopy(sid))})),
+        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}})),
+        'digressions':array(object_schema({'sentence_ids':array(deepcopy(sid)),
+            'kind':{'type':'string','enum':list(DIGRESSION_KINDS)},'why':{'type':'string'}})),
+        'not_claims':array(object_schema({'claim_id':{'type':'string'},'kind':{'type':'string','enum':list(NOT_CLAIM_KINDS)},
+            'target':{'type':'string'},'why':{'type':'string'}}))})
+    obs_types=BASE['observations']['items']['properties']['observation_type']['enum']
+    step_types=BASE['evidence_steps']['items']['properties']['step_type']['enum']
+    records=schema('step_records',{'records':array(object_schema({'step_id':{'type':'string'},
+        'kind':{'type':'string','enum':['observation','evidence','position','question']},'statement':{'type':'string'},
+        'observation_type':{'type':['string','null'],'enum':obs_types+[None]},
+        'step_type':{'type':['string','null'],'enum':step_types+[None]},
+        'attribution':{'type':'string'},'scripture_refs':array({'type':'string'})}))})
+    return {'steps': steps, 'step_records': records, 'claims': schema('claims', {'candidates': array(claim)}),
             'materials': schema('single_pass_group_v1' if single_pass else 'group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
             'connections': schema('connections', {'connections': array(connection),
                 'observation_roles':array(object_schema({'observation_id':{'type':'string'},
@@ -85,15 +112,33 @@ RULES = (
     '逐字引文只從所給S定位碼連續複製，不補標點，不拼接；時間欄位必須null。'
     + f.KNOWLEDGE_TEXT_RULES)
 CLAIMS = RULES + (
-    '唯一任務：識別本組Claim候選及完整相關原文範圍，不生成Evidence、Fragment或關係。'
+    '輸入有diagrams時，那是他展示或畫的圖：程序從SVG讀出圖上文字與結構，不是口述，與他說的話同等；圖上的分段與層次可以是提綱的依據，Claim仍寫他的判斷，related_ranges包含圖所在的段落。'
+    '唯一任務：還原教授講這一組時心中的講課提綱，提綱上每一點寫成一條Claim候選及完整相關原文範圍；'
+    '不生成Evidence、Fragment或關係。'
+    '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子只寫這幾點合起來得出的那一個結論，一兩句，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子先寫他的結論，不把下面各條的內容再寫一遍（下面已有的點，蓋子不重述其內容）；只有結論本身就是分段或列舉時（例：「登山寶訓分兩大段」），才寫出各段的經文範圍或各項的名稱；不寫「要從甲、乙、丙來明白」這種只列題目、沒有答案的句子；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
+    '例如各部分、理由、前提。檢驗：用這些Claim做投影片，聽眾能跟上這段錄音、不漏他講的要點；不要求Claim與投影片一一對應。他後面補充前面講過的點時，把範圍加到那一條，或作分論點掛在它下面，不另立頂層。'
+    '一條Claim是他對一個問題的回答。每條先寫answers_question：這條回答的是什麼問題——他自己問過的用他的話，沒明問的寫成他在回答的那個問題。故事、例子、理由、經文的讀法是這個回答的論據，不另立Claim；兩條回答同一個問題的合成一條（例：「覺得異性漂亮是不是犯姦淫？」只有一條Claim，「神造男造女」是它的理由，兩個故事是它的例子）；回答不同問題的分開列（例：「神為什麼禁血？」與「哪些外邦人要禁戒？」是兩條）；不回答他提出或正在回答的任何問題的說法——例如故事的總結——不立Claim。他為了推出一個結論而順帶問、順帶答的小問題（例：林前九章二十節「這句話翻錯了！其實是什麼？……我乃在基督律法之下」，接著「所以啊，基督徒乃在基督的律法底下」），那個回答是結論的論據，不另立Claim；只有經文的讀法本身就是他要落到的結論時，才立Claim（例：羅馬書八章四節「律法的義」是律法正當的要求）。蓋子回答本組的主要問題。重用既有Claim時，answers_question寫它回答的問題。'
+    'statement直接寫他的判斷，像他自己對聽眾說的一句結論：不寫「教授認為」「教授判斷」「他解為」，不寫故事裡的人和情節（「那位弟兄求……」），故事、例子與他對故事中人的評語是支持這個判斷的論據；例：寫「覺得異性漂亮是神造男造女的本性，不等於心裡犯姦淫」，不寫「那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽」。'
+    'statement寫出這一點的內容，不只寫題目：聽眾一聽到這一點的題目，心裡自然會問的問題，statement都要用他的話回答——'
+    '聽到「結構」，就問分哪幾段（每段的經文範圍）、每段講什麼、段與段怎樣連接；聽到「分別」「對比」，就問兩邊各是什麼、差在哪裡；聽到「幾個原因」「幾個步驟」，就問是哪幾個、先後怎樣；'
+    '他講過的答案，即使只講一次、沒有強調，或他最後只用一句「所以……是這樣」帶過，照樣寫進statement，不降為論據；'
+    '他接著逐一講解的部分（給了說明或理由），各成一條分論點，只列出、未講解的部分留在上層那條；已各成分論點的部分，上層不重述其內容；上層的結論本身是分段或列舉時，點出各段經文範圍、各項名稱。'
+    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），推理中的前提與中間環節是論據，不另立Claim，只寫推出的那個結論；只有另有自己的論據、或他當作一條教導說出（「聖經的觀念是……」）、能單獨回答一個問題的判斷，才另立一條分論點。'
+    '拆不拆拿不準時問：這一部分能單獨回答一個問題嗎？能，就另立一條；只是上層的理由、限定或說明，限定寫進上層那條，理由與說明掛在它下面；描述同一結構的幾句算一個。不同要點不合併，同一要點的不同說法不另立。'
+    '他從經文、字詞或對照得出的推論是Claim，statement簡要寫出觀察及其意義；單純的引經、字詞資料、譯法留給論據。'
+    '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，以及一條律例或命令的出處，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導，從故事推出、他自己沒有說出的教訓也不立Claim；故事的總結（他講故事要說明的事）也不立Claim，例：他講兩個故事「看到這個事情的嚴重性」，「誤解這句經文使人痛苦，講清楚能使人得釋放」是這兩個故事的總結，不是Claim。'
+    '解說一種結構或方法是什麼（例：「inclusio……就是一段聖經……它的開頭跟它的最後……字完全一樣，或者是觀念完全一樣」）是定義，是論據，不立Claim；'
+    '但他明白教導、要聽眾照著做、並在本組用來得出要點的讀經原則（例：「讀經要用理性」「要看關鍵字的前後文」），是提綱上的點；他說出的一般原則（讀經、倫理或教義，適用範圍超出本段經文），不論在案例前、中、後，是本組結論之一，案例支持它，不掛在案例底下。'
+    '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，與本組主題相關的是Claim；這類回答及其他回答聽眾問題的Claim，掛在它所應用或支持的那條下面，與本組結論無關的不在本組立Claim；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
+    '他提出問題或指出張力而不當場回答時（例：「那不是矛盾嗎？」「耶穌來了之後，我們還要不要遵守摩西的律法？」），那是Question，不是Claim：不立「兩者有張力」之類的Claim，問題留給後續材料記為Question；他後面的回答才是Claim。'
+    '問題或張力在本組沒有回答時，不寫任何解答、裁決或傾向。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
+    '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。題外話不立Claim：他批評學者或別人，卻沒有給經文或推理、只是評論；以及用來襯托這種評論的個人故事（例：「有些學者看聖經眼睛都瞎了」及兒子看心臟幻燈片的故事）。他給了經文或推理的批評不是題外話（例：「很多人解經完全搞錯」之後用首尾呼應證明），照常立Claim。說出對方為什麼錯（動機、身份、不懂什麼）不算依據；依據是證明對方說法錯的經文或推理。'
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
-    '只有支持上層的一句斷言，沒有教授另給論據時保留為後續材料，不必升級Claim；'
-    '有經文、觀察、例子或推理另行支持才考慮獨立Claim，不設兩條Evidence門檻。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
-    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；'
+    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用，但只追加範圍，不掛到本組蓋子下面；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
     '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。'
-    + f.CLAIM_DISCOVERY_RULES)
+    '以「>」開頭的行是投影片或引用的文字：是和合本經文時，是他念出的經文；不是經文時，不是他說的話，只用來理解上下文，不能作conclusion_anchor的逐字引文，要引他自己說出這一點的話。')
 MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
@@ -110,15 +155,30 @@ MATERIALS = RULES + (
     '比較馬太與馬可的敘事，須保存比較雙方和必要時間順序，不能只掛結論句。'
     '回答聽眾的簡短肯定，須同掛原問句及明示對象；否定舊說須同掛舊說及教授的否定。'
     '不能把Claim候選當證據，不能臆測未提供的指涉；可選較長完整句，但不無差別掛整組原文。'
-    '不把「本批尚未解釋」「接下來將會談到」等抽取／編排評論寫進statement。')
+    '不把「本批尚未解釋」「接下來將會談到」等抽取／編排評論寫進statement。''與本組主題無關的生活經歷、見聞、閒談及離題的應用，不建Evidence/Observation，逐句以not_exegesis排除並寫簡短理由；若為理解前後文必須保留，最多一條簡短Evidence概括。只有與主題相關的生活應用才作為材料進論證層。'
+    '釋經與神學的材料（經文、字詞、觀察、論據）忠實完整保存；論點所依據的背景屬釋經，同樣完整保存；只作點綴的生活應用與背景材料要簡化：例子、故事、歷史文化背景只保存支持論點所需的一條簡短Evidence，不逐句建記錄，其餘句子覆蓋於該條。')
 # Reuse the existing producer definitions/attribution rules, excluding its
 # all-at-once Claim and relationship instructions.
 _existing_prompt=x.PROMPT_PATH.read_text(encoding='utf-8')
-MATERIALS += '\n'+_existing_prompt.split('1. `questions`',1)[1].split('5. `claims`',1)[0]
+MATERIALS += '\n1. `questions`'+_existing_prompt.split('1. `questions`',1)[1].split('5. `claims`',1)[0]
 MATERIALS += '\n歸屬規則：'+_existing_prompt.split('归属规则：',1)[1].split('观察与论证的关系',1)[0]
+
+# Steps first: one narrow task divides his argument; the package task then
+# builds records inside those boundaries. Examples are owner-reviewed.
+STEPS = RULES + (Path(__file__).parent/'prompts'/'argument_steps.md').read_text(encoding='utf-8')
+STEP_RECORDS = RULES + (
+    '唯一任務：argument_steps已劃好，為每一步填一筆記錄的類型與文字。原文片段由程式依各步sentence_ids從原文切出，'
+    '你不複製原文、不改步驟、不建連接；連接由程式依各步supports建立。'
+    'kind：字詞、原文、經文結構等事實→observation，填observation_type；他所反駁的看法→position，statement寫那個看法，'
+    'attribution寫持有者（如「很多人」）；line以「问题：」開頭的→question，statement寫他問的問題；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
+    'statement用一兩句寫出這一步的內容，忠於他的話，不加他沒說的。'
+    'scripture_refs填他在這一步親口報出的經文出處（如「太5:3」）。沒有報章節的引文由程式合併已核實的出處。')
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
+    '先依原文判定本組主要結論是哪條Claim；本組其他Claim是分論點，以supports或qualifies'
+    '連到它直接支持的Claim（主要結論或另一分論點），使每條分論點都有路線通到主要結論，不只用contextualizes。'
+    '他陳述的問題或張力不是解答的論據，不以supports連到解答。沿用的其他組Claim不掛在本組分論點底下；只因離題提到而沿用的，本組不為它建連接。'
     '每條一次輸出from_id、to_id、relation_type及完整但簡短reason，方向由端點表達。'
     '不要重複completed_connections。只使用提供的端點，不重抽Claim或材料。'
     '對local_observation_ids逐項判argument_role並給簡短理由，恰好一次。'
@@ -140,11 +200,22 @@ def compact_material_prompt():
         '每個本組sentence_id必須被覆蓋或列入excluded_sentences，不能兩者兼有，不能遺漏；不列參考段落的句子。').replace(
         'not_extracted給具體reason與既有reason_code；不得為避免處理而全排除。',
         'excluded_sentences每句只列一次，給具體reason與既有reason_code；不得為避免處理而全排除。'
-        '不輸出逐句status、covered_by、null或制式reason；程式只展開你明示的覆蓋關係，不從引文自動推定內容已保存。')
+        '不輸出逐句status、covered_by、null或制式reason；程式只展開你明示的覆蓋關係，不從引文自動推定內容已保存。'
+        'duplicate_of須在duplicate_of_record_id指名本次生成或existing_materials裡、錨點已保存同一意思的那筆材料；'
+        'Claim候選的statement只是摘要，不是來源，指名Claim或不指名都會被程式退回；其他reason_code填null。'
+        '教授重述或展開同一論點時，各段都作為同一筆材料的anchors保存（可多段），不丟掉任何一段。')
 
 
-def expand_material_audit(result, sentence_ids):
-    """Expand explicit model decisions, never infer coverage from source quotes."""
+def expand_material_audit(result, sentence_ids, keepers=()):
+    """Expand explicit model decisions, never infer coverage from source quotes.
+
+    `duplicate_of` is terminal without a human because a machine can verify it
+    (sentence_ledger_vocabulary): it names the record whose SourceFragment keeps
+    the same meaning. `keepers` are those records beyond this result's own
+    materials -- existing materials, or Claims whose statement SourceFragments the
+    program binds. Naming anything else, or nothing, leaves the passage anchored
+    nowhere: his first answer to 「什麼是謙卑？」 (2011 NYSC 二-1) was lost so."""
+    keep={r.get(IDS[col]) for col in COLLECTIONS[:4] for r in result.get(col,[])}|set(keepers);keep.discard(None)
     result=deepcopy(result);expected=set(sentence_ids);covered={};excluded={};seen=set()
     for row in result.pop('coverage_by_record'):
         rid=row['record_id'];ids=row['sentence_ids']
@@ -158,6 +229,9 @@ def expand_material_audit(result, sentence_ids):
             raise ValueError('compact audit has duplicate, foreign or also-covered exclusion')
         if row['reason_code'] not in d.REASON_CODES or not row['reason'].strip():
             raise ValueError('compact audit exclusion requires a valid reason')
+        if row['reason_code']=='duplicate_of' and row.get('duplicate_of_record_id') not in keep:
+            raise ValueError(f"{sid}: duplicate_of must name the record whose SourceFragment keeps it, "
+                             f"got {row.get('duplicate_of_record_id')!r}")
         excluded[sid]=row
     if set(covered)|set(excluded)!=expected:raise ValueError('compact audit omitted a source sentence')
     result['sentence_audit']=[{'sentence_id':sid,'status':'extracted','covered_by':covered[sid],
@@ -288,32 +362,335 @@ def attach(response, connections):
     return additional
 
 
-def bind_conclusions(package,candidates,projection):
-    """Retain the Claim's own selected source, not just its supporting passages."""
+def bind_conclusions(package,candidates,projection,statements=None):
+    """Retain the Claim's own selected source, not just its supporting passages.
+
+    `statements` adds every passage where he says the Claim itself (steps-first
+    claim_text), in his order after the selected conclusion anchor."""
     namespace=package['extraction']['record_namespace'];sid=package['source_documents'][0]['source_id']
     fragments=package['source_fragments']
     for alias,candidate in candidates.items():
-        cid=namespace+'-'+alias;anchor=candidate['conclusion_anchor']
-        fragment=next((p for p in fragments if p['paragraph_key']==anchor['segment_index']
-            and p['verbatim_excerpt']==anchor['verbatim_excerpt']),None)
-        if fragment is None:
-            fid='FR-'+e.digest([sid,cid,anchor])[:32]
-            fragment=x._anchored_fragment(fragment_id=fid,source_id=sid,anchor=anchor,
-                source_rows=projection.body_rows,visual_blocks={},source_sha256=projection.body_sha256)
-            fragments.append(fragment)
+        cid=namespace+'-'+alias;own=[]
+        for anchor in [candidate['conclusion_anchor']]+list((statements or {}).get(alias,[])):
+            fragment=next((p for p in fragments if p['paragraph_key']==anchor['segment_index']
+                and p['verbatim_excerpt']==anchor['verbatim_excerpt']),None)
+            if fragment is None:
+                fid='FR-'+e.digest([sid,cid,anchor])[:32]
+                fragment=x._anchored_fragment(fragment_id=fid,source_id=sid,anchor=anchor,
+                    source_rows=projection.body_rows,visual_blocks={},source_sha256=projection.body_sha256)
+                fragments.append(fragment)
+            if fragment['fragment_id'] not in own:own.append(fragment['fragment_id'])
         claim=next(p for p in package['claims'] if p['claim_id']==cid)
         from backend.api.canonical_repository.postgres_store import normalize_package
         records={col+'/'+oid:{'payload':p,'retired':False} for col,values in normalize_package(package).items() for oid,p in values.items()}
         observation_ids={p['observation_id'] for p in package['observations']}
         source_candidate={'evidence_step_ids':claim['evidence_step_ids'],
-            '_statement_fragment_ids':[fragment['fragment_id']],
+            '_statement_fragment_ids':own,
             '_observation_ids':[r['from_id'] for r in package['knowledge_relations']
                 if r['to_id']==cid and r['relation_type']=='supports' and r['from_id'] in observation_ids]}
         claim['occurrences']=f.c.candidate_occurrences(source_candidate,records,sid)
 
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False):
+def citation_listing(source_id, paragraphs, root, ports):
+    """The verse list for this source, made by the existing citation code
+    (claim_flash_citations: spoken references, readings, introduced quotes).
+    A run does not split his argument without it."""
+    from backend.pipeline import claim_flash_citations as c
+    listing = c.build(None, {source_id: {'paragraphs': {pk: {'text': t} for pk, t in paragraphs.items()}}},
+                      source_id, Path(root)/'citations', ports)
+    if not (Path(root)/'citations'/'citations.json').exists() or 'citations' not in listing:
+        raise ValueError('scripture citation list was not generated')
+    return listing
+
+
+def cited_sentences(listing, sentences, paragraphs):
+    """sentence_id -> verses: the sentences that carry a verse he cites explicitly.
+    A chapter named on its own (「我們今天開始來看第十六章」) is an opening, not a verse."""
+    by_pk = defaultdict(list)
+    for v in sentences:
+        by_pk[v.segment_index].append(v)
+    out = defaultdict(list)
+    for c in listing['citations']:
+        if c['key'][2] is None or c['paragraph_key'] not in by_pk:
+            continue
+        text = paragraphs[c['paragraph_key']]
+        # The cited sentence can open with the previous quote's closing mark (「」再看一節聖經」).
+        quote = c['quote'].strip().lstrip('」』）)').strip()
+        at = text.find(quote)
+        if at < 0:
+            raise ValueError(f"citation sentence not found in {c['paragraph_key']}: {c['quote'][:20]}")
+        end = at + len(quote)
+        for v in by_pk[c['paragraph_key']]:
+            if v.char_start is not None and v.char_start < end and at < v.char_end and c['ref'] not in out[v.sentence_id]:
+                out[v.sentence_id].append(c['ref'])
+    return dict(out)
+
+
+def check_citations_held(listing, records, owned):
+    """Every verse he cites in these paragraphs shows in a SourceFragment of the argument:
+    a record's, or a Claim's own words."""
+    from backend.pipeline import claim_flash_citations as c
+    holy = c.default_bible()
+    shown = defaultdict(list)
+    for col in ('evidence_steps', 'observations', 'positions', 'questions'):
+        for r in records[col]:
+            for a in r['anchors']:
+                shown[a['segment_index']].append(a['verbatim_excerpt'])
+    for anchors in records.get('claim_statements', {}).values():
+        for a in anchors:
+            shown[a['segment_index']].append(a['verbatim_excerpt'])
+    missing = [x['ref'] for x in listing['citations']
+               if x['paragraph_key'] in owned and x['key'][2] is not None
+               and not c.visible(x, shown[x['paragraph_key']], holy)]
+    if missing:
+        raise ValueError(f'scripture he cites is not in any SourceFragment of the argument: {sorted(set(missing))}')
+
+
+def is_question(step):
+    return step['line'].lstrip().startswith(('问题：', '問題：'))
+
+
+def check_not_claims(result, claim_ids, own_ids):
+    """The Claim list is written before anyone reads sentence by sentence; this pass may
+    return an entry that is not a Claim (lecture 2: a 題外話 and verse readings used as
+    Evidence became Claims, and a step then had to support them). Returns the IDs removed."""
+    rows=result.get('not_claims',[])
+    gone=[r['claim_id'] for r in rows]
+    if len(gone)!=len(set(gone)) or not set(gone)<=set(own_ids):
+        raise ValueError('not_claims may name each Claim first made in this group once')
+    kept=set(claim_ids)-set(gone)
+    # A group may hold no Claim (lecture 2: the Time Magazine aside alone); handing
+    # back every Claim it had is what is refused.
+    if gone and not kept:raise ValueError('not_claims would leave this group without a Claim')
+    for r in rows:
+        if not r['why'].strip():raise ValueError(f"{r['claim_id']}: not_claims needs a reason")
+        if r['kind']=='digression':
+            if r['target']:raise ValueError(f"{r['claim_id']}: a 題外話 has no target")
+        elif r['target'] not in kept:
+            raise ValueError(f"{r['claim_id']}: {r['kind']} must name a Claim that stays")
+    if {c for r in result['claim_text'] for c in [r['claim_id']]}&set(gone):
+        raise ValueError('a Claim returned as not a Claim has no claim_text')
+    if {c for r in result['steps'] for c in r['supports']}&set(gone):
+        raise ValueError('no step may support a Claim returned as not a Claim')
+    return set(gone)
+
+
+def repair_sentence_ids(result, sentence_ids):
+    """A sentence ID is its paragraph and a number unique in the lecture (S0015#322).
+    Lecture 6 G004: GPT wrote S0016#322 for S0015#322, the right number under the
+    next paragraph. An unknown ID whose number names exactly one sentence of this
+    group, not placed elsewhere in the reply, is that sentence; anything else is
+    left for check_steps to refuse. Returns the repairs, to be recorded."""
+    known=set(sentence_ids);by_number={}
+    for s in sentence_ids:by_number.setdefault(s.rsplit('#',1)[-1],[]).append(s)
+    rows=[r for part in ('steps','claim_text','other','digressions') for r in result.get(part,[])]
+    placed={s for r in rows for s in r['sentence_ids']}
+    repairs=[]
+    for r in rows:
+        for i,s in enumerate(r['sentence_ids']):
+            if s in known:continue
+            match=by_number.get(s.rsplit('#',1)[-1],[])
+            if len(match)==1 and match[0] not in placed:
+                r['sentence_ids'][i]=match[0];placed.add(match[0])
+                repairs.append({'written':s,'sentence_id':match[0]})
+    return repairs
+
+
+def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None, diagrams=()):
+    """Each sentence in exactly one place; supports name real Claims or steps;
+    a sentence carrying scripture he cites belongs to an argument step."""
+    gone=check_not_claims(result, claim_ids, claim_ids if own_ids is None else own_ids)
+    claim_ids=[c for c in claim_ids if c not in gone]
+    ids=[r['step_id'] for r in result['steps']]
+    if len(ids)!=len(set(ids)) or not all(i.strip() for i in ids) or set(ids)&set(claim_ids):
+        raise ValueError('argument steps need unique step IDs distinct from Claim IDs')
+    placed=[s for part in ('steps','claim_text','other','digressions') for r in result.get(part,[]) for s in r['sentence_ids']]
+    if len(placed)!=len(set(placed)) or set(placed)!=set(sentence_ids):
+        raise ValueError('argument steps must place every sentence exactly once')
+    for r in result['steps']:
+        if not r['sentence_ids'] or not r['line'].strip():raise ValueError('argument step needs sentences and a line')
+        if r['line'].count('↔')>1:raise ValueError(f"argument step {r['step_id']} holds two comparisons; split it")
+        if not set(r['supports'])<=set(ids)|set(claim_ids)-{r['step_id']}:raise ValueError('argument step supports unknown Claim or step')
+    if not {r['claim_id'] for r in result['claim_text']}<=set(claim_ids):raise ValueError('claim_text names an unknown Claim')
+    # The package rule: every Claim needs Evidence that supports it directly.
+    # An open question names the Claims that answer it; that is not support for them.
+    unsupported=set(claim_ids)-{c for r in result['steps'] if not is_question(r) for c in r['supports']}
+    # Owner 2026-11-17: in Q&A he often answers in a sentence and gives no argument.
+    # The Claim prompt already says to record such an answer as he gave it, without
+    # reasons; it needs his own words and a question it answers, not a made-up step.
+    answers={c for r in result['steps'] if is_question(r) for c in r['supports']}
+    stated={r['claim_id'] for r in result['claim_text'] if r['sentence_ids']}
+    short=(unsupported&answers&stated)
+    unsupported-=short
+    if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
+    result['answer_only']=sorted(short)
+    if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
+    if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
+        raise ValueError('a 題外話 needs sentences, a kind and a reason')
+    # Owner 2026-11-16: any element of the argument may hold it (Evidence, Question,
+    # Position, a Claim's own words); filler and a 題外話 may not.
+    loose = sorted(s for part in ('other', 'digressions') for r in result.get(part, [])
+                   for s in r['sentence_ids'] if s in scripture)
+    if loose:
+        raise ValueError(f'scripture he cites must be in the argument, not filler or a 題外話: {loose}')
+    # #812: his diagram is evidence he gave; it is not filler, a 題外話 or a Claim's own words.
+    misplaced = sorted(s for part in ('claim_text', 'other', 'digressions') for r in result.get(part, [])
+                       for s in r['sentence_ids'] if s in diagrams)
+    if misplaced:
+        raise ValueError(f'his diagram must be in an argument step: {misplaced}')
+    return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
+
+
+def step_fragments(sentence_ids, by_id, paragraphs, visuals=None):
+    """Cut each step's SourceFragments from the transcript; nothing is copied by a model.
+
+    Consecutive sentences in one paragraph become one fragment. A fragment is
+    stored by its text alone, so a run that also occurs earlier in the paragraph
+    is widened by the sentences before it until it names one place.
+
+    A sentence that is one of his attested diagrams (#812) becomes a visual
+    anchor citing every literal fact of that SVG; the compiler binds the raw SVG."""
+    anchors=[]
+    for s in sentence_ids:
+        if getattr(by_id[s],'source_modality','spoken')=='visual':
+            block=(visuals or {})[by_id[s].segment_index]
+            anchors.append({'segment_index':block.locator,'start_time':None,'end_time':None,'verbatim_excerpt':'',
+                'source_modality':'visual','visual_fact_ids':[str(f['fact_id']) for f in block.facts]})
+    sentence_ids=[s for s in sentence_ids if getattr(by_id[s],'source_modality','spoken')!='visual']
+    for pk in dict.fromkeys(by_id[s].segment_index for s in sentence_ids):
+        row=[v for v in by_id.values() if v.segment_index==pk]
+        picked=sorted(row.index(by_id[s]) for s in sentence_ids if by_id[s].segment_index==pk)
+        runs=[[picked[0]]]
+        for i in picked[1:]:
+            if i==runs[-1][-1]+1:runs[-1].append(i)
+            else:runs.append([i])
+        text=paragraphs[pk]
+        for run in runs:
+            first,last=run[0],run[-1]
+            while text.find(text[row[first].char_start:row[last].char_end])!=row[first].char_start:
+                if first>0:first-=1
+                elif last+1<len(row):last+=1
+                else:raise ValueError(f'{pk}: cannot make a unique SourceFragment')
+            anchors.append({'segment_index':pk,'start_time':None,'end_time':None,
+                'verbatim_excerpt':text[row[first].char_start:row[last].char_end]})
+    return anchors
+
+
+UNNAMED_HOLDER='有人'
+
+RELATION_WORDS = {'inside': '「{0}」在「{1}」框內', 'above': '「{0}」在「{1}」之上', 'left_of': '「{0}」在「{1}」左邊',
+                  'arrow': '箭頭從「{0}」指向「{1}」', 'overlap': '「{0}」與「{1}」兩圈重疊'}
+
+
+def diagram_text(block):
+    """What the model reads for one of his diagrams: its words and its structure (#812).
+
+    Read from the SVG by the program (svg_diagram, eval E3); the sentence ID stays the
+    one the audit expects, so the diagram is placed like any sentence."""
+    from backend.pipeline.svg_diagram import read
+    seen = read(block.raw_svg)
+    parts = []
+    for kind, *rest in seen['relations']:
+        if kind == 'column':
+            parts.append(f"「{rest[0]}」下列：" + '、'.join(f'「{v}」' for v in rest[1]))
+        elif kind == 'inside_both':
+            parts.append(f"「{rest[0]}」在" + '與'.join(f'「{v}」' for v in rest[1]) + '兩圈之內')
+        else:
+            parts.append(RELATION_WORDS[kind].format(*rest))
+    return (f"他的圖（非口述，{block.locator}）。圖上文字：" + '；'.join(seen['texts'])
+            + ('。結構：' + '；'.join(parts) if parts else '') + '。')
+
+
+def merge_scripture_refs(existing, sentence_ids, scripture):
+    """Preserve stated references and add verified citations anchored to these sentences."""
+    from backend.api.scripture import reference_slugs
+
+    merged = list(existing)
+    seen = {tuple(reference_slugs(ref)) or (ref,) for ref in merged}
+    for sid in sentence_ids:
+        for ref in scripture.get(sid, ()):
+            key = tuple(reference_slugs(ref)) or (ref,)
+            if key not in seen:
+                merged.append(ref)
+                seen.add(key)
+    return merged
+
+
+def build_step_records(steps, records, sentences, paragraphs, visuals=None, *, scripture=None):
+    """Compile steps + typed records to the grouped package format the flow already accepts."""
+    f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
+    by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
+    out={'questions':[],'positions':[],'observations':[],'evidence_steps':[],'coverage_by_record':[],'excluded_sentences':[],'connections':[]}
+    # A step that only lays out a question he raises proves nothing yet: it is context
+    # for that Question, not load-bearing Evidence (G03: 「這些話是從以賽亞的話來的」).
+    asked={s['step_id'] for s in steps['steps'] if kind[s['step_id']]['kind']=='question'}
+    proves=lambda step:any(t not in asked for t in step['supports'])
+    for step in steps['steps']:
+        sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs,visuals)
+        if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
+        refs = merge_scripture_refs(r['scripture_refs'], step['sentence_ids'], scripture or {})
+        if r['kind']=='observation':
+            if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
+            out['observations'].append({'observation_id':sid,'statement':r['statement'],'observation_type':r['observation_type'],
+                'argument_role':'load_bearing' if proves(step) else 'background','scripture_refs':refs,'anchors':anchors})
+        elif r['kind']=='evidence':
+            if not r['step_type']:raise ValueError(f'{sid}: evidence needs step_type')
+            out['evidence_steps'].append({'evidence_step_id':sid,'statement':r['statement'],'step_type':r['step_type'],
+                'speaker':'professor','stance':'asserted','discourse_role':step['line'],
+                'support_eligibility':'eligible_candidate' if proves(step) else 'context_only',
+                'scripture_refs':refs,'anchors':anchors})
+        elif r['kind']=='question':
+            out['questions'].append({'question_id':sid,'text':r['statement'],'questioner':'professor',
+                'question_type':'open_question','answer_state':'answered' if step['supports'] else 'unanswered',
+                'answer_claim_ids':[],'anchors':anchors})
+        else:
+            # A 反方 step is someone else's view by its line; when his words do not name the
+            # holder the reply may leave it blank (lecture 6 G004, twice). 「有人」 says only that.
+            holder=r['attribution'].strip()
+            if not holder:
+                if not step['line'].startswith('反方'):raise ValueError(f'{sid}: position needs attribution')
+                holder=UNNAMED_HOLDER;out.setdefault('repairs',[]).append({'record_id':sid,'attribution':holder,'why':'holder not named in his words'})
+            out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':holder,'anchors':anchors})
+        out['coverage_by_record'].append({'record_id':sid,'sentence_ids':step['sentence_ids']})
+    positions={r['position_id'] for r in out['positions']}
+    questions={r['question_id'] for r in out['questions']}
+    for step in steps['steps']:
+        for target in step['supports']:
+            if step['step_id'] in questions:edge=(target,step['step_id'],'answers')
+            elif target in questions:edge=(step['step_id'],target,'contextualizes')
+            elif step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
+            elif target in positions:edge=(step['step_id'],target,'refutes')
+            else:edge=(step['step_id'],target,'supports')
+            out['connections'].append({'from_id':edge[0],'to_id':edge[1],'relation_type':edge[2],'reason':step['line']})
+    # His own words of a Claim are not its Evidence, but they are where he says
+    # it: they become the Claim's statement SourceFragments, so no sentence of
+    # the teaching is dropped (S0195-S0199, 他第一次定義謙卑).
+    out['claim_statements']={}
+    for row in steps['claim_text']:
+        out['claim_statements'].setdefault(row['claim_id'],[]).extend(step_fragments(row['sentence_ids'],by_id,paragraphs))
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'duplicate_of','duplicate_of_record_id':row['claim_id'],
+            'reason':f"{row['claim_id']}本身的話，保存為它的SourceFragment"} for s in row['sentence_ids']]
+    for row in steps['other']:
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'structural_markup','reason':row['why']} for s in row['sentence_ids']]
+    # A 題外話 is kept with its SourceFragments as a proposal; it is not Evidence.
+    out['digressions']=[]
+    for row in steps.get('digressions',[]):
+        out['digressions'].append({'kind':row['kind'],'why':row['why'],'sentence_ids':row['sentence_ids'],
+            'anchors':step_fragments(row['sentence_ids'],by_id,paragraphs),'review_status':'proposed'})
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'digression','reason':row['why']} for s in row['sentence_ids']]
+    return out
+
+
+def selected_groups(groups, keys, only_paragraphs):
+    """Group numbers (1-based) that own any of the given paragraphs: a test runs only these."""
+    wanted = set(only_paragraphs)
+    unknown = wanted - set(keys)
+    if unknown: raise ValueError(f'unknown paragraphs: {sorted(unknown)}')
+    return {n for n, g in enumerate(groups, 1) if wanted & set(ranges(g['paragraph_ranges'], keys))}
+
+
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None, visual_source_attestations=None):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -321,14 +698,22 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         path = Path(source_path).resolve(); raw = path.read_bytes(); source = json.loads(raw)
         projection = project_script(source.get('script', []))
-        if projection.visual_blocks: raise ValueError('creation visual attestation adapter required; use existing visual extraction')
+        # #812: only a diagram attested as his (professor_displayed_or_drawn_visual_source)
+        # may enter; an unattested or editorial one stops the run here.
+        validate_visual_source_attestations(projection, visual_source_attestations)
+        visuals = {b.locator: b for b in projection.visual_blocks}
+        if visuals and not steps_first: raise ValueError('a source with his diagrams runs steps-first')
         keys = [x.segment_locator(i) for i in range(len(projection.body_rows))]
         paragraphs = dict(zip(keys, [r['text'] for r in projection.body_rows]))
-        all_sentences = x.section_sentences(source, sections.Section(1,0,len(keys),'complete'))
+        all_sentences = [replace(v, text=diagram_text(visuals[v.segment_index])) if v.source_modality=='visual' else v
+                         for v in x.section_sentences(source, sections.Section(1,0,len(keys),'complete'))]
+        diagram_ids = {v.sentence_id for v in all_sentences if v.source_modality=='visual'}
+        row_of = lambda v: v.segment_index.split('/')[0]
         if not keys: raise ValueError('empty creation source')
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
         grouped_package=grouped_package or single_pass
+        if steps_first and (single_pass or not grouped_package):raise ValueError('steps-first divides the grouped package task; use --grouped-package')
         compact_audit=compact_audit or grouped_package
         contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package,single_pass=single_pass)
         material_prompt = single_pass_prompt() if single_pass else group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
@@ -336,10 +721,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
             'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
-            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]), 'supplied_groups': groups,
+            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]+([STEPS, STEP_RECORDS] if steps_first else [])), 'supplied_groups': groups,
             **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
             **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {}),
-            **({'single_pass_contract':SINGLE_PASS} if single_pass else {})})
+            **({'single_pass_contract':SINGLE_PASS} if single_pass else {}),
+            **({'argument_steps_contract':STEPS_CONTRACT} if steps_first else {}),
+            **({'visual_source_attestations':dict(sorted(visual_source_attestations.items()))} if visuals else {})})
         if (root/'creation-result.json').exists():
             saved = json.loads((root/'creation-result.json').read_text())
             package = json.loads((root/'candidate.json').read_text())
@@ -352,7 +739,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             initial = sections.plan_sections(list(paragraphs.values()), headings=projection.headings)
             contract = {'name': VERSION+'_groups', 'strict': True, 'schema': SemanticGroups.model_json_schema()}
             request = {'identity': ports.identity['gpt'], 'system': RULES+
-                '唯一任務：依論證將全部原文分組，小標題只是線索。每段恰好歸一組，不重疊不遺漏；'
+                '唯一任務：依論證將全部原文分組。小標題是編者按內容所分，是重要線索：不在一個小標題之內切開，除非他在那裡明顯轉向另一個問題；在小標題處分開、或跨小標題合併都可以。'
+                '分組界線只放在他轉向新問題的地方：開頭回指前文（如「你說這裡……」）、或接著講同一個對照或論證的段落，與前一段同組。一組是一個主要結論及他為建立它所講的全部內容：'
+                '一個論證跨幾個小標題就合為一組；只提出問題或預告要講什麼的段落，與回答它的段落同組；'
+                '插在別的論證中間、證明另一個結論的段落，歸它所證明的那組；兩處在證明同一結論就合為一組；'
+                '回答另一個問題、只用到別組已建立的結論的，另成一組；彼此不支持的主題分開。''與主題無關的生活經歷、閒談，歸它所在的那組，不另成組。'
+                '每段恰好歸一組，不重疊不遺漏；'
                 '後文回到同一論點可用多個範圍。每組提供title、topic_key、paragraph_ranges及整體reason。',
                 'input': {'task': 'creation_grouping', 'paragraphs': paragraphs,
                           'headings': [sections.section_payload(s) for s in initial.sections]}, 'schema': contract}
@@ -367,20 +759,28 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if single_pass and len(groups)!=1:
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        # A test of one argument (e.g. against a diagram gold key) runs only the groups that own
+        # its paragraphs. Later groups then see no Claims of the skipped groups. No candidate is built.
+        chosen = selected_groups(groups, keys, only_paragraphs) if only_paragraphs else None
+        listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
-        response = empty(); candidates = {}; group_claims = {}; group_materials = {}
+        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
+        new_claims = {}; not_claims = []; claim_seq = 0; answer_only = set()
         for n, group in enumerate(groups, 1):
+            if chosen is not None and n not in chosen: continue
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
                        'context':{pk:paragraphs[pk] for pk in context},
                        'existing_claims': {k:{'statement':v['statement'],'related_ranges':v['related_ranges']} for k,v in candidates.items()}}
+            shown = {loc: diagram_text(b) for loc, b in visuals.items() if b.segment_index in owned}
+            if shown: payload['diagrams'] = shown
             if single_pass:
                 payload={'group_id':gid,'batch_id':1,
                     'owned_paragraphs':{pk:paragraphs[pk] for pk in owned if paragraphs[pk].strip()},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in context},
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index}
-                        for v in all_sentences if v.segment_index in owned], 'existing_materials':{}}
+                        for v in all_sentences if row_of(v) in owned], 'existing_materials':{}}
                 whole=call(root/gid/'single-pass',ports,'creation_single_pass',payload,contracts['materials'],material_prompt,source_check)
                 single_outputs[gid]=deepcopy(whole);model_ids=[v['claim_id'] for v in whole['candidates']]
                 material_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in whole[col]}
@@ -392,7 +792,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             else:
                 result = call(root/gid/'claims', ports, 'creation_claims', payload, contracts['claims'], CLAIMS, source_check)
             e.save(root/gid/'claims'/'quote-calibration.json',calibrate(result['candidates'],paragraphs))
-            group_claims[gid] = []
+            group_claims[gid] = []; new_claims[gid] = []
             for candidate in result['candidates']:
                 cid = candidate.pop('existing_claim_id'); related = ranges(candidate['related_ranges'], keys)
                 if not related or not set(related) <= set(owned+context) or not candidate['support_hint'].strip():
@@ -401,7 +801,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 # Reuse the existing spoken-anchor validation via an Observation shell.
                 shell = empty(); shell['observations']=[{'observation_id':'anchor-check','statement':candidate['statement'],
                     'observation_type':'literary_context','argument_role':'background','scripture_refs':[], 'anchors':[anchor]}]
-                d.validate_response(shell,source,visible_locators=set(owned+context), require_load_bearing_relations=False)
+                d.validate_response(shell,source,visible_locators=set(owned+context), visible_visual_locators=set(), require_load_bearing_relations=False)
                 if anchor['segment_index'] not in related: raise ValueError('Claim conclusion missing from related range')
                 if cid is not None:
                     if cid not in candidates or candidates[cid]['statement'] != candidate['statement']:
@@ -409,7 +809,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     prior = candidates[cid]
                     prior['related_ranges'] = _ranges(set(ranges(prior['related_ranges'],keys)) | set(related), keys)
                 else:
-                    cid=f'CL{len(candidates)+1:04d}'; candidates[cid]=candidate
+                    # Numbered by a counter: a Claim the steps pass returns is removed, and its ID is not reused.
+                    claim_seq+=1; cid=f'CL{claim_seq:04d}'; candidates[cid]=candidate; new_claims[gid].append(cid)
                     response['claims'].append({k:deepcopy(candidate[k]) for k in BASE['claims']['items']['properties'] if k in candidate} |
                         {'claim_id':cid,'evidence_step_ids':[],'opposed_position_ids':[],'review_status':'candidate'})
                 group_claims[gid].append(cid)
@@ -418,23 +819,24 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         # Bounded material tasks keep output manageable without another full review.
         material_ordinal=0;connections=[]
         for n, group in enumerate(groups,1):
+            if chosen is not None and n not in chosen: continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
             group_materials[gid]=[]
             batches=[owned] if grouped_package else [];batch=[];count=0
             for pk in ([] if grouped_package else owned):
-                total=sum(v.segment_index==pk for v in all_sentences)
+                total=sum(row_of(v)==pk for v in all_sentences)
                 if total>24:raise ValueError('one paragraph exceeds material sentence budget; use existing sentence-slice source preparation')
                 if batch and count+total>24:batches.append(batch);batch=[];count=0
                 batch.append(pk);count+=total
             if batch:batches.append(batch)
             for ordinal, batch in enumerate(batches,1):
                 material_ordinal+=1
-                sentences=[v for v in all_sentences if v.segment_index in batch]
+                sentences=[v for v in all_sentences if row_of(v) in batch]
                 context=sorted({keys[j] for pk in batch for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(batch),key=keys.index)
                 reference=set(context)
                 for cid in group_claims[gid]:reference.update(ranges(candidates[cid]['related_ranges'],keys))
                 reference.update(a['segment_index'] for col in COLLECTIONS[:4] for row in response[col]
-                    for a in row.get('anchors',[]) if a['segment_index'] in owned)
+                    for a in row.get('anchors',[]) if a['segment_index'].split('/')[0] in owned)
                 reference-=set(batch)
                 payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch if paragraphs[pk].strip() or not grouped_package},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in keys if pk in reference},
@@ -442,7 +844,44 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
-                if single_pass:
+                if steps_first:
+                    scripture=cited_sentences(listing,sentences,paragraphs)
+                    steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
+                        'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
+                        'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
+                    # Only a Claim this group made and no other group reuses may be returned.
+                    own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
+                    repairs=repair_sentence_ids(steps,[v.sentence_id for v in sentences])
+                    if repairs:
+                        e.save(root/gid/'steps'/'sentence-id-repairs.json',{'repairs':repairs,'model_calls':0,
+                            'rule':'unknown ID whose number names exactly one unplaced sentence of this group'})
+                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own,diagrams=diagram_ids)
+                    answer_only.update(steps.pop('answer_only',[]))
+                    gone={r['claim_id'] for r in steps.get('not_claims',[])}
+                    for r in steps.get('not_claims',[]):
+                        not_claims.append({**r,'group_id':gid,'statement':candidates.pop(r['claim_id'])['statement']})
+                    response['claims']=[c for c in response['claims'] if c['claim_id'] not in gone]
+                    group_claims[gid]=[c for c in group_claims[gid] if c not in gone]
+                    text={v.sentence_id:v.text for v in sentences}
+                    # A group that is all 題外話 and filler has no step to type: no call.
+                    records={'records':[]} if not steps['steps'] else call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
+                        'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
+                            'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
+                        contracts['step_records'],STEP_RECORDS,source_check)
+                    result=build_step_records(steps,records['records'],sentences,paragraphs,visuals,scripture=scripture)
+                    check_citations_held(listing,result,set(owned))
+                    claim_by_id = {claim['claim_id']: claim for claim in response['claims']}
+                    for row in steps['claim_text']:
+                        claim = claim_by_id[row['claim_id']]
+                        claim['scripture_refs'] = merge_scripture_refs(
+                            claim['scripture_refs'], row['sentence_ids'], scripture)
+                    for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
+                    keepers=set(result.pop('claim_statements'))
+                    if result.get('repairs'):e.save(root/gid/'steps'/'attribution-repairs.json',{'repairs':result.pop('repairs'),'model_calls':0})
+                    digressions.extend({**d,'group_id':gid} for d in result.pop('digressions'))
+                elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
                         raise ValueError('material IDs collide with allocated Claim aliases')
@@ -457,7 +896,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 raw_sha=e.digest(single_outputs[gid]) if single_pass else e.digest(result)
                 local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
-                    result=expand_material_audit(result,[v.sentence_id for v in sentences])
+                    result=expand_material_audit(result,[v.sentence_id for v in sentences],
+                        keepers if steps_first else payload['existing_materials'])
                     e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'audit-expansion.json',{
                         'contract':COMPACT_AUDIT,'raw_response_sha256':raw_sha,'sentence_audit':result['sentence_audit']})
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
@@ -467,7 +907,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
-                if any(not any(a['segment_index'] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
+                if any(not any(a['segment_index'].split('/')[0] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
                     raise ValueError('new material requires an owned primary source; reference context is not a second extraction root')
                 d.validate_response(partial,source,visible_locators=set(batch)|reference,require_load_bearing_relations=False)
                 named=sections.namespace_response(partial,sections.Section(material_ordinal,0,0,group['title']))
@@ -493,6 +933,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 group_materials[gid].extend(r[IDS[col]] for col in COLLECTIONS[:4] for r in named[col])
                 for col in COLLECTIONS[:4]:response[col].extend(named[col])
                 response['sentence_audit'].extend(audits)
+        if chosen is not None:
+            partial={'version':VERSION,'status':'partial_test','groups':groups,'chosen_groups':sorted(chosen),
+                'only_paragraphs':sorted(only_paragraphs),'claim_candidates':candidates,'group_claim_ids':group_claims,
+                'not_claims':not_claims,'response':response,'claim_statements':claim_statements,'production_writes':0}
+            e.save(root/'partial-test-result.json',partial)
+            return partial
         for n, group in enumerate(groups,1):
             if grouped_package:continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
@@ -523,25 +969,32 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 if not ({edge['from_id'],edge['to_id']}&local):raise ValueError('connection is unrelated to its source group')
             connections.extend(result['connections'])
         additional=attach(response,connections)
-        d.validate_response(response,source,additional_relations=additional)
+        d.validate_response(response,source,additional_relations=additional,answer_only_claims=sorted(answer_only))
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
-            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS, model_id=ports.identity['gpt']['model'],
+            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS+(STEPS+STEP_RECORDS if steps_first else ''), model_id=ports.identity['gpt']['model'],
             reasoning_effort=ports.identity['gpt']['effort'],max_output_tokens=getattr(getattr(ports,'gpt',None),'max_output_tokens',6000),
             section_plan={'groups':groups},response_schema={'name':VERSION,'schema':contracts},
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
+        if visuals:identity['source_visual_sha256']=projection.visual_content_sha256
         source_check()
         package=x.compile_package(transcript_id=source_id,transcript_path=path,transcript=source,raw=raw,
-            response=response,extraction=identity,additional_relations=additional)
-        bind_conclusions(package,candidates,projection)
+            response=response,extraction=identity,additional_relations=additional,
+            visual_source_attestations=visual_source_attestations if visuals else None)
+        bind_conclusions(package,candidates,projection,claim_statements)
         validate_merged_package(package,native_relations=True);source_check()
+        e.save(root/'digression-proposals.json',{'contract':STEPS_CONTRACT,'proposals':digressions});
+        if steps_first:e.save(root/'not-claims.json',{'contract':STEPS_CONTRACT,'returned':not_claims})
         e.save(root/'extraction-response.json',response);e.save(root/'additional-relations.json',additional);e.save(root/'candidate.json',package)
         result={'version':VERSION,'status':'creation_complete','candidate_path':str(root/'candidate.json'),
             'candidate_sha256':e.digest(package),'source_id':package['source_documents'][0]['source_id'],
             'source_file_sha256':hashlib.sha256(raw).hexdigest(),'groups':groups,
             'claim_candidates':candidates,'group_claim_ids':group_claims,
-            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted'}
+            **({'not_claims':not_claims} if steps_first else {}),
+            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted',
+            **({'scripture_citations':{'listed':len(listing['citations']),'unresolved':len(listing['unresolved']),
+                'all_in_argument_fragments':True}} if listing else {})}
         from backend.pipeline.claim_flash_flow import accounting
         result['accounting']=accounting(root,getattr(ports,'root',None))
         result['wall_seconds_this_invocation']=round(time.monotonic()-started,3)
@@ -560,14 +1013,20 @@ def main():
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
     parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
+    parser.add_argument('--steps-first',action='store_true',help='Divide each group into argument steps; GPT only types each step, the program cuts SourceFragments and links')
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
+    parser.add_argument('--visual-attestations',help="JSON {locator: raw SVG SHA}: diagrams the owner attested as his (#812); any other diagram stops the run")
+    parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
+    client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first,
+               only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None,
+               visual_source_attestations=json.loads(Path(args.visual_attestations).read_text()) if args.visual_attestations else None)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)

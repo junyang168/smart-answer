@@ -13,6 +13,7 @@ import unicodedata
 from opencc import OpenCC
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.api.canonical_repository.source_claim_membership import occurrence_source
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_relation_refresh as relations
 from backend.pipeline import claim_context_refresh as attached
@@ -213,7 +214,9 @@ def anchors(eids, records, sid, *, source_binding=None):
             if verify_current_source_binding(binding)!=source_binding:
                 raise ValueError('Claim occurrence source binding differs from exact editorial proof')
             binding=source_binding
-        source = e.source_snapshot(binding,source=doc)
+        # A source with his attested diagrams (#812) is read with them; source_snapshot
+        # still checks every attestation and descriptor against the registered document.
+        source = e.source_snapshot(binding,source=doc,visual_context=bool(doc.get('visual_sources')))
         paragraphs = {key:value['text'] for key,value in source['paragraphs'].items()}
     for eid in eids:
         evidence = records['evidence_steps/' + eid]['payload']
@@ -234,7 +237,7 @@ def anchors(eids, records, sid, *, source_binding=None):
 def refresh_occurrences(claim, eids, records, sid, *, source_binding=None):
     current = anchors(eids, records, sid,source_binding=source_binding)
     old = claim.get('occurrences', [])
-    if any(o.get('source_id') not in source_aliases(records, sid) for o in old):
+    if any(occurrence_source(o) not in source_aliases(records, sid) for o in old):
         raise ValueError('legacy cross-source Claim requires explicit reconciliation')
     available = current[0]['anchors']
     updated, count = deepcopy(old), 0

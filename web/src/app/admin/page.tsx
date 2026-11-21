@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   BookOpen,
   CalendarDays,
+  ClipboardCheck,
   FileText,
   Library,
   ListVideo,
@@ -32,6 +33,7 @@ const groups: AdminGroup[] = [
     icon: BookOpen,
     accent: "bg-sky-100 text-sky-700",
     items: [
+      { title: "同工審閱", description: "聽一段王教授的講課，判斷底色的幾句是理由、結論還是題外話。", href: "/admin/argument-review" },
       { title: "批次轉錄", description: "查看影音檔案狀態、轉錄進度與待處理事項，並開啟完成稿校對。", href: "/admin/media-batches" },
       { title: "講道稿件", description: "管理講道逐字稿、認領狀態與發布流程。", href: "/admin/surmons" },
       { title: "講道系列", description: "建立系列並整理系列內的講道內容。", href: "/admin/surmon_series" },
@@ -78,6 +80,7 @@ const groups: AdminGroup[] = [
 ];
 
 const quickLinks = [
+  { title: "同工審閱", href: "/admin/argument-review", icon: ClipboardCheck },
   { title: "批次轉錄", href: "/admin/media-batches", icon: ListVideo },
   { title: "王教授文庫", href: "/admin/wang", icon: BookOpen },
   { title: "講稿整理", href: "/admin/notes-to-sermon/series", icon: FileText },

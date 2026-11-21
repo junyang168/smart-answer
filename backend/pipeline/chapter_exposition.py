@@ -45,12 +45,15 @@ MIN_PIECE_CHARS = 5
 KINDS = ("釋經", "神學", "應用")
 
 DEFAULT_MODEL = "claude-opus-5-5"
+# Owner 2026-11-18: whole-PPT generation/revision may wait up to ten minutes.
+CHAPTER_GPT_TIMEOUT_SECONDS = 600
 
 
 def chapter_client(model: str):
     if model.startswith("gpt-"):
         from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-        return CodexSubscriptionClient(model=model, reasoning_effort="high")
+        return CodexSubscriptionClient(model=model, reasoning_effort="high",
+                                       timeout_seconds=CHAPTER_GPT_TIMEOUT_SECONDS)
     from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
     return ClaudeSubscriptionClient(model=model)
 
@@ -570,6 +573,10 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="只跑这几堂；写全名或结尾，如 （二）3",
     )
+    parser.add_argument("--instance-change-set", help="按新庫完整頂層論證主題選材")
+    parser.add_argument("--eval-case", type=Path, help="整组选材的固定 Eval 案例")
+    parser.add_argument("--target-section", help="目標小段，例如 mat-5-1-12")
+    parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--force", action="store_true", help="逐字稿没变也重跑")
     args = parser.parse_args(argv)
@@ -584,12 +591,34 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if not lectures:
         parser.error("没有符合的讲道")
-    store = PostgresKnowledgeStore()
     client = chapter_client(args.model)
+    if args.instance_change_set:
+        if len(lectures) != 1 or args.target_section not in chapter.sections or not args.data_dir:
+            parser.error("論證選材須指定一堂、章內小段及隔離 --data-dir")
+        from backend.pipeline import chapter_argument_selection
+        from backend.pipeline.argument_review import connect
+        with connect() as conn:
+            record = chapter_argument_selection.decide(chapter, args.target_section, conn=conn,
+                change_set_id=args.instance_change_set, data_base_dir=args.data_dir, client=client, lecture=lectures[0])
+        if record["lecture"] != lectures[0]:
+            parser.error("ChangeSet 與指定講道不同")
+        if args.eval_case:
+            evaluation = chapter_argument_selection.evaluate(record, json.loads(args.eval_case.read_text()))
+            evaluation_path = args.data_dir.parent / "selection" / "eval.json"
+            evaluation_path.write_text(json.dumps(evaluation, ensure_ascii=False, indent=2))
+            if not evaluation["passed"]:
+                print(json.dumps(evaluation, ensure_ascii=False))
+                return 1
+        print(json.dumps({"lecture": record["lecture"], "groups": record["raw_decisions"],
+                          "editor_review": record["editor_review"]}, ensure_ascii=False))
+        return 0
+    if args.target_section or args.eval_case:
+        parser.error("--target-section / --eval-case 須與 --instance-change-set 一起使用")
+    store = PostgresKnowledgeStore()
     failed = False
     for lecture in lectures:
         report = decide(
-            chapter, lecture, store=store, data_base_dir=Path(DATA_BASE_PATH),
+            chapter, lecture, store=store, data_base_dir=args.data_dir or Path(DATA_BASE_PATH),
             client=client, force=args.force,
         )
         print(json.dumps(report, ensure_ascii=False))

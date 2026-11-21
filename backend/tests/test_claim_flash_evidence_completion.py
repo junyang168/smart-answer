@@ -381,3 +381,29 @@ def test_empty_repair_correction_only_resends_affected_item(campaign):
     replay.new_gpt_identity = ports.new_gpt_identity
     assert eo.run(store, 'S', plan, root / 'corrected', replay, previous, apply=True)['status'] == 'completed'
     assert replay.calls == []
+
+
+class PrayerPorts(Ports):
+    """GPT judges the only paragraph to be his prayer (owner 2026-11-17: Jev decides nothing; 43f41a42)."""
+    def repair(self,request):
+        if request['input']['task']=='prayer_check':
+            self.calls.append(('gpt',request))
+            return {'items':[{'job_id':j['job_id'],'decision':'prayer','reason':'test'} for j in request['input']['jobs']]}
+        return super().repair(request)
+
+
+@pytest.mark.prayer
+def test_prayer_is_not_material_and_prayer_only_records_are_listed(campaign):
+    store,root,_,plan,previous=campaign;ports=PrayerPorts()
+    result=eo.run(store,'S',plan,root/'run',ports,previous,apply=False)
+    assert result['prayer_only_records']==sorted('evidence_steps/'+x for x in ('BIND','BOTH','E','KEEP'))
+    assert not [r for role,r in ports.calls if role=='gpt' and r['input']['task']=='evidence_coverage_repair']
+    assert json.loads((root/'run'/'intent.json').read_text())['prayer_contract']==eo.PRAYER_CONTRACT
+
+
+def test_in_prayer_needs_the_whole_quote_inside_the_prayer():
+    text='奉主耶穌基督的名求，阿們。我們今天看馬太福音。'
+    spans={0:[(0,12)]}
+    assert eo.in_prayer(spans[0],text,'奉主耶穌基督的名求')
+    assert not eo.in_prayer(spans[0],text,'我們今天看馬太福音')
+    assert not eo.in_prayer([],text,'奉主耶穌基督的名求')

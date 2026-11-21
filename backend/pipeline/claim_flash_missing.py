@@ -39,6 +39,15 @@ class Discovery(BaseModel):
     reason:str=Field(min_length=1)
 
 
+def lower_dispositions(candidates):
+    """Per-record view of GPT's retain/represented answers, for the reverse lookup (§4.3)."""
+    return [{'object_key':key,'disposition':item['action'],
+             **({'claim_id':item['claim_id']} if item['action']=='represented' else {}),
+             'reason':item['reason'],'stage':'missing_claims'}
+            for item in candidates if item['action'] in {'retain_evidence','represented'}
+            for key in item['support_keys']]
+
+
 def discovery_material(ports,jobs,shared):
     """Lossless field-name packing; preserve all same-sermon identity references."""
     request={'identity':ports.identity['gpt'],'system':PROMPT,'schema':Discovery.model_json_schema(),
@@ -318,7 +327,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         with store.connect() as conn:
             conn.execute('SET TRANSACTION READ ONLY')
             rows=conn.execute("SELECT object_id,revision,content_sha256,payload,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection='claims' AND retired_at IS NOT NULL AND payload @> ANY(%s::jsonb[])",
-                ([json.dumps({'occurrences':[{'source_id':a}]}) for a in aliases],)).fetchall()
+                (f.occurrence_needles(aliases),)).fetchall()
         for oid,rev,sha,p,retired in rows:
             key='claims/'+oid;records[key]={'revision':rev,'content_sha256':sha,'payload':p,'retired':retired};peers[key]=p
         read.update(peers)
@@ -431,7 +440,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         draft={'version':c.VERSION,'execution_mode':VERSION,'source_id':source_id,'claim_ids':ids,'status':'needs_attention' if pending else 'verified',
             'updates':question_updates,'new_claim_candidates':proposed,'new_relation_specs':relationships['new_relations'],
             'new_knowledge_relation_specs':new_lower,'retiring_keys':[],'question_links':[],'pending':pending,'applied':False,
-            'dispositions':dispositions,'statement_checks':checked,'attachment_checks':attachment['outcomes'],
+            'dispositions':dispositions,'lower_dispositions':lower_dispositions(dispositions),'statement_checks':checked,'attachment_checks':attachment['outcomes'],
             'claim_relation_discovery':discoveries,'claim_relation_checks':relationships['outcomes'],
             'completion_scope':'group_missing_claims_only','claim_qualification':'not_granted'}
         draft['pending']+=flash.new_claim_support_findings(draft,records)

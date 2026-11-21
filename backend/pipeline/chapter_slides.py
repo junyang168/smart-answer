@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -31,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline import chapter_exposition, chapter_material
+from backend.pipeline import chapter_exposition, chapter_material, chapter_slide_arguments
 from backend.pipeline.chapter_material import Chapter
 
 SCHEMA_VERSION = "chapter_slides_v3"
@@ -39,20 +40,45 @@ SCHEMA_VERSION = "chapter_slides_v3"
 DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 
 MOST_POINTS = 4
+#: 負責人要求一段講論留在同一張（one_slide 案例）時，這一張最多幾條：他的裁定優先於四條上限。
+MOST_CASE_POINTS = 6
 FEWEST_POINTS = 2
 
 SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之前的完整原文範圍及全部要點命名，涵蓋整張的共同主題，不只取開頭、最後一句、某一條 Claim 或其中一個子段。
+- 標題是整張的摘要，換張時即可顯示，包括教授在本張稍後才完整講出的答案或結論。
 - 講背景和整體結構、列出多段或比較多部分時，標題寫「背景與分段」「整體結構」或相應的共同主題；不能用「第一段」等局部名稱代替整體。
 - 只有這一張確實專講某一段，才以該段命名；不因下一張繼續講第二段，就把本張已講的整體分段縮成第一段。
 - 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
 
 
-POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這一點的句子，按這一張完整原文由前往後找。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
-- 介紹一段或提出一個問題時，從開始介紹、開始提問的那一句出現，不等到後面再把問題說完整。
-- 術語定義的要點從教授明確說出術語名稱的句子開始。若接著問「是什麼」再給定義，這幾句是同一段引入，sentence 標在命名句。
+ARGUMENT_COVERAGE_RULES = (
+    "用論證層和逐字稿確認：對每個承重結論，保留必要的理由，以及教授怎樣用理由推出結論。"
+    "一個步驟可能同時含事實、對照或首尾呼應，以及這些內容為何支持結論；意思需要分別保留。"
+    "只列理由和結論、只說兩段要連讀，或只填對 source，而未交代理由怎樣支持結論，仍是漏步驟。"
+    "推論可以合寫在一條要點，也可以用多條或相鄰投影片接續；相鄰張的要點合起來要能讀出兩者的關係。"
+    "不要求逐句拆寫或加固定連接詞，只保留教授實際講出的推理。"
+)
+
+
+POINT_TIMING_RULES = """要點的 sentence 標記教授首次實際說出這條文字所表達內容的句子，按這一張完整原文由前往後找；不是它所屬段落或 Evidence 步驟的開始句。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
+- 介紹或提問的要點，從開始介紹、開始提問的那一句出現；這不代表答案也可提前。若要點寫的是定義、推論答案或結論，必須等教授首次說出該實質內容，不得借用前面的提問、讀經或背景句作答案錨點。
+- 只介紹術語名稱或提出「是什麼」時，可顯示術語或問題；包含實質定義的要點，綁首次說出該定義的句子。需要時把提問與答案分成不同要點，不把尚未講出的答案塞在介紹要點中。
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
-- 不要把 sentence 綁到這一點講完後的歸納句。以開始引入這一點的位置為準。一條要點含幾個相隔較遠的新意思時，重新組織要點，使每條各有自己的開始位置。
+- 完整內容早已講出時，不必等後面的重述；若到歸納句才首次講出結論，就應綁該歸納句。不能以「不要綁歸納句」為由把尚未說出的結論提前。
+- 過晚和過早一樣是錯：他開始講一點，這條要點就要在那一句出現，不能等他講完後面幾句。
+- 一條要點只寫他在一處講出的一個意思。Evidence 步驟或合併的文字若包含他在不同句講出的幾個意思，拆成幾條，各綁各自首次講出的句子，不要合成一條等到最後一個意思講出。例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，S0017 才說「認識神之後有生命上的反應」；寫成兩條，分別綁 S0015 與 S0017，不寫成一條綁 S0017。拆開後超過四條時，從他換到下一點的那一句另起一張（負責人指定同一張的段落除外：那一張最多六條）；不得為了守四條上限刪去他講出的承重內容（問題的答案、對比的另一端、故事的結果）。
+- 合併、縮寫、補充要點或合併投影片後，舊 sentence 不再自動適用，逐條按上面規則重新核對。
+- 審稿意見要求提前時也套用同一規則；若該句尚未講出答案，保留正確錨點，不照錯誤意見前移。故事可先聽原聲，不為填滿畫面提前顯示後面的情節、對比或結論。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
+
+
+SLIDE_VOICE_RULES = """這是配合教授原聲的同步投影片，不是介紹教授觀點的第三人稱報告。
+- 教授本人的問題、理由、判斷和回答直接寫內容，省略「教授認為／教授指出／他說／他回答」等轉述框架；不機械改成「我認為」。
+- 省略的只是教授這個敘述主語，不刪否定、條件、程度、理由或結論；不要把原話的保留語氣加強。
+- 必須區分其他人的立場：反方用「有人主張……」或具體身分，並直接寫反駁的內容，不寫指涉不明的「他說錯了」。保羅、耶穌、聽眾、故事中人物等有必要的主語不可刪。
+- 聽眾提問可寫「問：……」，回答直接寫答案。故事中他人說的話仍標明人物，不能變成教授自己的結論。
+- 例如教授回答十誡問題時，寫「十誡也不必遵守」，不寫「他回答：十誡也不必遵守」；此例只規定敘述口吻，實際結論、適用範圍和論證必須取自本次原文。
+- 審閱逐條檢查：能否省掉教授轉述框架，同時仍看清誰的主張、反方立場、引文與判斷方向。不得為了省主語而混淆歸屬。"""
 
 
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
@@ -61,13 +87,17 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 
 分張：
 - 每張投影片從某一句開始（first），到下一張的第一句之前為止。第一張從第一句開始。
-- 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。
+- 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。若頁末只剩問句、下一頁才有回答，應把問句一起移到回答頁，不讓聽眾翻頁才找答案。反駁須明示否定或修正結論，不能僅列正面理由、讓聽眾自行猜出否定回答。
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
+
+呈現口吻：
+〈原聲投影片口吻〉
 
 要點（points，2 到 4 條，每條不超過 28 字）：
 - 每條寫 sentence，按他講的次序排，sentence 遞增。
 〈要點時間規則〉
 - 每條一個意思；同一張裡兩條不可說同一件事（例如「全與天國有關」和「都與天國有關係」只留一條）。
+- 完整與同步必須同時成立：不得為了把答案延後顯示而刪掉反方問題、推論理由、答案或故事要說明的道理。放不下時調整分張，不能以省略承重內容換取二到四條要點。輸出前按原文逐項回查問題、理由、答案與限定是否仍在。
 - 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
 - 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
 - 不重複前面投影片已經有的要點。
@@ -110,17 +140,116 @@ def for_lecture(prompt: str, lecture: str) -> str:
     return prompt
 
 
-def system_prompt(chapter: Chapter, lecture: str = "") -> str:
+INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語法與經文結構，寫入 inline_notes。
+經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。必須有可回查的原文字詞或文法解說依據；普通中文詞義、英文釋義或一般上下文解經，不因涉及某節經文就自動成為原文短註。這些意思留在要點；original 留空不能作為加入一般釋經短註的理由。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
+先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
+每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading 一律留空、explanation（一句短語，十五字以內，只說原文的意思或文法）。節下文字只佔一行，不重複經文或要點已有的話。無法核實的原文字形留空。
+教授糾正和合本譯法時，span 仍須選和合本實際存在的原字詞；更正的譯詞放 explanation 或要點，不可拿更正後的文字定位和合本。不要為一般譯法比較建立空內容的結構高亮。
+跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。original 欄只填本節實際使用的原文字詞或其轉寫；通常／其他地方的譯詞即使教授確實提到，也不能獨立掛在本節的 original 欄。一般譯法比較放要點；不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
+
+
+_SUBUNIT_POINT_SOURCE_RULE = """每條要點寫一個完整、可理解的論旨，可以概括連續幾句，保留本張原文的條件與因果。
+- 每條填 evidence_sentence，標出同張支持要點內容的原文。它用來核對內容。顯示位置另由程式與 Jev 確定。
+- 只有分開呈現能讓聽眾更容易跟上時，才拆成多條。先保留承重內容，如空間不足可分張。"""
+
+
+SUBUNIT_LOCAL_DISTINCTION_RULE = (
+    "同一條 Claim 若跨張出現，每張先從本張原文找教授正在區分的情況。"
+    "寫「不是／而是」「只有／才」時，先核對否定的到底是哪個行為或狀態，及教授說在甚麼條件下才成立。"
+    "可以縮短措辭，須保留這個否定對象和條件；不能縮成較前一步、範圍較寬的行為。"
+    "Claim 摘要只用來定位共同主題；前後張即使同屬一個主題，也不能用另一張的對比替換本張。"
+)
+
+
+SUBUNIT_LOCAL_ANSWER_RULE = (
+    "整理問答時，先核對本張原文中教授這一次的回答，分清聽眾的問題與教授的立場。"
+    "用本次回答的原句核對結論、理由和肯否，再寫成要點。"
+    "轉錄的「問：／答：」只標明有標出的發言。其間單獨的「對」「是啊」等短附和，"
+    "若說話者未標明或附和的對象不清，不能作教授確認前一句問題的依據。"
+    "此時可保留聽眾的問句，再寫有明確歸屬的回答；只寫回答本身確定說了甚麼。"
+    "同一問題在前後段落有不同說法時，前文只用來理解這一次在問什麼。"
+    "即使最後的結論相同，也不可拿前一段的理由替換這次的理由，"
+    "不可把「明說」改成「沒明說」，也不可從沉默推成教授在這裡沒有講的規則。"
+    "口語若省略主語、指涉或範圍不明，只寫本次原話能確定的意思。"
+    "不要替「可以」「明說」等補上一個未能確定的對象。"
+    "若把這句放在一個具體問題後面會讓讀者補出未確定的對象，即使照抄原話，也不要把它列成該問題的答案。"
+    "肯否或理由無法確定時，直接呈現本段明確的解釋或限制，讓原聲保留有歧義的部分。"
+    "如果本次回答沒有交代理由，只呈現他這次實際給的答案。"
+)
+
+
+def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False) -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
+    template = _SYSTEM_TEMPLATE
+    scope = ""
+    if chapter.slide_scope:
+        scope = "、".join(f"{n}:{a}–{b}" for _, n, a, b in
+                         map(chapter_material.verse_range, chapter.slide_scope))
+        template = (template.replace("第 〈章〉 章本身", "本單元主經文")
+                    .replace("第 〈章〉 章的哪幾節，格式「〈章〉:3-10」", "本單元的哪幾節，格式如「6:8-13」")
+                    .replace("講整章結構的，寫「〈整章〉」。", "列出實際解釋的各章節；跨章時分別列出各章的範圍。")
+                    .replace("第 〈章〉 章的逐字稿", f"{scope} 的逐字稿"))
     prompt = (
-        _SYSTEM_TEMPLATE.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        template.replace("〈要點時間規則〉", _SUBUNIT_POINT_SOURCE_RULE if subunit else POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+        .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
         .replace("〈整章〉", f"{number}:{start}-{end}")
         .replace("〈章〉", str(number))
     )
-    return for_lecture(prompt, lecture)
+    if subunit:
+        prompt = (prompt.replace("- 每條寫 sentence，按他講的次序排，sentence 遞增。", "按論述順序排列要點。")
+                  .replace("sentence 寫開始讀它的那一句；ref 寫", "每條只填 ref，由程式定位朗讀。ref 寫")
+                  .replace("完整與同步必須同時成立：不得為了把答案延後顯示而刪掉", "保留完整論證，不刪掉"))
+        prompt += "\n\n" + SUBUNIT_LOCAL_DISTINCTION_RULE + "\n\n" + SUBUNIT_LOCAL_ANSWER_RULE
+        prompt += "\n\n" + chapter_slide_arguments.EXPLICIT_PREMISE_RULE
+        prompt += "同一句原文有完整對照時，可以合寫成一條要點，無須另加一條。"
+    if scope:
+        prompt += f"\n本單元的經文範圍為 {scope}。保留第六、七章之間的原有論證；引用作論據的經文在 scriptures 照實記錄。"
+    notes = INLINE_NOTE_RULES
+    if subunit:
+        notes = (notes.replace("與出現時間", "")
+                 .replace("，將相關詞句綁到同一講解開始句", "")
+                 .replace("sentence（教授開始解釋的句子）", "evidence_sentence（支持短註的原文句）"))
+    return for_lecture(prompt, lecture) + "\n\n" + notes
+
+
+#: 程序核對不通過時，把問題交回模型改的次數上限。
+REPAIRS = 2
+MOST_POINT_CHARS = 40
+
+
+def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Claim 提綱模式下，每條要點多一個 source（它呈現的 Claim 或論證步驟）。"""
+    if not claim_context or claim_context.get("schema_version") != "chapter-slide-outline-context.v1":
+        return RESPONSE_SCHEMA
+    import copy
+    schema = copy.deepcopy(RESPONSE_SCHEMA)
+    point = schema["properties"]["slides"]["items"]["properties"]["points"]["items"]
+    point["properties"]["source"] = {"type": "string"}
+    point["required"].append("source")
+    if claim_context.get("scope") == "subunit":
+        properties = schema["properties"]["slides"]["items"]["properties"]
+        for spec in (point, properties["inline_notes"]["items"]):
+            spec["properties"]["evidence_sentence"] = spec["properties"].pop("sentence")
+            spec["required"] = ["evidence_sentence" if name == "sentence" else name for name in spec["required"]]
+        scripture = properties["scriptures"]["items"]
+        scripture["properties"].pop("sentence")
+        scripture["required"].remove("sentence")
+    if "diagram_spans" in claim_context:
+        if claim_context["diagram_spans"]:
+            schema["properties"]["slides"]["items"]["properties"]["points"].pop("maxItems", None)
+    elif refs := sorted({d["sha256"] for claim in claim_context["claims"]
+                         for d in claim.get("diagrams", []) if "svg" in d}):
+        slide = schema["properties"]["slides"]["items"]
+        slide["properties"]["diagram_ref"] = {"type": "string", "enum": ["", *refs]}
+        slide["required"].append("diagram_ref")
+    if routes := claim_context.get(chapter_slide_arguments.PLAN_KEY):
+        key = chapter_slide_arguments.BINDINGS_KEY
+        schema["properties"][key] = chapter_slide_arguments.binding_schema(routes)
+        schema["required"].append(key)
+    return schema
 
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -136,7 +265,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                     "points": {
                         "type": "array",
                         "minItems": FEWEST_POINTS,
-                        "maxItems": MOST_POINTS,
+                        "maxItems": MOST_CASE_POINTS,
                         "items": {
                             "type": "object",
                             "properties": {"sentence": {"type": "string"}, "text": {"type": "string"}},
@@ -163,6 +292,19 @@ RESPONSE_SCHEMA: dict[str, Any] = {
     "required": ["slides"],
     "additionalProperties": False,
 }
+
+
+_INLINE_FIELDS = {
+    **{name: {"type": "string"} for name in ("sentence", "scripture", "span", "original", "reading", "explanation")},
+    "verse": {"type": "integer"},
+}
+_SLIDE_SCHEMA = RESPONSE_SCHEMA["properties"]["slides"]["items"]
+_SLIDE_SCHEMA["properties"]["inline_notes"] = {
+    "type": "array",
+    "items": {"type": "object", "properties": _INLINE_FIELDS, "required": list(_INLINE_FIELDS),
+              "additionalProperties": False},
+}
+_SLIDE_SCHEMA["required"].append("inline_notes")
 
 
 def kept_pieces(decisions_record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -204,6 +346,7 @@ def _clock(seconds: float) -> str:
 
 
 def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: dict[str, Any] | None = None) -> str:
+    subunit = (claim_context or {}).get("scope") == "subunit"
     position = {piece["id"]: index for index, piece in enumerate(decisions_record["pieces"])}
     kept = kept_pieces(decisions_record)
     by_piece: dict[str, list[dict[str, Any]]] = {}
@@ -214,10 +357,101 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
     for piece in kept:
         if previous is not None and position[piece["id"]] != position[previous["id"]] + 1:
             lines.append("（……中間略去……）")
-        lines.append(f"〔{_clock(piece['start'])}〕")
+        if not subunit:
+            lines.append(f"〔{_clock(piece['start'])}〕")
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
-    if claim_context is not None:
+    if claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+        from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+        source_lines = sentences(kept)
+        owner_cases = resolve_cases(cases_for(lecture), source_lines,
+                                    partial=subunit)
+        source_by_id = {line['id']: line['text'] for line in source_lines}
+        if subunit:
+            owner_cases = [case for case in owner_cases if case["kind"] not in ("point", "not_before")]
+        if owner_cases:
+            scoped = [{**case, 'anchor_quotes': {key: source_by_id[case[key]] for key in ('at', 'from', 'to')
+                       if case.get(key) in source_by_id}} for case in owner_cases]
+            lines += ['# 本講已確認的 golden 約束',
+                      ('以下是負責人已裁定的特定案例。照各案例自己的條件處理，優先於一般規則。'
+                       if subunit else
+                       '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。'),
+                      json.dumps(scoped, ensure_ascii=False)]
+        from backend.pipeline.chapter_slide_claims import source_context_index
+        source_entries = source_context_index(claim_context, source_lines)
+        if subunit:
+            routes = chapter_slide_arguments.validate(
+                claim_context.get(chapter_slide_arguments.PLAN_KEY, []), source_lines)
+            lines += ["# 本子單元承重推論及原文位置", chapter_slide_arguments.BOUNDARY,
+                      "先按原文位置安排各張，再逐條確認理由、結論及兩者的關係能從投影片讀出。"
+                      "每條可由一條或幾條要點表達；source 填對不代表推論已寫出。"
+                      "承重的對照與推論須用要點交代。其他確有承重作用的原文也應保留。",
+                      json.dumps(routes, ensure_ascii=False)]
+            if routes:
+                lines += [chapter_slide_arguments.CHAIN_RULE,
+                          "交稿須有 argument_bindings。對每條推論填 id 和 point_sentences，列承載推論的要點 evidence_sentence。"
+                          "至少一個要點在結論原文所在的張。先讀這幾條要點，確認理由怎麼推出結論寫得清楚。"
+                          "例如『兩個要求衝突，因此選 A』仍缺一步。若原文靠比較輕重選 A，就把這個判準接上。"]
+            required = [{"sentence": rule["at"], "content": rule["why"]}
+                        for rule in owner_cases if rule["kind"] == "required_point"]
+            if required:
+                lines += ["以下是必須出現在對應投影片的要點，不可省略：", json.dumps(required, ensure_ascii=False)]
+        bounds = {rid: [entry['first'], entry['last']] for rid, entry in source_entries.items()}
+        lines += ['# 本講要點 source 的保留原文上下文範圍',
+                  '這是程序按實際保留原文編譯的可用範圍，不是新增支持證明。source 要相關、要點忠於原文，sentence 必須在該 source 的此範圍內。原始 anchors 的逐字引用可以較短，不要把旁邊同一片段的實際結論誤判為沒有位置。',
+                  json.dumps(bounds, ensure_ascii=False)]
+        lines += ["", "# 本堂講課提綱（論證層 Claims）",
+                  ("標題概括整張原文，可以寫出本張稍後講到的結論。" if subunit else
+                   "標題在 first 一換張就顯示，概括整張原文，可以寫出本張稍後講到的結論。"
+                   "定時要點的結論及故事結果等到首次講出時才顯示。"),
+                  "逐條保留限制、否定及適用範圍；術語不能用範圍更廣的上位詞代替。"
+                  + ARGUMENT_COVERAGE_RULES,
+                  "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
+                  ("按逐字稿分張；提綱決定結構，使聽眾看清整體：" if subunit else
+                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體："),
+                  "- 不另做本堂地圖或總覽：第一張照他開頭實際講的內容做，每一張都是他此刻在講的。",
+                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，按這張結構頁的完整內容命名。"
+                  + ("" if subunit else "定時要點中的上層 Claim 結論在原文首次講出時顯示。"),
+                  "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
+                  "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
+                  "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
+                  + ("evidence_sentence 填支持內容的原文句，顯示時間另行處理。"
+                     if subunit else
+                     "sentence 綁他講出這條要點內容的那一句；答案仍綁首次說出答案的那一句。") +
+                  "遵守本講 golden，同一張不可兩條綁同一句。"
+                  "這一句必須落在前列程序編譯的 source 上下文範圍內。"
+                  "own_passages 是他直接講這條 Claim 本身的地方（例如自問「什麼是謙卑？」再自己回答）；"
+                  + ("以該處原文支持要點。" if subunit else
+                     "他講到那裡時，畫面最新的要點要是 source 為這條 Claim 的要點，寫出他在那裡講的內容。"),
+                  "- 他講任何一步論證（某個 Claim 的 stated 句、own_passages 或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
+                  "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
+                  "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 是候選出處；只有本堂實際讀出或幾乎逐字引用的節數才放進投影片的 scriptures，不因舊提示包列了範圍就顯示未讀的節數，"
+                  + ("寫在他引用、讀出的投影片；同一段經文在同一張只填一次。" if subunit else
+                     "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。"),
+                  "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
+                  "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
+                  json.dumps({**{k: v for k, v in claim_context.items() if k != chapter_slide_arguments.PLAN_KEY}, "claims": [
+                      {**{k: v for k, v in claim.items() if k != "diagrams"},
+                       **({"diagrams": [{k: d[k] for k in ("title", "origin", "kind", "sha256")}
+                                        for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}
+                      for claim in claim_context["claims"]
+                  ]}, ensure_ascii=False)]
+        if claim_context.get("verified_scriptures"):
+            lines += ["verified_scriptures 是論證層已驗證的引文，程式依句子顯示。保留含這些句子的原文，"
+                      "不必重新辨認出處，也不必另外為同一處填 scriptures。"]
+        if "diagram_spans" in claim_context:
+            if spans := claim_context["diagram_spans"]:
+                lines += ["# 已定位的連續講圖範圍",
+                          "每段 first–last 必須連續留在同一張投影片。切換圖內的區塊只換要點，"
+                          "不換投影片。到 last 為止都保留這張，之後有原文就另起一張。首句可包含緊接的引入。"
+                          "圍繞整張圖整理少量完整要點，沒有四點上限。選圖和出圖時間由程式處理，不填 diagram_ref。",
+                          json.dumps(spans, ensure_ascii=False)]
+            else:
+                lines += ["本段未確認有連續的整圖講解。圖由程式處理，不填 diagram_ref。"]
+        elif any("svg" in d for claim in claim_context["claims"] for d in claim.get("diagrams", [])):
+            lines += ["每張投影片的 diagram_ref 只填這張要顯示的一張圖的 sha256。"
+                      "圖須連到本張實際講述的 Claim；有圖也要保留講論要點。沒有圖就填空字串。"]
+    elif claim_context is not None:
         from backend.pipeline.chapter_slide_claims import claim_source_ranges
 
         ranges = claim_source_ranges(claim_context, decisions_record)
@@ -244,6 +478,33 @@ def _covers(shown: list[dict[str, Any]], wanted: dict[str, Any]) -> bool:
     )
 
 
+def scripture_covers(outer: dict, inner: dict) -> bool:
+    return (outer["slug_book"] == inner["slug_book"] and outer["chapter"] == inner["chapter"]
+            and outer["start"] <= inner["start"] and inner["end"] <= outer["end"])
+
+
+def merge_scripture_ranges(scriptures: list[dict], sentence_order: list[str]) -> list[dict]:
+    """Combine overlapping readings at the same sentence, keeping distinct reading times."""
+    from backend.api.scripture import parse_reference
+
+    grouped = {}
+    for item in scriptures:
+        ref = parse_reference(item["slug"])
+        key = item["sentence"], ref["slug_book"], ref["chapter"]
+        grouped.setdefault(key, []).append((ref["start"], ref["end"], item["slug"]))
+    merged = []
+    for (sentence, book, chapter), ranges in grouped.items():
+        combined = []
+        for start, end, slug in sorted(ranges, key=lambda row: (row[0], -row[1])):
+            if not combined or start > combined[-1][1]:
+                combined.append((start, end, slug))
+            elif end > combined[-1][1]:
+                first = combined[-1][0]
+                combined[-1] = (first, end, f"{book.lower()}-{chapter}-{first}-{end}")
+        merged.extend({"sentence": sentence, "slug": slug} for _, _, slug in combined)
+    return sorted(merged, key=lambda item: sentence_order.index(item["sentence"]))
+
+
 def _title(text: str) -> str:
     text = text.strip()
     while len(text) >= 2 and text[0] in "「『\"“" and text[-1] in "」』\"”":
@@ -264,6 +525,10 @@ def _earlier_term_introduction(
     term_point = _TERM_POINT.match(point["text"])
     if not term_point or not index or not _TERM_DEFINITION.match(lines[index]["text"]):
         return None
+    # A substantive definition must wait for the answer, even if the name came earlier.
+    tail = point["text"][term_point.end():].strip()
+    if tail not in ("", "是什麼？", "是什麼?", "什麼意思？", "什麼意思?"):
+        return None
     term = term_point.group(1) or term_point.group(2)
     first = index - 1
     if first > 0 and _TERM_QUESTION.fullmatch(lines[first]["text"]):
@@ -280,10 +545,35 @@ def _earlier_term_introduction(
     return None
 
 
+def parse_slide_verses(text: str, chapter: Chapter) -> list[str] | None:
+    if not chapter.slide_scope:
+        return chapter_exposition.parse_verses(text, chapter)
+    from dataclasses import replace
+
+    # All entries must fit one of the separately declared chapter ranges.
+    parsed = []
+    for match in chapter_exposition._VERSE.finditer(text):
+        for passage in chapter.slide_scope:
+            slugs = chapter_exposition.parse_verses(match.group(), replace(chapter, passage=passage))
+            if slugs:
+                parsed.extend(slugs)
+                break
+        else:
+            return None
+    return parsed or None
+
+
 def check(
     slides: list[dict[str, Any]],
     kept: list[dict[str, Any]],
     chapter: Chapter,
+    *,
+    cuv_root: Path | None = None,
+    one_slide: list[tuple[str, str]] = (),
+    check_term_timing: bool = True,
+    diagram_spans: tuple = (),
+    verified_scriptures: tuple = (),
+    allow_no_chapter_verses: bool = False,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -295,7 +585,7 @@ def check(
     在读经文。
     """
 
-    from backend.api.scripture import parse_reference, reference_slugs, spoken_references
+    from backend.api.scripture import parse_reference, slide_reference_slugs, spoken_references
 
     lines = sentences(kept)
     ids = [s["id"] for s in lines]
@@ -319,6 +609,7 @@ def check(
         return problems, unshown, []
 
     normalised: list[dict[str, Any]] = []
+    verse_cache: dict[Path, dict[str, str]] = {}
     for index, slide in enumerate(slides):
         a = starts[index]
         b = starts[index + 1] if index + 1 < len(starts) else len(lines)
@@ -333,8 +624,16 @@ def check(
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
                 continue
+            # A point is one short line. 510 published points are all ≤ 25 characters; a
+            # 2026-11-18 answer carried pasted junk after the point (「新加坡總統府文件…🦉…」).
+            if len(text) > MOST_POINT_CHARS or "\n" in text or re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]", text):
+                problems.append(f"{title}: 要點「{text[:30]}…」不是一行短句（最多 {MOST_POINT_CHARS} 字、不換行、無表情符號）")
+                continue
             point = {"sentence": item["sentence"], "text": text}
-            earlier = _earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+            if str(item.get("source") or "").strip():
+                point["source"] = str(item["source"]).strip()
+            earlier = (_earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+                       if check_term_timing else None)
             if earlier:
                 problems.append(
                     f"{title}: 要點「{text}」在 {earlier} 已明確引入術語，"
@@ -345,26 +644,83 @@ def check(
             problems.append(f"{title}: 要點沒有按他講的次序")
         if not title:
             problems.append(f"{own_ids[0]}: 沒有標題")
-        if not FEWEST_POINTS <= len(points) <= MOST_POINTS:
+        held = any(own_ids[0] <= a and b in own_ids for a, b in one_slide)
+        diagram_span = any(span["first"] in own_ids for span in diagram_spans)
+        limit = len(own_ids) if diagram_span else MOST_CASE_POINTS if held else MOST_POINTS
+        if not FEWEST_POINTS <= len(points) <= limit:
             problems.append(f"{title}: 要點 {len(points)} 條")
-        verses = chapter_exposition.parse_verses(str(slide.get("verses") or ""), chapter)
+        verse_field = str(slide.get("verses") or "")
+        verses = [] if allow_no_chapter_verses and not verse_field.strip() else parse_slide_verses(verse_field, chapter)
         if verses is None:
             problems.append(f"{title}: 經節讀不出來或不在這一章（{slide.get('verses')}）")
         scriptures = []
         for item in slide.get("scriptures") or []:
-            slugs = reference_slugs(str(item.get("ref") or ""))
-            if len(slugs) != 1:
+            slugs = slide_reference_slugs(str(item.get("ref") or ""))
+            if not slugs:
                 problems.append(f"{title}: 經文出處讀不出來（{item.get('ref')}）")
                 continue
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: {item.get('ref')} 的句子 {item.get('sentence')} 不在這一張")
                 continue
-            scriptures.append({"sentence": item["sentence"], "slug": slugs[0]})
+            scriptures.extend({"sentence": item["sentence"], "slug": slug} for slug in slugs)
+        confirmed = [item for item in verified_scriptures if item["sentence"] in own_ids]
+        confirmed_slugs = {item["slug"] for item in confirmed}
+        if confirmed:
+            from backend.pipeline.chapter_slide_eval import Bible, reads_scripture
+
+            bible = Bible(cuv_root)
+            text_at = {line["id"]: line["text"] for line in own}
+            # A verified occurrence supersedes an ungrounded model anchor.
+            # An independently detected reading at another sentence is a distinct occurrence.
+            scriptures = [item for item in scriptures if item["slug"] not in confirmed_slugs
+                          or reads_scripture(text_at[item["sentence"]], item["slug"], bible)] + confirmed
+        scriptures = merge_scripture_ranges(scriptures, own_ids)
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:
             for _, slug in spoken_references(line["text"]):
                 if not _covers(shown, parse_reference(slug)):
                     unshown.append(f"{title}（{line['id']}）：逐字稿裡有 {slug}")
+        inline_notes = []
+        for note in slide.get("inline_notes", []):
+            wanted = parse_reference(note["scripture"])
+            matching = [item for item in scriptures if wanted is not None
+                        and (ref := parse_reference(item["slug"])) is not None
+                        and (ref["slug_book"], ref["chapter"]) == (wanted["slug_book"], wanted["chapter"])
+                        and wanted["start"] <= note["verse"] <= wanted["end"]
+                        and ref["start"] <= note["verse"] <= ref["end"]]
+            scripture = next((item for item in matching if item["sentence"] <= note["sentence"]), None)
+            later = next(iter(matching), None)
+            if scripture is None and later is not None and note["sentence"] in own_ids:
+                # 註解綁在經文讀出之前一兩句：時間移到讀出那一句，文字不變。
+                note = {**note, "sentence": later["sentence"]}
+                scripture = later
+            if scripture is not None:
+                note = {**note, "scripture": scripture["slug"]}
+            ref = parse_reference(scripture["slug"]) if scripture else None
+            if (note["sentence"] not in own_ids or ref is None
+                    or not ref["start"] <= note["verse"] <= ref["end"]
+                    or not note["span"].strip()):
+                problems.append(f"{title}: 經文註解未對應本張已顯示的經節或句子（{note['sentence']}）")
+                continue
+            if cuv_root is None:
+                from backend.bible_study.paths import cuv_dir
+
+                cuv_root = cuv_dir()
+            path = cuv_root / ref["slug_book"].upper() / f"{ref['chapter']}.json"
+            if path not in verse_cache:
+                try:
+                    verse_cache[path] = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    verse_cache[path] = {}
+            text = verse_cache[path].get(str(note["verse"]), "")
+            folded = _fold_variants(text).find(_fold_variants(note["span"]))
+            if folded >= 0 and _fold_variants(text).count(_fold_variants(note["span"])) == 1:
+                # 模型寫「得著」、和合本檔是「得着」：同一個字。存和合本的寫法，頁面才找得到。
+                note = {**note, "span": text[folded:folded + len(note["span"])]}
+            if text.count(note["span"]) != 1:
+                problems.append(f"{title}: 無法在和合本 {note['scripture']} 第 {note['verse']} 節唯一定位「{note['span']}」")
+                continue
+            inline_notes.append({**note, "reading": ""})  # 不另列讀法（負責人 2026-11-15）
         normalised.append({
             "first": own_ids[0],
             "last": own_ids[-1],
@@ -372,8 +728,89 @@ def check(
             "points": points,
             "verses": verses or [],
             "scriptures": scriptures,
+            **({"diagram_ref": slide["diagram_ref"]} if slide.get("diagram_ref") else {}),
+            **({"inline_notes": inline_notes} if inline_notes else {}),
         })
     return problems, unshown, normalised
+
+
+#: 和合本檔與模型輸出常用不同寫法的同一個字；逐字等長替換，只用來定位。
+_VARIANTS = str.maketrans({"着": "著", "裏": "裡", "峯": "峰", "綫": "線", "麪": "麵", "衆": "眾", "爲": "為", "僞": "偽"})
+
+
+def _fold_variants(text: str) -> str:
+    return text.translate(_VARIANTS)
+
+
+def checked(
+    raw: list[dict[str, Any]],
+    kept: list[dict[str, Any]],
+    chapter: Chapter,
+    claim_context: dict[str, Any] | None,
+    *, scripture_placements: list[dict] | None = None,
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """初稿、修正稿共用的程序核對：一般核對之外，有 Claim 提綱時按論證步驟定要點時間，
+    再查 Evidence 經文與「此刻畫面與他此刻的論證相關」。"""
+    outline = claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1"
+    if outline:
+        from backend.pipeline.chapter_slide_claims import retime
+        if "diagram_spans" in claim_context:
+            spans_by_start = {span["first"]: span["sha256"] for span in claim_context["diagram_spans"]}
+            raw = [{k: v for k, v in slide.items() if k != "diagram_ref"} for slide in raw]
+            for sid, ref in spans_by_start.items():
+                slide = next((row for row in reversed(raw) if row.get("first", "") <= sid), None)
+                if slide is not None:
+                    slide["diagram_ref"] = ref
+        else:
+            raw = place_case_diagrams(raw, claim_context, sentences(kept))
+        raw = retime(raw, claim_context)
+    spans = []
+    if claim_context is not None:
+        from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+        try:
+            spans = [(c["from"], c["to"]) for c in resolve_cases(cases_for(claim_context.get("lecture", "")), sentences(kept),
+                     partial=claim_context.get("scope") == "subunit") if c["kind"] == "one_slide"]
+        except ValueError:
+            spans = []  # check_cases reports the broken case below
+    options = {"one_slide": spans} if spans else {}
+    if (claim_context or {}).get("verified_scriptures"):
+        options["verified_scriptures"] = claim_context["verified_scriptures"]
+    if scripture_placements is not None:
+        options["verified_scriptures"] = scripture_placements
+    if (claim_context or {}).get("scope") == "subunit":
+        options["check_term_timing"] = False
+        options["allow_no_chapter_verses"] = True
+        if (claim_context or {}).get("diagram_spans"):
+            options["diagram_spans"] = claim_context["diagram_spans"]
+    problems, unshown, slides = check(raw, kept, chapter, **options)
+    if not problems and claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
+        problems = evidence_scripture_gaps(claim_context, slides,
+            source_lines=[line["text"] for line in sentences(kept)], passage=chapter.passage)
+        if outline:
+            from backend.pipeline.chapter_slide_claims import point_spans, stale_points
+            # Explicit Scripture reading is carried by the displayed verse, not an early answer point.
+            from backend.pipeline import chapter_slide_eval
+            source_lines = sentences(kept)
+            problems += point_spans(claim_context, slides, source_lines=source_lines) + argument_alignment(claim_context, slides)
+            if claim_context.get("scope") != "subunit":
+                readings = chapter_slide_eval.displayed_reading_sentences(slides, source_lines)
+                problems += stale_points(claim_context, slides, source_lines, displayed_readings=readings)
+            # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
+            from backend.pipeline import chapter_slide_eval
+            problems += chapter_slide_eval.evaluate(
+                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context),
+                context=claim_context)["problems"]
+            # 負責人指出過的問題（chapter_slide_cases.json），每次都查，不再回來。
+            from backend.pipeline.chapter_slide_cases import cases_for, check_cases
+            cases = cases_for(claim_context.get("lecture", ""))
+            if scripture_placements is not None:
+                cases = [case for case in cases if case["kind"] not in ("point", "not_before")]
+            problems += check_cases(slides, cases, sentences(kept), partial=claim_context.get("scope") == "subunit")
+    if not outline and not problems and any(slide.get("diagram_ref") for slide in slides):
+        from backend.pipeline.chapter_slide_eval import diagram_problems
+        problems += diagram_problems(slides, sentences(kept), claim_context or {})
+    return problems, unshown, slides
 
 
 def record_path(data_base_dir: Path, passage: str, lecture: str) -> Path:
@@ -399,7 +836,66 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
-def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[
+def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings=None, *,
+                   legacy_clock: bool = False) -> dict[str, dict]:
+    """Resolve the one diagram selected for a slide and when it appears.
+
+    New sub-unit bundles carry an explicit sentence located from the slide's
+    transcript. Retain the linked-Claim anchor for existing bundles without one.
+    """
+    by_id = {line["id"]: line["start"] for line in lines}
+    claims = context.get("claims", [])
+    if timings is not None and set(timings) != {slide["first"] for slide in slides if slide.get("diagram_ref")}:
+        raise ValueError("Diagram timings do not match the selected slides")
+    placed = {}
+    for slide in slides:
+        ref = slide.get("diagram_ref")
+        if not ref:
+            continue
+        on_slide = lambda sentence: sentence in by_id and slide["first"] <= sentence <= slide["last"]
+        matches = []
+        for claim in claims:
+            found = [d for d in claim.get("diagrams", []) if d["sha256"] == ref and "svg" in d]
+            if not found:
+                continue
+            if timings is None and legacy_clock:
+                # Existing published bundles used the Claim or its point as the
+                # anchor. Evidence-based placement requires an explicit timing.
+                sentence = claim.get("stated")
+                if not on_slide(sentence):
+                    sentence = next((p["sentence"] for p in slide["points"]
+                                     if p.get("source") == claim["claim_id"]), None)
+                if sentence in by_id:
+                    matches.append((by_id[sentence], found[0]))
+                continue
+            steps = {step.get("evidence_step_id") for step in claim.get("evidence_steps", [])} - {None}
+            starts = [claim.get("stated")]
+            starts += [sentence for step in claim.get("evidence_steps", [])
+                       for anchor in step.get("anchors", []) for sentence in anchor.get("sentences", [])]
+            starts += [p["sentence"] for p in slide["points"]
+                       if p.get("source") == claim["claim_id"] or p.get("source") in steps]
+            matches.extend((by_id[s], found[0]) for s in starts if on_slide(s))
+        if not matches:
+            raise ValueError(f"{slide['title']}: 所選論證圖沒有連到本張的論點")
+        at, item = min(matches, key=lambda match: match[0])
+        if timings is not None:
+            timing = timings[slide["first"]]
+            sentence = timing["sentence"]
+            if timing["sha256"] != ref or (sentence is not None and not on_slide(sentence)):
+                raise ValueError(f"{slide['title']}: 圖的出場句與本張原文不符")
+            if sentence is None:
+                continue
+            at = by_id[sentence]
+        image = base64.b64encode(item["svg"].encode()).decode("ascii")
+        placed[slide["first"]] = {
+            "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
+            "sha256": ref, "image_src": "data:image/svg+xml;base64," + image,
+            **({"layout": item["layout"], "labels": item["labels"]} if legacy_clock and item.get("layout") else {}),
+        }
+    return placed
+
+
+def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any], *, legacy_diagram_clock: bool = False) -> tuple[
     dict[str, list[str]], list[dict[str, Any]]
 ]:
     """片段归哪张投影片的经节、每张投影片从第几秒开始、经文第几秒出现。
@@ -409,10 +905,15 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     """
 
     lines = sentences(kept_pieces(decisions_record))
+    from backend.pipeline.chapter_slide_point_timing import apply_adjustments
+
+    slides = apply_adjustments(slides_record["slides"], lines, slides_record.get("point_timing_adjustments"))
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
-    for slide in slides_record["slides"]:
+    diagrams = timed_diagrams(slides, lines, slides_record.get("claim_context") or {},
+                              slides_record.get("diagram_timing"), legacy_clock=legacy_diagram_clock)
+    for slide in slides:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:
             piece_verses.setdefault(line["piece"], slide["verses"])
@@ -425,12 +926,31 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
                 for item in slide["points"]
             ],
-            "scriptures": [
+            "inline_notes": [
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
-                for item in slide["scriptures"]
+                for item in slide.get("inline_notes", [])
             ],
+            "scriptures": _reread(slide["scriptures"], own, lines, index),
+            **({"diagram": diagrams[slide["first"]]} if slide["first"] in diagrams else {}),
         })
     return piece_verses, timed
+
+
+def _reread(scriptures: list[dict[str, Any]], own: list[dict[str, Any]], lines: list[dict[str, Any]],
+            index: dict[str, int]) -> list[dict[str, Any]]:
+    """經文出現的時間；他在同一張裡再念一次已顯示的經文時，經文也再出現一次。"""
+
+    from backend.api.scripture import parse_reference, spoken_references
+
+    timed = [{**item, "at": lines[index[item["sentence"]]]["start"]} for item in scriptures]
+    for line in own:
+        for _, slug in spoken_references(line["text"]):
+            wanted = parse_reference(slug)
+            earlier = [item for item in scriptures if index[item["sentence"]] < index[line["id"]]
+                       and _covers([parse_reference(item["slug"])], wanted)]
+            if earlier and not any(item["sentence"] == line["id"] for item in scriptures):
+                timed.append({**earlier[-1], "sentence": line["id"], "at": line["start"]})
+    return sorted(timed, key=lambda item: item["at"])
 
 
 def decide(
@@ -457,8 +977,21 @@ def decide(
         validate_context(claim_context, chapter.passage, lecture, decisions_record,
                          decisions_sha(data_base_dir, chapter.passage, lecture))
     prompt = user_prompt(lecture, decisions_record, claim_context)
-    response = client.generate_json(system_prompt(chapter, lecture), prompt, RESPONSE_SCHEMA)
-    return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    schema = response_schema(claim_context)
+    system = system_prompt(chapter, lecture, subunit=(claim_context or {}).get("scope") == "subunit")
+    response = client.generate_json(system, prompt, schema)
+    result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    # 程序核對不通過：把問題和上一份交回模型改，最多 REPAIRS 次。改的是同一份，不換提示詞。
+    repair_limit = REPAIRS if claim_context is not None and claim_context.get("scope") != "subunit" else 0
+    for _ in range(repair_limit):
+        if result["status"] != "rejected":
+            break
+        repair = (prompt + "\n\n上一份投影片（JSON）：\n" + json.dumps(response, ensure_ascii=False)
+                  + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n"
+                  + "\n".join(f"- {p}" for p in result["problems"]))
+        response = client.generate_json(system, repair, schema)
+        result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    return result
 
 
 def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str, Any]:
@@ -484,11 +1017,16 @@ def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str,
     from backend.pipeline.chapter_slide_claims import saved_context
     context = saved_context(rejected, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     prompt = user_prompt(lecture, decisions_record, context)
-    prompt_sha = hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest()
+    system = system_prompt(chapter, lecture, subunit=(context or {}).get("scope") == "subunit")
+    prompt_sha = hashlib.sha256((system + "\n" + prompt).encode("utf-8")).hexdigest()
     if rejected.get("prompt_sha256") != prompt_sha:
         return {"lecture": lecture, "status": "prompt_changed"}
     kept = kept_pieces(decisions_record)
-    return save(chapter, lecture, data_base_dir, {"slides": rejected.get("raw_slides") or []}, prompt, kept,
+    response = {"slides": rejected.get("raw_slides") or []}
+    if chapter_slide_arguments.BINDINGS_KEY in rejected:
+        key = chapter_slide_arguments.BINDINGS_KEY
+        response[key] = rejected.get(chapter_slide_arguments.RAW_BINDINGS_KEY, rejected[key])
+    return save(chapter, lecture, data_base_dir, response, prompt, kept,
                 rejected.get("model", ""), rejected.get("claim_context"))
 
 
@@ -502,23 +1040,85 @@ def save(
     model: str,
     claim_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
+    raw = response.get("slides") or []
+    normalized = raw
+    placements = None
+    preparation_problems = []
+    content_only = (claim_context or {}).get("scope") == "subunit" and any(
+        "evidence_sentence" in point for slide in raw for point in slide.get("points", []))
+    if content_only:
+        from backend.pipeline.chapter_slide_scripture_timing import locate_readings
+        from backend.pipeline.claim_flash_common import jev
+        from backend.pipeline.evidence_refresh import JevPort
+
+        artifacts = data_base_dir.parent / "scripture-timing"
+        placements, preparation_problems = locate_readings(
+            raw, sentences(kept), claim_context.get("verified_scriptures", []),
+            lambda state, questions: jev(artifacts, JevPort(), state, questions))
+        normalized = []
+        for slide in raw:
+            row = {**slide, "scriptures": []}
+            for key in ("points", "inline_notes"):
+                row[key] = [{**{k: v for k, v in item.items() if k != "evidence_sentence"},
+                             "sentence": item.get("evidence_sentence")} for item in slide.get(key, [])]
+            normalized.append(row)
+    if preparation_problems:
+        problems, unshown, slides = preparation_problems, [], []
+    else:
+        problems, unshown, slides = checked(normalized, kept, chapter, claim_context,
+                                           **({"scripture_placements": placements} if placements is not None else {}))
     record = {
         "schema_version": SCHEMA_VERSION,
         "passage": chapter.passage,
         "lecture": lecture,
         "decisions_sha256": decisions_sha(data_base_dir, chapter.passage, lecture),
         "model": model,
-        "prompt_sha256": hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256((system_prompt(
+            chapter, lecture, subunit=(claim_context or {}).get("scope") == "subunit") + "\n" + prompt).encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "slides": slides,
         "unshown_references": unshown,
-        "raw_slides": response.get("slides") or [],
+        "raw_slides": raw,
+        **({"point_anchor_basis": "evidence"} if content_only else {}),
     }
+    if (claim_context or {}).get(chapter_slide_arguments.PLAN_KEY):
+        key = chapter_slide_arguments.BINDINGS_KEY
+        record[key] = response.get(key)
+        if not problems:
+            try:
+                source = sentences(kept)
+                requirements = chapter_slide_arguments.review_requirements(claim_context, source, slides)
+                try:
+                    bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                except ValueError:
+                    if claim_context.get("scope") != "subunit" or not isinstance(record[key], list):
+                        raise
+                    from backend.pipeline.claim_flash_common import jev
+                    from backend.pipeline.evidence_refresh import JevPort
+
+                    artifacts = data_base_dir.parent / "argument-repeats"
+                    repeats = chapter_slide_arguments.find_adjacent_repeats(
+                        requirements, slides, source, record[key],
+                        lambda state, questions: jev(artifacts, JevPort(), state, questions))
+                    if not repeats:
+                        raise
+                    requirements = chapter_slide_arguments.apply_adjacent_repeats(requirements, slides, repeats)
+                    bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                    record[chapter_slide_arguments.CONFIRMED_REPEATS_KEY] = repeats
+                point_sentences = {route["id"]: route["writer_points"] for route in bound}
+                normalized = [{**row, "point_sentences": point_sentences[row["id"]]} for row in record[key]]
+                if normalized != record[key]:
+                    record[chapter_slide_arguments.RAW_BINDINGS_KEY] = record[key]
+                    record[key] = normalized
+            except ValueError as error:
+                problems.append(str(error))
     if claim_context is not None:
         from backend.pipeline.chapter_slide_claims import digest
         record["claim_context"] = claim_context
         record["claim_context_sha256"] = digest(claim_context)
+        if claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+            from backend.pipeline.chapter_slide_eval import SEMANTIC_SCHEMA_VERSION
+            record["semantic_eval"] = SEMANTIC_SCHEMA_VERSION
     target = record_path(data_base_dir, chapter.passage, lecture)
     target.parent.mkdir(parents=True, exist_ok=True)
     if problems:
@@ -532,6 +1132,7 @@ def save(
         "status": "saved",
         "slides": len(slides),
         "unshown_references": unshown,
+        **({"semantic_eval": "pending"} if record.get("semantic_eval") else {}),
         "file": str(target),
     }
 
@@ -549,15 +1150,18 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 使用者給你：保留的逐字稿（每句有編號 S0001 起），以及投影片（每張的第一句、標題、要點與它出現的那一句、顯示的經文與讀到的那一句）。要點在它標的實際講述錨點之前短暫預顯，讓聽眾先讀再聽；經文在讀到的那一句出現。
 
+呈現口吻：
+〈原聲投影片口吻〉
+
 逐張對照逐字稿檢查：
 1. 忠實：要點只寫他講的，沒有加入他沒講的解釋、評論；沒有把「很好的證據」寫成「證明」；沒有把會眾的話當成他的話；沒有搞錯誰說的、在講哪一卷書。
 2. 完整：他這一段的問題、理由、結論、勸告都在；問題和它的答案在同一張；例子和它說明的道理在同一張；沒有只留鋪陳、漏了結論。
-3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
+3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；標題說得出這一張在講什麼。長時間只有標題可提示核對，但不能只憑秒數判缺漏；講故事時按下列論證作用規則檢查。
 4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
 
 每條另查出現時間
 〈要點時間規則〉
-確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文。此類問題未修正前不可發布。
+確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文；current_sentence 填目前的句子編號，proposed_sentence 填應改的句子編號（其他種類的問題兩欄都填空字串）。程序按錄音時間量這兩句的距離：要點比他講到早 30 秒以上、或晚 60 秒以上才算阻擋，更小的差距只記錄、不再修改。
 
 每張另查標題範圍：
 〈標題規則〉
@@ -565,11 +1169,31 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 每張只有二到四條要點。改法也必須符合這個上限；新增會超過時，明確說明合併、刪除或分張，不能要求其餘要點不動而超限。
 
-只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
+只列真正影響聽眾的問題，不挑無關緊要的措辭；原聲投影片的敘述視角及說話者歸屬屬於必要檢查，不得略過。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
 
 grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、漏了他讀的經文、或仍有出現時間問題時為 true。
 
 用繁體中文。"""
+
+REVIEW_COMPLETENESS_RULES = """承重內容與誤報界線：
+有論證層時，先核對本段 Claim、Evidence 步驟及其角色（包括 analogy、example、opposed_position 等），再回到對應原文，確認故事或例子實際支撐哪個判斷；不能把反方說法當教授的理由，也不能因故事沒有獨立 Claim 就斷定它無關。沒有論證層時明說依原文判斷，不假稱已核對論證層。
+先從原文辨認各段實際回答的問題、結論、支撐它的理由／經文及必要限制，再反向核對投影片是否保留。不能只逐條看現有要點而漏查未呈現的內容；未回答的問題不得自行補答案。
+完整是保留論證作用，不是抄全原文。是否缺故事要點，取決於論證層與原文中的必要對比、理由、前提及應用是否已保存，而不是有沒有故事開場點、多久沒出現要點；故事鋪陳可只聽原聲。不強迫新增故事開場要點，不把「一分鐘以上只有標題」本身列為須修改或阻擋的缺陷。若論證層漏記但原文確有承重推論，仍須核對，不以圖中沒有記錄豁免。故事已表達訓練與未訓練的差別及其應用時，不強求照片種類、病變細節等非承重細節；若刪除後因果、否定或適用條件改變，才是缺漏。每項完整異議須指出原話、缺失的實質意思，以及為何現有要點／經文／短註未保存它。只會讓文字更具體的建議不能判為缺陷或阻擋。
+同一實質意思在合適的要點或短註已保存，就不要要求重複。一般詞義／常見譯詞比較可以放在要點；不可為求完整，把一般譯詞冒充某節實際希臘字詞塞回經文短註。
+若材料附有已採納的修正決定，核對它是否正確落實；不能僅因偏好另一種呈現就要求反向修改。只有新的原文證據能指出該決定造成實質缺陷時，才明列新證據與衝突，不冒充普通漏項。已採納決定不是免查忠實的通行證。
+"""
+
+
+def review_system_prompt(lecture: str | None = None) -> str:
+    """One review policy for production and evaluator calibration."""
+    prompt = (REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+              .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+              .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES))
+    if lecture is not None:
+        prompt = for_lecture(prompt, lecture)
+    return (prompt + "\n\n" + INLINE_NOTE_RULES + "\n" + REVIEW_COMPLETENESS_RULES
+            + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。")
+
 
 REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -585,8 +1209,10 @@ REVIEW_SCHEMA: dict[str, Any] = {
                     "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文", "出現時間"]},
                     "problem": {"type": "string"},
                     "fix": {"type": "string"},
+                    "current_sentence": {"type": "string"},
+                    "proposed_sentence": {"type": "string"},
                 },
-                "required": ["slide", "kind", "problem", "fix"],
+                "required": ["slide", "kind", "problem", "fix", "current_sentence", "proposed_sentence"],
                 "additionalProperties": False,
             },
         },
@@ -597,7 +1223,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
 
 _REVISE_TAIL = """
 
-這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。交回完整的一份投影片（不是只交改動的）。"""
+這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。合併或改寫過的要點須按共用時間規則重新核對完整文字的錨點，不沿用最早來源句；不為了湊要點上限把後段答案搬到前段。交回完整的一份投影片（不是只交改動的）。"""
 
 
 def show_slides(slides: list[dict[str, Any]]) -> str:
@@ -608,10 +1234,15 @@ def show_slides(slides: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for number, slide in enumerate(slides, 1):
         lines.append(f"第 {number} 張（{slide['first']}–{slide['last']}）{slide['title']}　經節：{','.join(slide['verses'])}")
+        if slide.get("diagram_ref"):
+            lines.append(f"  論證圖：{slide['diagram_ref']}")
         for point in slide["points"]:
-            lines.append(f"  · [{point['sentence']}] {point['text']}")
+            source = f" (source: {point['source']})" if point.get("source") else ""
+            lines.append(f"  · [{point['sentence']}] {point['text']}{source}")
         for item in slide["scriptures"]:
             lines.append(f"  經文 [{item['sentence']}] {format_chinese_reference(item['slug'])}")
+        for note in slide.get("inline_notes", []):
+            lines.append("  經文註解 " + json.dumps(note, ensure_ascii=False))
     return "\n".join(lines)
 
 
@@ -625,6 +1256,7 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "first": slide["first"],
             "title": slide["title"],
             "points": slide["points"],
+            "inline_notes": slide.get("inline_notes", []),
             "verses": ", ".join(v.split("-", 1)[1].replace("-", ":", 1) for v in slide["verses"]),
             "scriptures": [
                 {"sentence": item["sentence"], "ref": format_chinese_reference(item["slug"])}
@@ -635,14 +1267,69 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+EARLY_SECONDS = 30  # a point shown this long before he says it gives the answer away
+LATE_SECONDS = 60   # the review's own bar: about a minute of a slide with no point
+
+
+def measure_timing(findings: list[dict[str, Any]], sentences_: list[dict[str, Any]]) -> None:
+    """Measure each 出現時間 finding on the recording, so the review's guess is checked by the clock.
+
+    A finding the program cannot place (unknown sentence) keeps blocking."""
+    start = {s["id"]: s["start"] for s in sentences_}
+    for finding in findings:
+        if finding.get("kind") != "出現時間":
+            continue
+        now, proposed = finding.get("current_sentence"), finding.get("proposed_sentence")
+        if now not in start or proposed not in start:
+            finding["timing_blocks"] = True
+            finding["measured_seconds"] = None
+            continue
+        gap = round(start[proposed] - start[now], 1)  # > 0: shown too early; < 0: shown too late
+        finding["measured_seconds"] = gap
+        finding["timing_blocks"] = gap >= EARLY_SECONDS or -gap >= LATE_SECONDS
+
+
+def finding_blocks(finding: dict[str, Any]) -> bool:
+    if finding.get("kind") == "出現時間":
+        return finding.get("timing_blocks", True)  # an unmeasured (older) timing finding still blocks
+    return True
+
+
 def review_blocks_publication(review: dict[str, Any]) -> bool:
-    return review.get("blocking") is not False or any(
-        finding.get("kind") == "出現時間" for finding in review["findings"]
-    )
+    """Timing findings block only as measured; the reviewer's own flag decides the rest."""
+    findings = review["findings"]
+    if any(f.get("kind") == "出現時間" and finding_blocks(f) for f in findings):
+        return True
+    only_small_timing = bool(findings) and not any(finding_blocks(f) for f in findings)
+    return review.get("blocking") is not False and not only_small_timing
+
+
+def actionable(review: dict[str, Any]) -> list[dict[str, Any]]:
+    """Findings a revision should act on: all but timing findings measured as too small to matter."""
+    return [f for f in review["findings"] if finding_blocks(f)]
 
 
 def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) -> Path:
     return record_path(data_base_dir, passage, lecture).with_suffix(f".review-{revision}.json")
+
+
+def accepted_review_context(record: dict[str, Any], *, decisions_sha256: str,
+                            review_directory: Path) -> str:
+    """Carry explicit adopted decisions, never infer acceptance from old findings.
+
+    These are runner/owner metadata, outside the model's slides response schema.
+    Source drift or missing original review fails before a new model call.
+    """
+    resolutions = record.get("accepted_review_resolutions", [])
+    if not resolutions:
+        return ""
+    reviews = {chapter_exposition.file_sha256(p) for p in review_directory.glob("*.review-*.json")}
+    for item in resolutions:
+        if (item.get("decisions_sha256") != decisions_sha256
+                or item.get("source_review_sha256") not in reviews
+                or not isinstance(item.get("decision"), str) or not item["decision"].strip()):
+            raise ValueError("Adopted review decision has stale source or missing original review")
+    return "\n\n已明確採納的修正決定（原審閱保留；新證據造成衝突須明列，不默默反向改動）：\n" + json.dumps(resolutions, ensure_ascii=False)
 
 
 def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
@@ -651,6 +1338,8 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
         return {"lecture": lecture, "status": "no_slides"}
+    if chapter_slide_arguments.PLAN_KEY in (record.get("claim_context") or {}):
+        return {"lecture": lecture, "status": "subunit_uses_semantic_eval"}
     revision = int(record.get("revision", 0))
     slides_sha = chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture))
     target = review_path(data_base_dir, chapter.passage, lecture, revision)
@@ -666,16 +1355,18 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     from backend.pipeline.chapter_slide_claims import saved_context, review_contract, check_review
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
-    prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
-    review_system = (
-        REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
-        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
-    )
-    answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
+    prompt = (user_prompt(lecture, decisions_record, context)
+              + accepted_review_context(record, decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture),
+                                        review_directory=target.parent)
+              + "\n\n投影片：\n" + show_slides(record["slides"]))
+    system = review_system_prompt(lecture) + extra
+    answer = client.generate_json(system, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
+    measure_timing(answer["findings"], sentences(kept_pieces(decisions_record)))
     out = {
         "slides_sha256": slides_sha,
+        "review_contract_sha256": hashlib.sha256(json.dumps({"system": system, "user": prompt, "schema": schema}, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
         "revision": revision,
         "model": getattr(client, "model", ""),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -683,16 +1374,82 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     }
     target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
-            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]), "file": str(target)}
+            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]),
+            "actionable": len(actionable(answer)), "file": str(target)}
 
 
-def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
+def revision_user_prompt(lecture, decisions_record, previous_slides, findings, context=None, *, accepted_context=""):
+    """Same revision material for the normal runner and isolated regression cases."""
+    notes = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in findings)
+    return (user_prompt(lecture, decisions_record, context) + accepted_context
+            + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": previous_slides}, ensure_ascii=False)
+            + "\n\n審稿人的意見：\n" + notes)
+
+
+def untouched_problems(previous: list[dict[str, Any]], revised: list[dict[str, Any]], flagged: set[str]) -> list[str]:
+    """A slide the reviewer did not flag comes back exactly as it was (owner 2026-11-18: a
+    lecture 2 revision dropped diagram A from a slide nobody had flagged)."""
+    if not flagged:
+        return []
+    def same(slide):  # spacing in the verse field is not a change
+        return slide and {**slide, "verses": re.sub(r"\s", "", str(slide.get("verses") or ""))}
+    now = {slide.get("first"): slide for slide in revised}
+    return [f"{slide.get('title')}（{slide.get('first')}）沒有被指出問題，修正稿卻改了它；請原樣交回"
+            for slide in previous if slide.get("first") not in flagged and same(now.get(slide.get("first"))) != same(slide)]
+
+
+def place_case_diagrams(raw: list[dict[str, Any]], context: dict[str, Any], source_lines=()) -> list[dict[str, Any]]:
+    """His diagram goes on the slide on screen when he starts the argument it shows.
+
+    The program knows both facts (the owner's diagram cases and the Claim's first spoken
+    sentence), so the model does not choose it. Owner 2026-11-18: revisions of sub-unit
+    1.1 dropped diagram D three times. A slide that already carries another diagram is
+    left alone and the diagram check reports it."""
+    from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
+
+    raw = [dict(slide) for slide in raw]
+    for case in diagrams_for_lecture(context.get("lecture", "")):
+        if quote := case.get("source_text"):
+            # Known diagram identity belongs to the spoken section, not to
+            # every slide citing the same Claim.
+            for slide in raw:
+                if slide.get("diagram_ref") in case["replace_refs"]:
+                    slide["diagram_ref"] = ""
+            matching = [line["id"] for line in source_lines if line["text"] == quote]
+            if len(matching) > 1:
+                raise ValueError("Approved diagram introduction is ambiguous")
+            if matching:
+                diagram = case["sha256"]
+                linked = {d["sha256"] for claim in context.get("claims", [])
+                          if claim["claim_id"].rsplit("-", 1)[-1] == case["claim"]
+                          for d in claim.get("diagrams", [])}
+                if diagram not in linked:
+                    raise ValueError("Approved diagram is missing from the bound Claim")
+                slide = next((row for row in reversed(raw) if row.get("first", "") <= matching[0]), None)
+                if slide is not None:
+                    slide["diagram_ref"] = diagram
+            continue
+        for claim in context.get("claims", []):
+            if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"] or not claim.get("diagrams"):
+                continue
+            said = [claim.get("stated")] + [x for step in claim.get("evidence_steps", [])
+                                             for anchor in step.get("anchors", []) for x in anchor.get("sentences", [])]
+            said = sorted(x for x in said if isinstance(x, str) and x.startswith("S"))
+            slide = next((x for x in reversed(raw) if said and str(x.get("first")) <= said[0]), None)
+            if slide is not None and not slide.get("diagram_ref"):
+                slide["diagram_ref"] = claim["diagrams"][0]["sha256"]
+    return raw
+
+
+def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
     path = record_path(data_base_dir, chapter.passage, lecture)
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
         return {"lecture": lecture, "status": "no_slides"}
+    if chapter_slide_arguments.PLAN_KEY in (record.get("claim_context") or {}):
+        return {"lecture": lecture, "status": "subunit_uses_semantic_eval"}
     revision = int(record.get("revision", 0))
     review_file = review_path(data_base_dir, chapter.passage, lecture, revision)
     if not review_file.exists():
@@ -700,9 +1457,9 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     verdict = json.loads(review_file.read_text(encoding="utf-8"))
     if verdict.get("slides_sha256") != chapter_exposition.file_sha256(path):
         return {"lecture": lecture, "status": "review_is_for_other_slides"}
-    if not verdict["findings"]:
+    if not actionable(verdict):
         return {"lecture": lecture, "status": "nothing_to_fix"}
-    if revision >= MOST_ROUNDS:
+    if revision >= most_rounds:
         return {"lecture": lecture, "status": "rounds_used_up", "findings": len(verdict["findings"])}
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
@@ -710,23 +1467,45 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     from backend.pipeline.chapter_slide_claims import saved_context
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     kept = kept_pieces(decisions_record)
-    findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in verdict["findings"])
-    prompt = (
-        user_prompt(lecture, decisions_record, context)
-        + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
-        + "\n\n審稿人的意見：\n" + findings
-    )
+    system = system_prompt(chapter, lecture, subunit=(context or {}).get("scope") == "subunit") + _REVISE_TAIL
+    # A timing finding measured as too small to matter is not sent back: moving it is how rounds went back and forth.
+    prompt = revision_user_prompt(lecture, decisions_record, _as_answer(record["slides"]), actionable(verdict), context,
+        accepted_context=accepted_review_context(record,
+            decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture), review_directory=review_file.parent))
     rejected_attempt = path.with_suffix(f".revision-{revision + 1}.rejected.json")
-    if context is not None and rejected_attempt.exists():
-        return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
-    response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
-    problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
+    if recheck_only:
+        if not rejected_attempt.exists():
+            return {"lecture": lecture, "status": "nothing_rejected"}
+        response = {"slides": json.loads(rejected_attempt.read_text())["raw_slides"]}
+    else:
+        if context is not None and rejected_attempt.exists():
+            return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
+        response = client.generate_json(system, prompt, response_schema(context))
+    flagged = {f["slide"] for f in actionable(verdict)}
+    previous = record.get("raw_slides") or []
+
+    def check_revision(answer):
+        found, unshown_, slides_ = checked(answer.get("slides") or [], kept, chapter, context)
+        return found + untouched_problems(previous, answer.get("slides") or [], flagged), unshown_, slides_
+
+    problems, unshown, slides = check_revision(response)
+    # Same as generation: program problems go back to the model with its own answer, at most REPAIRS times.
+    for _ in range(0 if recheck_only or context is None else REPAIRS):
+        if not problems:
+            break
+        repair = (prompt + "\n\n上一份修正稿（JSON）：\n" + json.dumps(response, ensure_ascii=False)
+                  + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n" + "\n".join(f"- {p}" for p in problems))
+        response = client.generate_json(system, repair, response_schema(context))
+        problems, unshown, slides = check_revision(response)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
-        rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},
-                                       ensure_ascii=False, indent=1), encoding="utf-8")
+        if not recheck_only:
+            rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},
+                                           ensure_ascii=False, indent=1), encoding="utf-8")
         return {"lecture": lecture, "status": "rejected", "problems": problems, "file": str(rejected)}
     path.with_suffix(f".revision-{revision}.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    if recheck_only:
+        record["rechecked_revision_answer_sha256"] = chapter_exposition.file_sha256(rejected_attempt)
     record.update({
         "revision": revision + 1,
         "revised_from_review_sha256": chapter_exposition.file_sha256(review_file),
@@ -748,6 +1527,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
     parser.add_argument("--claims-context", type=Path, help="本堂凍結的主張提示包；只可選一堂")
     parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
+    parser.add_argument("--owner-extra-round", action="store_true",
+                        help="轮数用完后，负责人批准的一轮：按最后一次审阅修正一次，再审一次，不再继续")
     parser.add_argument(
         "--recheck", action="store_true",
         help="被程序拒收的那一份回答，用现在的核对再过一遍；不调用模型",
@@ -782,12 +1563,18 @@ def main(argv: list[str] | None = None) -> int:
         client = RecordedClient(client, data_root.parent / "calls")
     failed = False
     for lecture in lectures:
+        if args.owner_extra_round:
+            report = revise(chapter, lecture, data_base_dir=data_root, client=client, most_rounds=MOST_ROUNDS + 1)
+            print(json.dumps(report, ensure_ascii=False))
+            if report["status"] == "revised":
+                print(json.dumps(review(chapter, lecture, data_base_dir=data_root, client=client), ensure_ascii=False))
+            continue
         if args.review:
             data = data_root
             while True:
                 report = review(chapter, lecture, data_base_dir=data, client=client)
                 print(json.dumps(report, ensure_ascii=False))
-                if report["status"] != "reviewed" or not report["findings"]:
+                if report["status"] != "reviewed" or not report["actionable"]:
                     break
                 report = revise(chapter, lecture, data_base_dir=data, client=client)
                 print(json.dumps(report, ensure_ascii=False))

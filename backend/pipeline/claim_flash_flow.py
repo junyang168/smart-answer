@@ -19,6 +19,7 @@ from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements 
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
 from backend.pipeline import claim_flash_missing as missing, claim_flash_source_disposition as disposition
 from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
+from backend.pipeline import claim_flash_citations as citations, claim_flash_citation_tags as citation_marks
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError, ID_FIELDS
 
@@ -30,6 +31,13 @@ def read(path):return json.loads(Path(path).read_text())
 
 def complete(result):
     return result.get('status') in {'verified','applied','completed'} and not result.get('pending')
+
+
+def with_citation_contract(root,intent):
+    """New roots run the citation check; a root started before it replays its saved intent unchanged."""
+    path=Path(root)/'flow-intent.json'
+    if path.exists() and 'citation_contract' not in read(path):return intent
+    return {**intent,'citation_contract':citations.CONTRACT}
 
 
 def source_handoff_batches(result,root):
@@ -136,7 +144,8 @@ def accounting(root, provider_root=None, evidence_provider_root=None):
         for started in paths:
             folder = started.parent
             stage = started.relative_to(root).parts[0]
-            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings'}
+            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings',
+                                           'citations', 'citation-marks', 'citation-fragments'}
                      else 'evidence' if stage in {'evidence', 'source-handoffs'}
                      else 'claims' if stage == 'claims' else 'unclassified')
             seconds = None
@@ -245,6 +254,55 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
     return e.publish(root,result)
 
 
+def citation_steps(store,source_id,root,ports,*,apply=True):
+    """Source layer citation steps, in order: the citation list (Jev, prayers and
+    introduced quotes), GPT check of introduced quotes, marks on existing
+    SourceFragments, then missing citations saved as marked SourceFragments.
+    Without apply the last two only list what they would write."""
+    records,sources=snapshot(store,source_id)
+    listing=citations.build(records,sources,source_id,root/'citations',ports)
+    marked=citation_marks.run(store,source_id,root/'citation-marks',apply=apply,listing=listing)
+    stages={'citation_marks':marked}
+    if not complete(marked):return stages,marked.get('pending',[])
+    # Marks change only scripture_refs, not what a fragment shows.
+    # Every held explicit citation must be visible through a fragment.
+    checked=citations.fragment_check(records,sources,source_id,listing)
+    stages['citations']={'status':'verified','pending':[],'citations':len(listing['citations']),
+        'unresolved':len(listing['unresolved']),'visible':checked['visible'],'new_fragments':len(checked['spans'])}
+    e.save(root/'citations'/'fragment-check.json',checked)
+    if checked['spans']:
+        filled=fill.run_citations(store,source_id,checked['spans'],root/'citation-fragments',apply=apply)
+        stages['citation_fragments']=filled
+        if not complete(filled):return stages,filled['pending']
+    return stages,[]
+
+
+SOURCE_ONLY_VERSION='claim_flash_citation_source_only_v1'
+
+
+def run_source_only(store,source_id,root,ports,*,apply=False):
+    """Only the source layer citation steps, on any sermon: no coverage, fill,
+    Evidence or Claim layer, no export package, no completion receipt."""
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);started=time.monotonic()
+    with (root/'flow.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        records,sources=snapshot(store,source_id)
+        intent={'version':SOURCE_ONLY_VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
+                'models':ports.identity,'citation_contract':citations.CONTRACT}
+        saved=root/'flow-intent.json'
+        if saved.exists() and read(saved)!=intent:
+            raise ValueError('source-only saved input differs; use a new root')
+        e.save(saved,intent)
+        stages,pending=citation_steps(store,source_id,root,ports,apply=apply)
+        status=('needs_attention' if pending else 'applied' if apply else 'verified')
+        result={'version':SOURCE_ONLY_VERSION,'source_id':source_id,'status':status,'applied':apply and not pending,
+                'pending':[{'layer':'source','findings':pending}] if pending else [],'stages':stages,
+                'seconds':round(time.monotonic()-started,1),
+                'accounting':accounting(root,getattr(ports,'root',None))}
+        (root/'source-only').mkdir(exist_ok=True)
+        return e.publish(root/'source-only',result)
+
+
 def bind_evidence_ports(root, ports, evidence_ports):
     intent_path = Path(root) / 'evidence' / 'intent.json'
     if evidence_ports is not ports and intent_path.exists():
@@ -286,6 +344,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
             records,sources=snapshot(store,source_id)
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
+        intent=with_citation_contract(root,intent)
         e.save(root/'flow-intent.json',intent)
         data_root=os.getenv('DATA_BASE_DIR')
         canonical_url=os.getenv('KNOWLEDGE_DATABASE_URL') or os.getenv('DATABASE_URL')
@@ -425,6 +484,10 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
                 stages['scripture_bindings']=bound
                 if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
+            if intent.get('citation_contract'):
+                found,pending=citation_steps(store,source_id,root,ports)
+                stages.update(found)
+                if pending:return finish(stages,[{'layer':'source','findings':pending}])
             recovery.lower_checkpoint(root,intent,stages,source_only=True)
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
@@ -563,11 +626,13 @@ def main():
     selector.add_argument('--candidate',help='Complete creation package; only private candidate SQL')
     selector.add_argument('--source-id',help='Existing canonical source; requires explicit --apply')
     parser.add_argument('--apply',action='store_true');parser.add_argument('--database-url')
+    parser.add_argument('--source-only',action='store_true',help='Only the source layer citation steps; without --apply they list what they would write')
     parser.add_argument('--shared-groups');parser.add_argument('--codex-executable')
     parser.add_argument('--published');parser.add_argument('--locator-root');parser.add_argument('--registration-root');parser.add_argument('--backup-manifest')
     args=parser.parse_args()
     if args.candidate and (args.apply or args.database_url):parser.error('candidate mode never accepts canonical write flags or database URLs')
-    if args.source_id and not args.apply:parser.error('canonical flow requires explicit --apply')
+    if args.source_only and not args.source_id:parser.error('--source-only needs --source-id')
+    if args.source_id and not args.apply and not args.source_only:parser.error('canonical flow requires explicit --apply')
     load_dotenv('.env');root=Path(args.root).resolve()
     ports, evidence_ports = subscription_ports(root, ClaimModelCapacity(read(args.capacity_file)), args.codex_executable)
     plan=read(args.shared_groups) if args.shared_groups else None
@@ -582,6 +647,10 @@ def main():
                 path = Path(os.environ['DATA_BASE_DIR'])/'script_published'/(item+'.json')
                 if path.is_file():
                     published = path
+        if args.source_only:
+            result=run_source_only(store,args.source_id,root,ports,apply=args.apply)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result['status'] in {'verified','applied'} else 2
         result=run(store,args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports,
                    published=published,locator_root=args.locator_root,registration_root=args.registration_root,backup_manifest=args.backup_manifest)
     print(json.dumps(result, ensure_ascii=False))

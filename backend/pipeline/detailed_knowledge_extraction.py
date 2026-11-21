@@ -356,7 +356,12 @@ def validate_sentence_audit(
             covered = bool(spans.get(sentence.segment_index))
         else:
             text = segments.get(sentence.segment_index, "")
-            start = text.find(sentence.text)
+            # A sentence spoken twice in one paragraph is located by its own
+            # position; searching would land every copy on the first one.
+            start = sentence.char_start if (
+                sentence.char_start is not None
+                and text[sentence.char_start:sentence.char_start + len(sentence.text)] == sentence.text
+            ) else text.find(sentence.text)
             covered = False
             if start >= 0:
                 end = start + len(sentence.text)
@@ -512,6 +517,7 @@ def validate_response(
     visible_visual_locators: set[str] | None = None,
     require_load_bearing_relations: bool = True,
     additional_relations: Sequence[dict[str, Any]] = (),
+    answer_only_claims: Sequence[str] = (),
 ) -> None:
     """Check one response against the source it claims to come from.
 
@@ -668,6 +674,7 @@ def validate_response(
                     if allow_reviewed_notes_blockquote
                     else None
                 ),
+                spoken_scripture_quotes=source_type != "notes_manuscript",
             ):
                 anchor_errors.append(
                     f"{owner}: excerpt lands in provenance-ambiguous inline markup "
@@ -752,6 +759,9 @@ def validate_response(
                 row["support_eligibility"] != "eligible_candidate",
                 f"{row['evidence_step_id']}: non-professor/asserted evidence cannot be eligible",
             )
+    # Only Claims the caller names as short answers (his words, no argument) and that a
+    # Question records as its answer may stand without Evidence (owner 2026-11-17).
+    answered = set(answer_only_claims) & {cid for q in response.get("questions", []) for cid in q.get("answer_claim_ids", [])}
     additional_support = {r.get("to_id") for r in additional_relations
         if r.get("from_id") in ids["observation"] | ids["evidence"]
         and r.get("to_id") in ids["claim"] and r.get("relation_type") == "supports"}
@@ -785,7 +795,9 @@ def validate_response(
             set(row["opposed_position_ids"]) <= ids["position"],
             f"{row['claim_id']}: unknown opposed position",
         )
-        collect(bool(row["evidence_step_ids"]) or row["claim_id"] in additional_support, f"{row['claim_id']}: claim has no evidence")
+        # A short answer to a Question may stand without Evidence: he gave none (owner 2026-11-17).
+        collect(bool(row["evidence_step_ids"]) or row["claim_id"] in additional_support or row["claim_id"] in answered,
+                f"{row['claim_id']}: claim has no evidence")
 
     # A Claim's evidence_step_ids and an EvidenceStep's produced_claim_ids are
     # the two projections of the same many-to-many connection.  Neither side
