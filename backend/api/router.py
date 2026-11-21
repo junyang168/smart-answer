@@ -418,7 +418,13 @@ def get_sunday_service_resources() -> SundayServiceResources:
 
 @sunday_service_router.post("/{date:path}/ppt")
 def create_sunday_service_ppt(date: str) -> FileResponse:
-    ppt_path = generate_sunday_service_ppt(date)
+    from backend.sunday_presenter import PptPublicationPending
+    cloud_pending = False
+    try:
+        ppt_path = generate_sunday_service_ppt(date)
+    except PptPublicationPending as exc:
+        ppt_path = exc.draft_path
+        cloud_pending = True
     from .service import repository
     from backend.sunday_presenter import service_day
     from backend.sunday_service_skeletons import skeleton_status
@@ -433,7 +439,9 @@ def create_sunday_service_ppt(date: str) -> FileResponse:
         ppt_path,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=ppt_path.name,
-        headers={"X-Sunday-Ppt-Missing": quote(json.dumps(missing, ensure_ascii=False))},
+        headers={"X-Sunday-Ppt-Missing": quote(json.dumps(missing, ensure_ascii=False)),
+                 "X-Sunday-Ppt-Cloud-Status": "pending" if cloud_pending else "published",
+                 "Cache-Control": "no-store"},
     )
 
 

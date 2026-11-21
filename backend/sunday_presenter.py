@@ -6,6 +6,9 @@ does not prove that the cloud copy is available yet.
 from dataclasses import dataclass
 from hashlib import sha256
 from datetime import date, datetime, timedelta
+import errno
+from io import BytesIO
+import time
 import json
 import os
 from pathlib import Path
@@ -17,6 +20,27 @@ from zoneinfo import ZoneInfo
 from backend.sunday_data_lock import sunday_write
 
 ZONE = ZoneInfo("America/Chicago")
+
+
+class PptPublicationPending(RuntimeError):
+    def __init__(self, draft_path: Path):
+        super().__init__('PPT 已生成；OneDrive 尚未更新，已保留下載檔。')
+        self.draft_path = draft_path
+
+
+def _file_provider_retry(action):
+    """Retry only transient macOS File Provider errors, with a fixed bound."""
+    for attempt, delay in enumerate((.25, .75, 1.5, 0)):
+        try:
+            return action()
+        except OSError as exc:
+            if exc.errno not in {errno.EDEADLK, errno.EAGAIN, errno.EBUSY} or attempt == 3:
+                raise
+            time.sleep(delay)
+
+
+def _read_bytes(path):
+    return _file_provider_retry(path.read_bytes)
 
 
 def service_day(value: str) -> date:
@@ -112,21 +136,21 @@ class OneDrivePpts:
     def _copy(source: Path, target: Path) -> Path:
         if target.is_symlink():
             raise ValueError("PPT 不可使用符號連結")
-        if target.exists() and sha256(source.read_bytes()).digest() == sha256(target.read_bytes()).digest():
+        if target.exists() and sha256(_read_bytes(source)).digest() == sha256(_read_bytes(target)).digest():
             return target
         fd, temporary = tempfile.mkstemp(prefix=".ppt-", suffix=".tmp", dir=target.parent)
         try:
-            with os.fdopen(fd, "wb") as stream, source.open("rb") as original:
+            with os.fdopen(fd, "wb") as stream, BytesIO(_read_bytes(source)) as original:
                 shutil.copyfileobj(original, stream)
-            if sha256(Path(temporary).read_bytes()).digest() != sha256(source.read_bytes()).digest():
+            if sha256(_read_bytes(Path(temporary))).digest() != sha256(_read_bytes(source)).digest():
                 raise OSError("PPT 複製核對失敗，保留原檔")
-            Path(temporary).replace(target)
+            _file_provider_retry(lambda: Path(temporary).replace(target))
         finally:
             Path(temporary).unlink(missing_ok=True)
         return target
 
     def _archive(self, day: date, source: Path) -> Path:
-        digest = sha256(source.read_bytes()).hexdigest()
+        digest = sha256(_read_bytes(source)).hexdigest()
         return self._copy(source, self.archive_folder(day, "崇拜PPT版本") / f"{digest}-{source.name}")
 
     def _retire_legacy_generated(self, day: date) -> None:
@@ -152,14 +176,14 @@ class OneDrivePpts:
         state_path = self._state_path(day)
         state = json.loads(state_path.read_text()) if state_path.exists() else {}
         owned = (state.get("kind") == "generated" and target.exists() and
-                 state.get("sha256") == sha256(target.read_bytes()).hexdigest())
+                 state.get("sha256") == sha256(_read_bytes(target)).hexdigest())
         if target.exists() and not owned:
             # Still allow a new draft to be downloaded, without replacing the
             # human revision used for presentation, final download and email.
             result = self._archive(day, source)
         else:
             result = self._copy(source, target)
-            self._save_state(state_path, {"kind": "generated", "sha256": sha256(target.read_bytes()).hexdigest()})
+            self._save_state(state_path, {"kind": "generated", "sha256": sha256(_read_bytes(source)).hexdigest()})
         self._retire_legacy_generated(day)
         return result
 
@@ -167,7 +191,7 @@ class OneDrivePpts:
     def publish_final(self, day: date, source: Path) -> Path:
         target = self.generated(day)
         target.parent.mkdir(exist_ok=True)
-        if target.exists() and target.read_bytes() != source.read_bytes():
+        if target.exists() and _read_bytes(target) != _read_bytes(source):
             self._archive(day, target)
         # Persist manual ownership first: even an identical-byte upload must
         # prevent a later background render from replacing the approved file.

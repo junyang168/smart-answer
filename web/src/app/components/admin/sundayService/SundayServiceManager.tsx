@@ -444,7 +444,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pptGenerating, setPptGenerating] = useState<string | null>(null);
-  const [pptResult, setPptResult] = useState<{ date: string; message: string; failed: boolean } | null>(null);
+  const [pptResult, setPptResult] = useState<{ date: string; message: string; failed: boolean; cloudPending?: boolean } | null>(null);
   const [finalPptUploading, setFinalPptUploading] = useState(false);
   const [finalPptDownloading, setFinalPptDownloading] = useState<string | null>(null);
   const [emailSending, setEmailSending] = useState<string | null>(null);
@@ -897,7 +897,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
     setFeedback(null);
     setError(null);
     try {
-      const { blob, missing } = await generateSundayServicePpt(date);
+      const { blob, missing, cloudPending } = await generateSundayServicePpt(date);
       if (blob.size === 0) {
         throw new Error("產生的檔案內容為空");
       }
@@ -912,7 +912,8 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
       document.body.removeChild(anchor);
       window.URL.revokeObjectURL(url);
       const notice = missing.length ? ` 可先檢查版面，資料尚缺 ${missing.join("、")}。` : "";
-      setPptResult({ date, message: `已生成 ${fileName}，已要求瀏覽器下載。${notice}`, failed: false });
+      const syncNotice = cloudPending ? " OneDrive 暫時無法更新；下載檔已保留，雲端及 Presenter 尚未更新。請稍後重試，或修改後上傳最終 PPT。" : "";
+      setPptResult({ date, message: `已生成 ${fileName}，已要求瀏覽器下載。${notice}${syncNotice}`, failed: false, cloudPending });
     } catch (err) {
       const message = err instanceof Error ? err.message : "生成 PPT 失敗，沒有下載檔案，請稍後重試。";
       setPptResult({ date, message, failed: true });
@@ -1392,7 +1393,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
               </div>
               {pptGenerating === editingDate && <p role="status" className="text-sm text-blue-800">正在生成 {editingDate} 的 PPT，完成後會開始下載…</p>}
               {pptResult?.date === editingDate && (
-                <div role={pptResult.failed ? "alert" : "status"} className={`whitespace-pre-line rounded border p-3 text-sm ${pptResult.failed ? "border-red-200 bg-red-50 text-red-800" : "border-green-200 bg-green-50 text-green-800"}`}>
+                <div role={pptResult.failed ? "alert" : "status"} className={`whitespace-pre-line rounded border p-3 text-sm ${pptResult.failed ? "border-red-200 bg-red-50 text-red-800" : pptResult.cloudPending ? "border-amber-200 bg-amber-50 text-amber-900" : "border-green-200 bg-green-50 text-green-800"}`}>
                   {pptResult.message}
                 </div>
               )}

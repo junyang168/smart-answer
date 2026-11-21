@@ -1962,7 +1962,16 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
             try:
                 return cloud.publish_generated(service_day(date), output_path)
             except (ValueError, OSError) as exc:
-                raise HTTPException(status_code=503, detail="PPT 已生成，但無法存入 OneDrive；請重試：" + str(exc)) from exc
+                # The download must survive a File Provider outage. Never mark
+                # this as published, and never discard the only generated copy.
+                from backend.sunday_presenter import PptPublicationPending
+                draft_root = SUNDAY_WORSHIP_DIR / 'generated-drafts'
+                draft_root.mkdir(parents=True, exist_ok=True)
+                retained = Path(tempfile.mkdtemp(prefix=service.date + '-', dir=draft_root)) / filename
+                shutil.copyfile(output_path, retained)
+                import logging
+                logging.getLogger(__name__).warning('OneDrive PPT publication pending for %s: %s', service.date, exc)
+                raise PptPublicationPending(retained) from exc
         return output_path
     except PptTextOverflowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
