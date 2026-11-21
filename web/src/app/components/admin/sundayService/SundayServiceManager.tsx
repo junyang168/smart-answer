@@ -420,7 +420,18 @@ function formatScriptureDisplay(
     });
 }
 
-export function SundayServiceManager() {
+function dallasToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
+export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" | "history" }) {
+  const [today, setToday] = useState(dallasToday);
+  useEffect(() => {
+    const timer = window.setInterval(() => setToday(dallasToday()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [services, setServices] = useState<SundayServiceEntry[]>([]);
   const [resources, setResources] = useState<SundayServiceResources>({ workers: [], songs: [] });
   const [scriptureBooks, setScriptureBooks] = useState<ScriptureBook[]>([]);
@@ -630,32 +641,18 @@ export function SundayServiceManager() {
     }
   }, [emailBodyHtml]);
 
-  const upcomingServiceDate = useMemo(() => {
-    if (services.length === 0) {
-      return null;
-    }
-    const now = new Date();
-    const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-    let selectedDate: string | null = null;
-    let selectedTimestamp = Number.POSITIVE_INFINITY;
-
-    services.forEach((entry: SundayServiceEntry) => {
-      const normalizedDate = entry.date?.trim();
-      if (!normalizedDate) {
-        return;
-      }
-      const timestamp = parseServiceDateValue(normalizedDate);
-      if (timestamp === null || timestamp < todayUtc) {
-        return;
-      }
-      if (timestamp < selectedTimestamp) {
-        selectedTimestamp = timestamp;
-        selectedDate = normalizedDate;
-      }
+  const visibleServices = useMemo(() => {
+    const cutoff = parseServiceDateValue(today)!;
+    return services.filter((entry) => {
+      const timestamp = parseServiceDateValue(entry.date);
+      return view === "history" ? timestamp === null || timestamp < cutoff : timestamp !== null && timestamp >= cutoff;
+    }).sort((a, b) => {
+      const delta = (parseServiceDateValue(a.date) ?? 0) - (parseServiceDateValue(b.date) ?? 0);
+      return view === "history" ? -delta : delta;
     });
+  }, [services, today, view]);
 
-    return Number.isFinite(selectedTimestamp) ? selectedDate : null;
-  }, [services]);
+  const upcomingServiceDate = view === "upcoming" ? visibleServices[0]?.date ?? null : null;
 
   const workersByName = useMemo(() => {
     const map = new Map<string, SundayWorker>();
@@ -1177,12 +1174,18 @@ export function SundayServiceManager() {
       <header className="rounded-lg border border-blue-100 bg-blue-50 p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">主日服事管理</h2>
+            <h2 className="text-2xl font-bold text-gray-900">{view === "history" ? "歷史主日服事" : "主日服事管理"}</h2>
             <p className="mt-1 text-sm text-gray-600">
               管理主日服事同工、詩歌、讀經經文與家事報告。
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href={view === "history" ? "/admin/sunday-service" : "/admin/sunday-service/history"}
+              className="rounded border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              {view === "history" ? "本週及未來安排" : "歷史主日"}
+            </Link>
             <button
               type="button"
               className="rounded border border-green-300 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
@@ -1215,7 +1218,7 @@ export function SundayServiceManager() {
         </div>
       </header>
 
-      <SundayPresenterFolder />
+      {view === "upcoming" && <SundayPresenterFolder />}
 
       {error && (
         <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1230,8 +1233,8 @@ export function SundayServiceManager() {
 
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <header className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-800">主日服事清單</h3>
-          <span className="text-sm text-gray-500">共 {services.length} 筆</span>
+          <h3 className="text-lg font-semibold text-gray-800">{view === "history" ? "歷史紀錄" : "本週及未來安排"}</h3>
+          <span className="text-sm text-gray-500">共 {visibleServices.length} 筆</span>
         </header>
         <div className="overflow-auto">
           <table className="min-w-full table-fixed text-left text-sm">
@@ -1250,7 +1253,7 @@ export function SundayServiceManager() {
               </tr>
             </thead>
             <tbody>
-              {services.map((entry: SundayServiceEntry) => {
+              {visibleServices.map((entry: SundayServiceEntry) => {
                 const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
                 const entryDateValue = entry.date?.trim() ?? "";
                 const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
@@ -1332,10 +1335,10 @@ export function SundayServiceManager() {
                   </tr>
                 );
               })}
-              {services.length === 0 && (
+              {visibleServices.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">
-                    尚未建立主日服事資訊。
+                    {view === "history" ? "尚無歷史主日紀錄。" : "尚未建立本週或未來的主日安排。"}
                   </td>
                 </tr>
               )}
