@@ -224,7 +224,7 @@ def test_flash_preflight_reuses_existing_locator_transaction(relocation):
     store, root, args = setup(relocation)
     assert flow.preflight(store, 'S', published=args['published'])['status'] == 'locator_required'
     flow.prepare(store, root, **args)
-    assert flow.preflight(store, 'S', published=args['published'], locator_root=root)['status'] == 'migrated'
+    assert (result := flow.preflight(store, 'S', published=args['published'], locator_root=root))['status'] == 'migrated', repr(result.get('unlocated', result))
     assert flow.preflight(store, 'S', published=args['published'])['status'] == 'not_needed'
     args['published'].write_text('{"script":[{"index":1,"text":"different publication"}]}')
     assert flow.preflight(store, 'S', published=args['published'])['status'] == 'registration_required'
@@ -244,3 +244,37 @@ def test_clock_aligned_location_requires_context_and_matching_interval():
         assert ea.clock_aligned_location({**row,'alignment':{}},state,new,proof) is None
     with patch(target, return_value={'media_time':100,'media_end_time':110}):
         assert ea.clock_aligned_location(row,state,new,proof) is None
+
+
+def test_editor_metadata_rebind_checks_locators_without_mapping(relocation):
+    store, root, args = setup(relocation)
+    path = args['published']
+    flow.prepare(store, root, **args)
+    flow.run(store, root)
+    snap = ea.snap(path)
+    row = store.get_record_state('source_documents', 'S')['payload']
+    row.update(source_path=str(path), locator_space='spoken_body_v1', source_body_sha256=snap['body_sha256'],
+               source_text_sha256=snap['spoken_text_sha256'],
+               editorial_structure_sha256=snap['editorial_structure_sha256'])
+    store.apply_plan(store.plan_package({'source_documents': [row]}))
+    claim = store.get_record_state('claims', 'C')
+    value = json.loads(path.read_text())
+    value.setdefault('metadata', {})['review_revision'] = 19
+    path.write_text(json.dumps(value, ensure_ascii=False))
+    with patch.object(flow, 'prepare', side_effect=AssertionError('mapping called')):
+        result = flow.preflight(store, 'S', published=path)
+    assert result['status'] == 'migrated', repr(result.get('unlocated', result))
+    assert result['locator_verified'] and result['unlocated_count'] == result['rebound_count'] == 0
+    assert store.get_record_state('source_documents', 'S')['payload']['source_file_sha256'] == m.binding(path)['file_sha256']
+    assert store.get_record_state('claims', 'C') == claim
+    assert flow.preflight(store, 'S', published=path)['status'] == 'not_needed'
+    fragment = store.get_record_state('source_fragments', 'F3')['payload']
+    fragment['media_time'] = 123
+    store.apply_plan(store.plan_package({'source_fragments': [fragment]}))
+    result = flow.preflight(store, 'S', published=path)
+    assert result['status'] == 'locator_required'
+    assert result['unlocated_count'] == 1
+    assert result['unlocated'][0]['object_key'] == 'source_fragments/F3'
+    value['script'][0]['start_time'] = 123
+    path.write_text(json.dumps(value, ensure_ascii=False))
+    assert flow.preflight(store, 'S', published=path)['status'] == 'registration_required'
