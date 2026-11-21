@@ -253,7 +253,9 @@ For Meet, share **Sunday Presenter — OUTPUT** and explicitly enable **Also sha
 
 USB clicker: during audience playback, Presenter captures Page Up / Page Down
 and Left / Right as global shortcuts and routes them through the same serialized
-slide/animation command path as Remote. This works while another app has focus.
+slide/animation command path as Remote. This works while another app has focus. Clicker input uses background CDP delivery
+and never activates Presenter or raises OUTPUT; Remote retains its existing focus
+recovery path.
 Opening settings or preparation, ending playback, or pausing Clicker releases
 these keys. The panel reports registration conflicts and delivery errors. Other
 clicker keys (for example a laser button or blank-screen key) are not remapped.
