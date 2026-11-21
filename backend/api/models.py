@@ -481,6 +481,7 @@ class SundayServiceUpdate(SundayServiceEntry):
 
 
 class SundayServiceResources(BaseModel):
+    displayLabels: dict[str, str] = Field(default_factory=dict)
     workers: List[SundayWorker] = Field(default_factory=list)
     songs: List[SundaySong] = Field(default_factory=list)
 

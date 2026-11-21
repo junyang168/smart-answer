@@ -318,3 +318,21 @@ backend/.venv/bin/python scripts/authorize-sunday-gmail.py \
 「返覆前三行」沒有次數時，只暫緩演唱說明，兩個明確歌名先保存。管理群回答「第一段前三行重複一次」後，僅更新當週 `hymnNotes`，不重寫歌名、其他欄位或全站歌詞。行重複支援明確的前 N 行、1–4 次；未標每段時只處理第一段，明說「每段」才套到每段，原段落界線保留。資料不足、行數不符或超出界線時繼續澄清，不推定次數。
 
 管理員回覆「ignore 前三行，我明天問一問」等明確先略過未套用指示時，用 `defer_pending` 記錄 `deferred`：已保存欄位不變，本次 PPT 不再被該待辦阻擋，問題與完整來源保留，日後仍可補充後解決。只說「明天回答」並未授權先略過，仍維持等待。管理群有待辦時，`ignore_message` 先獨立核對是否確為無關聊天，避免把回答／暫緩／取消吞掉；團契工具不另提供可繞過此核對的忽略出口。
+
+### Shared Sunday prayer management
+
+The Sunday-service page has one independent prayer editor. Its authority is
+`sunday_worship/sunday_prayer.json` beside the dated service file. On first read,
+the repository initializes it from the most recent nonempty past/current dated
+prayer. GET/PUT `/admin/sunday-services/prayer` use a revision for concurrent-edit
+protection; an explicit empty value is retained. Initialization and subsequent
+saves snapshot the shared value into current/future rows under the Sunday data
+lock. Current/future repository reads and writes use the shared authority, so an
+old weekly form cannot restore obsolete prayer text. Past dates keep their dated
+snapshots; already generated or manually revised PPT files are not rewritten.
+
+Received Sunday prose (sermon title, song notes, announcements and prayer) is
+converted to traditional Chinese at repository writes, retaining paragraph breaks
+and URLs. Worker/song identifiers and scripture codes are preserved. Resource
+`displayLabels` supplies traditional labels for names and song titles in the form.
+Original WhatsApp messages remain unchanged.

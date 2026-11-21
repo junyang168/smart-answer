@@ -7,6 +7,7 @@ import { SundaySong } from "@/app/types/sundayService";
 
 interface SundaySongPickerProps {
   value: string;
+  displayLabels?: Record<string,string>;
   songs: SundaySong[];
   recentSongs: SundaySong[];
   placeholder?: string;
@@ -14,14 +15,15 @@ interface SundaySongPickerProps {
   onChange: (value: string) => void;
 }
 
-function formatSongLabel(song: SundaySong): string {
+function formatSongLabel(song: SundaySong, labels: Record<string,string>): string {
+  const title = labels[song.title] ?? song.title;
   if (song.source === "hymnal" && song.hymnalIndex != null) {
-    return `第 ${song.hymnalIndex} 首 | ${song.title}`;
+    return `第 ${song.hymnalIndex} 首 | ${title}`;
   }
   if (song.source === "hymnal") {
-    return `教會聖詩 | ${song.title}`;
+    return `教會聖詩 | ${title}`;
   }
-  return `自訂 | ${song.title}`;
+  return `自訂 | ${title}`;
 }
 
 function matchesSongIndex(song: SundaySong, query: string): boolean {
@@ -37,6 +39,7 @@ function matchesSongIndex(song: SundaySong, query: string): boolean {
 
 export function SundaySongPicker({
   value,
+  displayLabels = {},
   songs,
   recentSongs,
   placeholder = "未指定",
@@ -75,7 +78,7 @@ export function SundaySongPicker({
     setOpen(false);
   };
 
-  const triggerLabel = selectedSong ? formatSongLabel(selectedSong) : value.trim() || placeholder;
+  const triggerLabel = selectedSong ? formatSongLabel(selectedSong, displayLabels) : value.trim() || placeholder;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -139,8 +142,8 @@ export function SundaySongPicker({
                       )}
                       onClick={() => handleSelect(song.title)}
                     >
-                      <span className="text-sm font-medium text-gray-900">{song.title}</span>
-                      <span className="text-xs text-gray-500">{formatSongLabel(song)}</span>
+                      <span className="text-sm font-medium text-gray-900">{displayLabels[song.title] ?? song.title}</span>
+                      <span className="text-xs text-gray-500">{formatSongLabel(song, displayLabels)}</span>
                     </button>
                   );
                 })}
@@ -165,8 +168,8 @@ export function SundaySongPicker({
                     )}
                     onClick={() => handleSelect(song.title)}
                   >
-                    <span className="text-sm font-medium text-gray-900">{song.title}</span>
-                    <span className="text-xs text-gray-500">{formatSongLabel(song)}</span>
+                    <span className="text-sm font-medium text-gray-900">{displayLabels[song.title] ?? song.title}</span>
+                    <span className="text-xs text-gray-500">{formatSongLabel(song, displayLabels)}</span>
                   </button>
                 );
               })}
