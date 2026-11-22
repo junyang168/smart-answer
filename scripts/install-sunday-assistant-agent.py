@@ -10,6 +10,7 @@ from pathlib import Path
 import plistlib
 import secrets
 import shutil
+import sys
 
 from dotenv import dotenv_values, set_key
 
@@ -27,6 +28,11 @@ def main():
         raise SystemExit("Production configuration files must already exist")
     assistant_env = config / "sunday-assistant.env"
     existing = dotenv_values(assistant_env) if assistant_env.exists() else {}
+    browser = os.getenv("SUNDAY_WHATSAPP_CHROME") or existing.get("SUNDAY_WHATSAPP_CHROME")
+    if not browser or not Path(browser).is_file():
+        raise SystemExit("Install standalone chrome-headless-shell and set SUNDAY_WHATSAPP_CHROME before configuring the agent")
+    if sys.platform == 'darwin' and Path(browser).name != 'chrome-headless-shell':
+        raise SystemExit("macOS WhatsApp agent must use chrome-headless-shell, not desktop Chrome.app")
     port = int(existing.get("SUNDAY_WHATSAPP_PORT") or "8766")
     if not 1024 <= port <= 65535:
         raise SystemExit("Bridge port must be between 1024 and 65535")
@@ -56,7 +62,7 @@ def main():
         "SUNDAY_WHATSAPP_PORT": str(port),
         "SUNDAY_WHATSAPP_BRIDGE_URL": bridge_url,
         "SUNDAY_WHATSAPP_AUTOCONNECT": "1",
-        "SUNDAY_WHATSAPP_CHROME": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "SUNDAY_WHATSAPP_CHROME": browser,
     }
     # Keep local subscription runtime configuration outside the plist.
     values.update({k: v for k, v in backend_env.items() if k in {"SUNDAY_CODEX_MODEL", "CODEX_EXECUTABLE", "CODEX_HOME"}})
