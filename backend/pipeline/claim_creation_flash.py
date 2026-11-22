@@ -690,7 +690,7 @@ def selected_groups(groups, keys, only_paragraphs):
     return {n for n, g in enumerate(groups, 1) if wanted & set(ranges(g['paragraph_ranges'], keys))}
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None, visual_source_attestations=None):
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None, visual_source_attestations=None, unit_context_dir=None):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -710,14 +710,24 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         diagram_ids = {v.sentence_id for v in all_sentences if v.source_modality=='visual'}
         row_of = lambda v: v.segment_index.split('/')[0]
         if not keys: raise ValueError('empty creation source')
+        unit_context = None
+        unit_identity = {}
+        if unit_context_dir is not None:
+            from backend.pipeline.claim_unit_plan import UnitContext
+            if not steps_first:
+                raise ValueError('unit context requires grouped steps-first generation')
+            unit_context = UnitContext.load(unit_context_dir, source_id, path)
+            unit_identity = {'unit_plan_sha256': e.digest(unit_context.plan),
+                             'unit_context_contract': unit_context.contract}
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
+            if unit_context: unit_context.reading.verify()
         grouped_package=grouped_package or single_pass
         if steps_first and (single_pass or not grouped_package):raise ValueError('steps-first divides the grouped package task; use --grouped-package')
         compact_audit=compact_audit or grouped_package
         contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package,single_pass=single_pass)
         material_prompt = single_pass_prompt() if single_pass else group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
-        e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id,
+        e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id, **unit_identity,
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
             'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
@@ -773,6 +783,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
                        'context':{pk:paragraphs[pk] for pk in context},
                        'existing_claims': {k:{'statement':v['statement'],'related_ranges':v['related_ranges']} for k,v in candidates.items()}}
+            if unit_context: payload.update(unit_context.for_paragraphs(owned))
             shown = {loc: diagram_text(b) for loc, b in visuals.items() if b.segment_index in owned}
             if shown: payload['diagrams'] = shown
             if single_pass:
@@ -849,7 +860,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
                         'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
-                        'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
+                        'scripture_sentences':scripture, **(unit_context.for_paragraphs(batch) if unit_context else {})},contracts['steps'],STEPS,source_check)
                     # Only a Claim this group made and no other group reuses may be returned.
                     own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
                     repairs=repair_sentence_ids(steps,[v.sentence_id for v in sentences])
@@ -937,6 +948,9 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             partial={'version':VERSION,'status':'partial_test','groups':groups,'chosen_groups':sorted(chosen),
                 'only_paragraphs':sorted(only_paragraphs),'claim_candidates':candidates,'group_claim_ids':group_claims,
                 'not_claims':not_claims,'response':response,'claim_statements':claim_statements,'production_writes':0}
+            if unit_context:
+                partial.update(unit_identity, source_id=source_id, source_file_sha256=hashlib.sha256(raw).hexdigest(),
+                               local_connections=connections)
             e.save(root/'partial-test-result.json',partial)
             return partial
         for n, group in enumerate(groups,1):
@@ -975,7 +989,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
             prompt=RULES+CLAIMS+material_prompt+CONNECTIONS+(STEPS+STEP_RECORDS if steps_first else ''), model_id=ports.identity['gpt']['model'],
             reasoning_effort=ports.identity['gpt']['effort'],max_output_tokens=getattr(getattr(ports,'gpt',None),'max_output_tokens',6000),
-            section_plan={'groups':groups},response_schema={'name':VERSION,'schema':contracts},
+            section_plan={'groups':groups,**unit_identity},response_schema={'name':VERSION,'schema':contracts},
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
         if visuals:identity['source_visual_sha256']=projection.visual_content_sha256
         source_check()
@@ -1009,7 +1023,12 @@ def main():
     from backend.pipeline.claim_model_capacity import ClaimModelCapacity
     from backend.pipeline.claim_refresh import Models
     parser=argparse.ArgumentParser(description='Grouped creation; Flash begins only after a complete candidate')
-    for name in ('source-id','source-file','root','capacity-file'):parser.add_argument('--'+name,required=True)
+    for name in ('root','capacity-file'):parser.add_argument('--'+name,required=True)
+    parser.add_argument('--source-id')
+    parser.add_argument('--unit-context',help='Completed unit plan directory to read during grouped steps-first extraction')
+    inputs=parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument('--source-file')
+    inputs.add_argument('--unit-manifest',help='Plan a source-bound reading unit across lectures')
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
     parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
@@ -1020,11 +1039,23 @@ def main():
     parser.add_argument('--visual-attestations',help="JSON {locator: raw SVG SHA}: diagrams the owner attested as his (#812); any other diagram stops the run")
     parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
+    if args.unit_manifest and any((args.source_id, args.unit_context, args.groups, args.compact_audit, args.grouped_package,
+                                   args.steps_first, args.single_pass, args.through_flash,
+                                   args.only_paragraphs, args.visual_attestations)):
+        parser.error('--unit-manifest takes its source identities and ranges from the manifest')
+    if args.source_file and not args.source_id:
+        parser.error('--source-file requires --source-id')
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
     client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    if args.unit_manifest:
+        from backend.pipeline import claim_unit_plan
+        result=claim_unit_plan.run(args.unit_manifest, root/'unit', ports)
+        print(json.dumps(result,ensure_ascii=False))
+        return
     result=run(args.source_id,args.source_file,root/'creation',ports,
                groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first,
+               unit_context_dir=args.unit_context,
                only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None,
                visual_source_attestations=json.loads(Path(args.visual_attestations).read_text()) if args.visual_attestations else None)
     if args.through_flash:
