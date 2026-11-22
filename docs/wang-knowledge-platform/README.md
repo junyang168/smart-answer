@@ -45,6 +45,7 @@
 | [論證層重建設計](./10-extraction/argument_layer_rebuild_design.md) | #787 草案：分步生成寫入新知識庫實例、Flash 在新實例驗證、重放、投影片讀新實例、試作代碼轉正式 |
 | [从局部主张还原教授的整体论证](./10-extraction/unit_argument_design.md) | #845 设计草案、系列三长短双案例评测与盲测自审 |
 | [系列三单元通读与局部抽取试验](./10-extraction/unit_argument_context_trial_20261122.md) | #845 首轮实现、可复查的试验入口与长短两题结果 |
+| [系列三「耶稣为什么用比喻」整单元实测](./10-extraction/unit_argument_full_trial_20261122.md) | 20 条候选 Claim，跨讲推理、原句定位与长短两题验收 |
 | [GPT 第 1 講首次評分 2026 11 16](./10-extraction/argument_layer_gpt_lecture1_20261116.md) | GPT 6.1 sol 對太5 第 1 講：定案答案 20／22 對，題外話正確提出 |
 | [論證形態評測集](./10-extraction/argument_shape_eval_set.md) | prompt 改動怎麼驗證：按論證形態收的短案例、程式判的斷言、隨每講增長 |
 | [GPT 論證層各輪評分 2026 11 16](./10-extraction/argument_layer_gpt_rounds_20261116.md) | 第 1 講 36／36 通過；第 2 講保留分數 24／33、第二輪 28／33；第 3 講暫停 |

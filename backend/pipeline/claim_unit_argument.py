@@ -1,0 +1,245 @@
+"""Generate unit-wide argument candidates from source-bound groups and their native Claims."""
+
+from collections import defaultdict
+import fcntl
+import json
+from pathlib import Path
+
+from backend.pipeline import claim_creation_flash as creation
+from backend.pipeline import claim_unit_plan as unit
+from backend.pipeline import evidence_refresh as artifacts
+
+
+def load_plan(folder):
+    folder = Path(folder)
+    manifest = unit.UnitManifest.model_validate_json((folder / "unit-manifest.json").read_bytes())
+    first = manifest.sources[0]
+    return unit.UnitContext.load(folder, first.source_id, folder / first.file)
+
+
+def group_passages(context):
+    """Keep discontinuous teaching together, but never join a gap in a quotation."""
+    groups = defaultdict(list)
+    sentences = context.reading.sentences
+    runs = context.plan["runs"]
+    for index, run in enumerate(runs):
+        end = runs[index + 1]["first"] - 1 if index + 1 < len(runs) else len(sentences)
+        passages = groups[run["group"]]
+        for pos in range(run["first"] - 1, end):
+            row = sentences[pos]
+            if (not passages or pos != passages[-1]["positions"][-1]
+                    or row["paragraph"] != passages[-1]["paragraph"]
+                    or row["source_id"] != passages[-1]["source_id"]
+                    or row["modality"] != passages[-1]["modality"]
+                    or row["start"] != passages[-1]["end"]):
+                passages.append(dict(key=f"R{pos + 1:04d}", source_id=row["source_id"],
+                    paragraph=row["paragraph"], modality=row["modality"], text="", positions=[]))
+            passage = passages[-1]
+            passage["text"] += row["text"]
+            passage["end"] = row["end"]
+            passage["positions"].append(pos + 1)
+    return dict(groups)
+
+
+def extract_claims(root, context, group, passages, ports):
+    paragraphs = {p["key"]: p["text"] for p in passages}
+    by_key = {p["key"]: p for p in passages}
+    prompt = creation.CLAIMS + (
+        " 本次是单元内的一个论证组。每个R编号是一段连续原话，可能跨讲回到同一问题。"
+        "related_ranges的first/last和conclusion_anchor的segment_index只能选owned_paragraphs的R编号。"
+        "仅在结论确有讲出的地方锚定。单纯场务或留待解答的问题可没有Claim。"
+    )
+    content = {"group": group, "owned_paragraphs": paragraphs, "existing_claims": {},
+               "sources": {p["key"]: [p["source_id"], p["paragraph"], p["modality"]] for p in passages}}
+    reply = creation.call(root, ports, "creation_claims", content, creation.schemas()["claims"],
+                          prompt, context.reading.verify)
+    candidates = reply["candidates"]
+    repairs = creation.calibrate(candidates, paragraphs)
+    keys = list(paragraphs)
+    for c in candidates:
+        anchor = c["conclusion_anchor"]
+        key = anchor["segment_index"]
+        quote = anchor["verbatim_excerpt"]
+        if (key not in by_key or not quote.strip() or quote not in paragraphs[key]
+                or not c["statement"].strip() or c["existing_claim_id"] is not None):
+            raise ValueError("Claim conclusion is not bound to its supplied passage")
+        related = creation.ranges(c["related_ranges"], keys)
+        if key not in related:
+            raise ValueError("Claim ranges omit the conclusion")
+        p = by_key[key]
+        if p["modality"] != "spoken":
+            raise ValueError("Claim conclusion must cite his own words")
+        start = paragraphs[key].index(quote) + context.reading.sentences[p["positions"][0] - 1]["start"]
+        c["at"] = [i for i in p["positions"] if context.reading.sentences[i-1]["end"] > start
+                   and context.reading.sentences[i-1]["start"] < start + len(quote)]
+        c["group"] = group
+        c["source_id"] = p["source_id"]
+        c["paragraph"] = p["paragraph"]
+    artifacts.save(root / "quote-calibration.json", repairs)
+    return candidates
+
+
+def run(plan_dir, root, ports):
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "unit-argument.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        context = load_plan(plan_dir)
+        groups = group_passages(context)
+        artifacts.save(root / "intent.json", dict(unit_plan_sha256=artifacts.digest(context.plan),
+                       sources=context.reading.sources, model=ports.identity["gpt"]))
+        claims = {}
+        for i, (name, passages) in enumerate(groups.items(), 1):
+            for c in extract_claims(root / f"group-{i:02d}", context, name, passages, ports):
+                claims[f"C{len(claims) + 1:03d}"] = c
+        artifacts.save(root / "claims.json", claims)
+        return connect(root, context, claims, ports)
+
+
+TEXT = {"type": "string"}
+POSITIONS = creation.array({"type": "integer"})
+EDGE_TYPES = ["supports", "answers", "refutes", "qualifies", "illustrates", "contextualizes"]
+GRAPH = creation.schema("unit_argument", {
+    "new_nodes": creation.array(creation.object_schema({
+        "id": TEXT, "kind": {"type": "string", "enum": ["evidence", "observation", "example", "position", "question", "claim"]},
+        "statement": TEXT, "at": POSITIONS})),
+    "edges": creation.array(creation.object_schema({
+        "from_id": TEXT, "to_id": TEXT, "relation": {"type": "string", "enum": EDGE_TYPES},
+        "reason": TEXT, "at": POSITIONS,
+        "attribution": {"type": "string", "enum": ["explicit", "direct_inference", "editorial"]}})),
+    "question_states": creation.array(creation.object_schema({
+        "question_id": TEXT, "state": {"type": "string", "enum": ["answered", "partly_answered", "open"]},
+        "remaining": TEXT})),
+    "gaps": creation.array(creation.object_schema({"description": TEXT, "at": POSITIONS})),
+})
+GRAPH_PROMPT = (
+    "你是讲课记录的论证整理者。输入为同一阅读单元按录音顺序逐句编号的真实原文、各组已生成的Claim、"
+    "原先留题的节点。还原教授怎样从问题走到答案。先从开题追到后来真正作答的地方，再从最终判断倒查承重前提。"
+    "解释每条承接究竟证明目标中的哪一部分，以及为什么。若一段推理先提出困难，后面有解释消除了它，"
+    "把困难保留为question，解释用answers指向它，并将该解释连到它支持的下一步；明示两端如何相容。"
+    "区分采用一种做法的缘由、它想达到的目的、成立的条件、尚可能发生的结果。"
+    "现有C和Q编号直接引用，不重复生成。new_nodes用于缺的证据、关键中间步骤、独立插问、例证、"
+    "对方看法与来源确实讲出但各组遗漏的主张。给每个新节点唯一编号N1、N2等。"
+    "保留经文对读、语法和上下文怎样起作用，每一处重要限定以及插问自己的答案。"
+    "简单判断可由一则例证支持，不拆故事细节。若支持跨讲，分别指明原来的起点与后来的作答，"
+    "不能用后来重述抹掉原来的留题。只引用输入句号的整数位置，at可列多句。"
+    "证据、例子等指向受支持或被说明的节点，回答指向问题节点。重要推理应能沿这些边直接走通。"
+    "reason应写成可核对的中文判断，讲清如何推出，每条边也列支持该关系的原文句号。"
+    "每个新节点若为claim，其at只引作出这个判断的那一讲；跨讲的支持另建边。"
+    "explicit表示教授实际说明此关系，direct_inference表示其所述步骤可直接推出，编辑联系应标editorial。"
+    "所有question都填状态，未答的保留未答，不补答案。gaps只列读过原文后仍无法落实的必要承接。"
+    "不要为把图连满而强加关系，不用任何外部资料。"
+)
+
+
+def check_positions(values, length):
+    if (not values or len(set(values)) != len(values)
+            or any(type(i) is not int or not 1 <= i <= length for i in values)):
+        raise ValueError(f"invalid unit evidence positions: {values}")
+
+
+def bind_graph(reading, claims, questions, answer):
+    sentences = reading.sentences
+    nodes = {cid: {"kind": "claim", "statement": c["statement"], "at": c["at"]} for cid, c in claims.items()}
+    nodes.update(questions)
+    for item in answer["new_nodes"]:
+        key = item["id"]
+        if not key.strip() or key in nodes or not item["statement"].strip():
+            raise ValueError(f"invalid or duplicate unit node {key}")
+        nodes[key] = {k: v for k, v in item.items() if k != "id"}
+    for key, node in nodes.items():
+        check_positions(node["at"], len(sentences))
+        if node["kind"] == "claim" and len({sentences[i-1]["source_id"] for i in node["at"]}) != 1:
+            raise ValueError(f"Claim {key} spans multiple lecture identities")
+    edges = set()
+    answered = set()
+    for link in answer["edges"]:
+        a, b, rel = link["from_id"], link["to_id"], link["relation"]
+        signature = (a, b, rel, link["reason"].strip(), tuple(sorted(link["at"])))
+        if a not in nodes or b not in nodes or a == b or signature in edges or not link["reason"].strip():
+            raise ValueError(f"invalid unit edge {a} {rel} {b}")
+        check_positions(link["at"], len(sentences))
+        edges.add(signature)
+        if rel == "answers":
+            if nodes[b]["kind"] != "question":
+                raise ValueError("an answer must point to a question")
+            if link["attribution"] != "editorial":
+                answered.add(b)
+    states = answer["question_states"]
+    wanted = {key for key, node in nodes.items() if node["kind"] == "question"}
+    if len(states) != len(wanted) or {r["question_id"] for r in states} != wanted:
+        raise ValueError("every unit question needs one disposition")
+    for row in states:
+        if (row["state"] != "open") != (row["question_id"] in answered):
+            raise ValueError("question disposition disagrees with source-backed answer edges")
+        if row["state"] != "answered" and not row["remaining"].strip():
+            raise ValueError("open question needs its unresolved part")
+    for gap in answer["gaps"]:
+        check_positions(gap["at"], len(sentences))
+        if not gap["description"].strip():
+            raise ValueError("unit gap needs a description")
+    return nodes
+
+
+def connect(root, context, claims, ports):
+    rows = context.reading.sentences
+    questions = {f"Q{i:03d}": dict(kind="question", statement=q["question"], at=[q["at"]])
+                 for i, q in enumerate(context.plan["questions"], 1)}
+    lines = []
+    previous = None
+    for i, row in enumerate(rows, 1):
+        location = (row["source_id"], row["paragraph"], row["modality"])
+        if location != previous:
+            lines.append(list(location))
+            previous = location
+        lines.append([i, row["text"]])
+    compact = {cid: {"statement": c["statement"], "group": c["group"], "at": c["at"],
+                     "question": c["answers_question"], "support_hint": c["support_hint"]}
+               for cid, c in claims.items()}
+    answer = creation.call(root / "connections", ports, "creation_unit_connections",
+        {"sentences": lines, "claims": compact, "questions": questions}, GRAPH, GRAPH_PROMPT,
+        context.reading.verify)
+    nodes = bind_graph(context.reading, claims, questions, answer)
+    result = dict(version="unit_argument_candidate_v1", status="candidate_with_gaps" if answer["gaps"] else "candidate",
+                  unit_plan_sha256=artifacts.digest(context.plan), sources=context.reading.sources,
+                  sentences=rows, group_runs=context.plan["runs"], claims=claims, nodes=nodes, edges=answer["edges"],
+                  question_states=answer["question_states"], gaps=answer["gaps"], production_writes=0)
+    context.reading.verify()
+    artifacts.save(root / "unit-argument.json", result)
+    receipt = {"candidate_sha256": artifacts.digest(result), "nodes": len(nodes), "edges": len(answer["edges"]),
+               "claims": sum(n["kind"] == "claim" for n in nodes.values()), "sentences_read": len(rows),
+               "groups_read": len({r["group"] for r in context.plan["runs"]}), "status": result["status"]}
+    artifacts.save(root / "unit-argument-receipt.json", receipt)
+    (root / "unit-argument.md").write_text(render(result, receipt), encoding="utf-8")
+    return receipt
+
+def render(candidate, receipt):
+    """A readable projection of the frozen candidate; no editorial rewriting."""
+    rows = candidate["sentences"]
+
+    def sources(positions):
+        return "、".join(dict.fromkeys(
+            f'{rows[i-1]["source_id"]} {rows[i-1]["paragraph"]} {rows[i-1]["time"]}' for i in positions))
+
+    def quotes(positions):
+        return [f'> {rows[i-1]["text"]}（{rows[i-1]["source_id"]} {rows[i-1]["sentence_id"]}）' for i in positions]
+
+    lines = ["# 单元论证候选", "", f'候选摘要值 `{receipt["candidate_sha256"]}`', "", "## 全部 Claim", ""]
+    for key, node in candidate["nodes"].items():
+        if node["kind"] == "claim":
+            lines.extend([f'- **{key}** {node["statement"]}（{sources(node["at"])}）'])
+    lines.extend(["", "## 问题、依据和例证", ""])
+    for key, node in candidate["nodes"].items():
+        if node["kind"] != "claim":
+            lines.append(f'- **{key}** ({node["kind"]}) {node["statement"]}（{sources(node["at"])}）')
+    lines.extend(["", "## 逐条论证关系与原句", ""])
+    for edge in candidate["edges"]:
+        lines.extend([f'### {edge["from_id"]} → {edge["to_id"]} · {edge["relation"]}', "",
+            candidate["nodes"][edge["from_id"]]["statement"], "", candidate["nodes"][edge["to_id"]]["statement"],
+            "", edge["reason"], "", *quotes(edge["at"]), ""])
+    lines.extend(["## 待解问题", ""])
+    for row in candidate["question_states"]:
+        lines.append(f'- {row["question_id"]} · {row["state"]} {row["remaining"]}')
+    for gap in candidate["gaps"]:
+        lines.append(f'- {gap["description"]}（{sources(gap["at"])}）')
+    return "\n".join(lines) + "\n"

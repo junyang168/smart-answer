@@ -287,6 +287,30 @@ def ranges(rows, keys):
     return selected
 
 
+def project_unit_claim_ranges(rows, keys, sentences):
+    """Map valid local sentence ranges onto the paragraph-only native Claim schema."""
+    if not any('#' in endpoint for row in rows for endpoint in row.values()):
+        return rows
+    bounds = {}
+    for i, sentence in enumerate(sentences):
+        pk = sentence.segment_index.split('/')[0]
+        bounds[sentence.sentence_id] = (pk, i, i)
+        bounds[pk] = (pk, bounds.get(pk, (pk, i, i))[1], i)
+    projected = set()
+    positions = set()
+    for row in rows:
+        if row['first'] not in bounds or row['last'] not in bounds:
+            raise ValueError('unit Claim range has an unknown local sentence endpoint')
+        first, start, _ = bounds[row['first']]
+        last, _, end = bounds[row['last']]
+        selected = set(range(start, end + 1))
+        if end < start or selected & positions:
+            raise ValueError('unit Claim sentence ranges overlap or are reversed')
+        positions.update(selected)
+        projected.update(ranges([{'first': first, 'last': last}], keys))
+    return _ranges(projected, keys)
+
+
 def check_shape(value, spec):
     """Check just the existing strict extraction JSON vocabulary (no new dependency)."""
     # The producer sub-contract only uses objects, arrays, primitives and enums.
@@ -805,6 +829,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             e.save(root/gid/'claims'/'quote-calibration.json',calibrate(result['candidates'],paragraphs))
             group_claims[gid] = []; new_claims[gid] = []
             for candidate in result['candidates']:
+                if unit_context:
+                    candidate['related_ranges'] = project_unit_claim_ranges(candidate['related_ranges'], keys, all_sentences)
                 cid = candidate.pop('existing_claim_id'); related = ranges(candidate['related_ranges'], keys)
                 if not related or not set(related) <= set(owned+context) or not candidate['support_hint'].strip():
                     raise ValueError('Claim range or support hint is incomplete/outside task')
@@ -1028,6 +1054,7 @@ def main():
     parser.add_argument('--unit-context',help='Completed unit plan directory to read during grouped steps-first extraction')
     inputs=parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument('--source-file')
+    inputs.add_argument('--unit-argument',help='Generate all Claims and reasoning connections from a completed unit plan directory')
     inputs.add_argument('--unit-manifest',help='Plan a source-bound reading unit across lectures')
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
@@ -1039,15 +1066,20 @@ def main():
     parser.add_argument('--visual-attestations',help="JSON {locator: raw SVG SHA}: diagrams the owner attested as his (#812); any other diagram stops the run")
     parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
-    if args.unit_manifest and any((args.source_id, args.unit_context, args.groups, args.compact_audit, args.grouped_package,
+    if (args.unit_manifest or args.unit_argument) and any((args.source_id, args.unit_context, args.groups, args.compact_audit, args.grouped_package,
                                    args.steps_first, args.single_pass, args.through_flash,
                                    args.only_paragraphs, args.visual_attestations)):
-        parser.error('--unit-manifest takes its source identities and ranges from the manifest')
+        parser.error('unit input takes its source identities and ranges from the manifest')
     if args.source_file and not args.source_id:
         parser.error('--source-file requires --source-id')
-    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
+    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass or args.unit_argument else 6000,executable=args.codex_executable)
     client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    if args.unit_argument:
+        from backend.pipeline import claim_unit_argument
+        result=claim_unit_argument.run(args.unit_argument, root/'argument', ports)
+        print(json.dumps(result,ensure_ascii=False))
+        return
     if args.unit_manifest:
         from backend.pipeline import claim_unit_plan
         result=claim_unit_plan.run(args.unit_manifest, root/'unit', ports)
