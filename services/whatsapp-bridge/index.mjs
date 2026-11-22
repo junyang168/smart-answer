@@ -1,4 +1,5 @@
 import http from "node:http";
+import { browserOptions } from "./browser-options.mjs";
 import { timingSafeEqual } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -74,10 +75,8 @@ async function connect() {
     const [{ default: wweb }, { default: qrcode }] = await Promise.all([import("whatsapp-web.js"), import("qrcode")]);
     const { Client, LocalAuth } = wweb;
     if (client) await client.destroy().catch(() => {});
-    const executable = process.env.SUNDAY_WHATSAPP_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-    if (!existsSync(executable)) throw new Error("Configure SUNDAY_WHATSAPP_CHROME with an installed Chrome executable");
-    client = new Client({ authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }),
-      puppeteer: { headless: true, executablePath: executable } });
+    const puppeteer = browserOptions();
+    client = new Client({ authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }), puppeteer });
     client.on("qr", async code => { qr = await qrcode.toDataURL(code); state = "qr"; });
     client.on("ready", () => { state = "ready"; qr = null; connecting = false; lastHistorySync = 0; });
     client.on("auth_failure", () => { state = "auth_failure"; connecting = false; lastError = "WhatsApp 登入失敗，請重新連接"; });

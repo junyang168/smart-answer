@@ -518,6 +518,20 @@ The host's OneDrive Mac client performs upload, so a successful local write is
 not a cloud-delivery confirmation. The presenter installer contains no Microsoft
 session or host-specific storage configuration.
 
+On macOS the WhatsApp bridge uses Google's standalone `chrome-headless-shell`,
+not `/Applications/Google Chrome.app`. Sharing the desktop app binary lets the
+background agent receive Dock activation after the user's Chrome quits, leaving
+Chrome active with no window. Provision the shell with the installed bridge's
+`@puppeteer/browsers` installer, pin its version (match the existing profile's
+Chrome version when migrating), and keep it outside immutable releases under
+`smart-answer-config/browsers/`. Set `SUNDAY_WHATSAPP_CHROME` to that executable
+in `sunday-assistant.env`; the bridge uses Puppeteer's `headless: 'shell'` mode.
+The installer preserves this path and refuses desktop Chrome on macOS. Keep
+`SUNDAY_WHATSAPP_STATE_DIR` and its `auth/` directory unchanged when migrating;
+never copy or launch a second worker against the production login profile.
+Deployment's normal supervisor stop/start performs the browser handoff. Do not
+stop all Chrome processes: the user's browser must remain independent.
+
 Prepare its protected shared secret/configuration and LaunchAgent once with
 `backend/.venv/bin/python scripts/install-sunday-assistant-agent.py`. This only
 writes configuration; it does not load the service or enable collection.
