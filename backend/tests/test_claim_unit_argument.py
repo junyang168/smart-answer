@@ -90,3 +90,10 @@ def test_complete_unit_replays_and_preserves_local_claim_identity(tmp_path):
     assert candidate["claims"]["C001"]["source_id"] == "T"
     assert candidate["sentences"][0]["source_id"] == "previous"
     assert "C001 → Q001" in (run / "unit-argument.md").read_text()
+
+    packet = argument.blind_reading(candidate)
+    assert argument.json.loads((run / "unit-argument-reading.json").read_bytes()) == packet
+    assert packet["nodes"]["C001"] == {"kind": "claim", "statement": candidate["claims"]["C001"]["statement"]}
+    assert packet["edges"]["E1"] == dict(from_id="C001", to_id="Q001", relation="answers",
+        reason="後一講作答", attribution="explicit")
+    assert set(packet) == {"nodes", "edges", "question_states", "gaps"}

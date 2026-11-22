@@ -117,11 +117,13 @@ GRAPH_PROMPT = (
     "原先留题的节点。还原教授怎样从问题走到答案。先从开题追到后来真正作答的地方，再从最终判断倒查承重前提。"
     "解释每条承接究竟证明目标中的哪一部分，以及为什么。若一段推理先提出困难，后面有解释消除了它，"
     "把困难保留为question，解释用answers指向它，并将该解释连到它支持的下一步；明示两端如何相容。"
-    "区分采用一种做法的缘由、它想达到的目的、成立的条件、尚可能发生的结果。"
+    "按本题实际讲法还原每一支理由所支持的判断、反驳的看法或限定的结果。若几支共同回答一个问题，"
+    "保留各自通向该问题的路线；仅有共同主题不足以互相证明。教授直接作判断时可只有一个节点。"
     "现有C和Q编号直接引用，不重复生成。new_nodes用于缺的证据、关键中间步骤、独立插问、例证、"
     "对方看法与来源确实讲出但各组遗漏的主张。给每个新节点唯一编号N1、N2等。"
-    "保留经文对读、语法和上下文怎样起作用，每一处重要限定以及插问自己的答案。"
-    "简单判断可由一则例证支持，不拆故事细节。若支持跨讲，分别指明原来的起点与后来的作答，"
+    "设想读者只见节点陈述与关系说明，看不到原句：保留支撑判断的具体依据、限定和插问自己的答案。"
+    "若有例证，说清故事说明哪一点；教授亲自把它用到什么对象、处境或行动，或排除了什么推论，就具体保留。"
+    "故事中人物的行为与教授的教导分开。若支持跨讲，分别指明原来的起点与后来的作答，"
     "不能用后来重述抹掉原来的留题。只引用输入句号的整数位置，at可列多句。"
     "证据、例子等指向受支持或被说明的节点，回答指向问题节点。重要推理应能沿这些边直接走通。"
     "reason应写成可核对的中文判断，讲清如何推出，每条边也列支持该关系的原文句号。"
@@ -206,12 +208,27 @@ def connect(root, context, claims, ports):
                   question_states=answer["question_states"], gaps=answer["gaps"], production_writes=0)
     context.reading.verify()
     artifacts.save(root / "unit-argument.json", result)
+    artifacts.save(root / "unit-argument-reading.json", blind_reading(result))
     receipt = {"candidate_sha256": artifacts.digest(result), "nodes": len(nodes), "edges": len(answer["edges"]),
                "claims": sum(n["kind"] == "claim" for n in nodes.values()), "sentences_read": len(rows),
                "groups_read": len({r["group"] for r in context.plan["runs"]}), "status": result["status"]}
     artifacts.save(root / "unit-argument-receipt.json", receipt)
     (root / "unit-argument.md").write_text(render(result, receipt), encoding="utf-8")
     return receipt
+
+def blind_reading(candidate):
+    """Expose argument content without transcript fields, anchors, or retrieval paths."""
+    return {
+        "nodes": {key: {"kind": node["kind"], "statement": node["statement"]}
+                  for key, node in candidate["nodes"].items()},
+        "edges": {f"E{i}": {key: edge[key] for key in
+                  ("from_id", "to_id", "relation", "reason", "attribution")}
+                  for i, edge in enumerate(candidate["edges"], 1)},
+        "question_states": [{key: row[key] for key in ("question_id", "state", "remaining")}
+                            for row in candidate["question_states"]],
+        "gaps": [gap["description"] for gap in candidate["gaps"]],
+    }
+
 
 def render(candidate, receipt):
     """A readable projection of the frozen candidate; no editorial rewriting."""
