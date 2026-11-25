@@ -146,6 +146,18 @@ type TreeChild = {
   direction: "in" | "refuted_position";
 };
 
+type SecondaryTarget = {
+  edge: GraphEdge;
+  node: GraphNode;
+};
+
+type ComponentTree = {
+  root: GraphNode;
+  totalNodes: number;
+  secondaryCount: number;
+  isMain: boolean;
+};
+
 function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void }) {
   const mediaList = Object.values(unit.media);
   const [activeSourceId, setActiveSourceId] = useState<string>(mediaList[0]?.source_id ?? "");
@@ -188,20 +200,38 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
     return () => el.removeEventListener("loadedmetadata", onReady);
   }, [activeSourceId]);
 
-  // Build hierarchical argument trees from the graph:
-  // Roots = top-level questions/claims that do not point upward into another claim/question via supports/answers.
-  const { childrenByTarget, mainTrees, sideTrees } = useMemo(() => {
+  // Build connected-component hierarchical argument trees from the DAG:
+  // 1. Partition nodes into undirected connected components so one connected DAG
+  //    renders as ONE unified tree rather than splitting into many fake "main trees".
+  // 2. Inside each component, pick the single primary root (largest reachable subtree,
+  //    preferring top-level questions) and attach secondary sinks (sub-questions /
+  //    illustrated principles in the same component) inline onto the nodes that
+  //    answer/illustrate them.
+  const { childrenByTarget, secondaryBySource, mainComponents, sideComponents } = useMemo(() => {
     const nodes = unit.graph?.nodes ?? {};
     const edges = unit.graph?.edges ?? [];
     const childMap: Record<string, TreeChild[]> = {};
-    const hasUpwardParent = new Set<string>();
+    const outCount: Record<string, number> = {};
+    const undirected: Record<string, Set<string>> = {};
 
+    for (const id of Object.keys(nodes)) {
+      undirected[id] = new Set();
+    }
+    for (const e of edges) {
+      if (!nodes[e.from_id] || !nodes[e.to_id]) continue;
+      outCount[e.from_id] = (outCount[e.from_id] ?? 0) + 1;
+      undirected[e.from_id].add(e.to_id);
+      undirected[e.to_id].add(e.from_id);
+    }
+
+    const hasUpwardParent = new Set<string>();
     for (const e of edges) {
       const src = nodes[e.from_id];
       const dst = nodes[e.to_id];
       if (!src || !dst) continue;
-      if (e.relation === "refutes" && dst.kind === "position") {
-        // Attach the refuted external position under the refuting claim so it reads top-down.
+      // Only invert refutes -> position when the refuted position has no outgoing edges of its own;
+      // if it already contextualizes a question (e.g. N1 -> Q001), keep the refutation nested under it.
+      if (e.relation === "refutes" && dst.kind === "position" && (outCount[dst.id] ?? 0) === 0) {
         (childMap[e.from_id] ??= []).push({ edge: e, node: dst, direction: "refuted_position" });
         hasUpwardParent.add(e.to_id);
       } else {
@@ -210,31 +240,93 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       }
     }
 
-    // Count reachable subtree size to distinguish main argument trees from side branches.
-    const countSubtree = (id: string, seen = new Set<string>()): number => {
-      if (seen.has(id)) return 0;
-      seen.add(id);
-      let total = 1;
-      for (const ch of childMap[id] ?? []) {
-        total += countSubtree(ch.node.id, seen);
+    const collectReachable = (rootId: string): Set<string> => {
+      const seen = new Set<string>();
+      const stack = [rootId];
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const ch of childMap[cur] ?? []) {
+          if (!seen.has(ch.node.id)) stack.push(ch.node.id);
+        }
       }
-      return total;
+      return seen;
     };
 
-    const roots = Object.values(nodes)
-      .filter((n) => !hasUpwardParent.has(n.id) && (n.kind === "question" || n.kind === "claim" || (childMap[n.id]?.length ?? 0) > 0))
-      .map((n) => ({ node: n, size: countSubtree(n.id) }))
-      .sort((a, b) => b.size - a.size);
+    // Find undirected connected components
+    const visited = new Set<string>();
+    const rawComponents: string[][] = [];
+    for (const id of Object.keys(nodes)) {
+      if (visited.has(id)) continue;
+      const comp: string[] = [];
+      const queue = [id];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        comp.push(cur);
+        for (const nxt of undirected[cur] ?? []) {
+          if (!visited.has(nxt)) queue.push(nxt);
+        }
+      }
+      rawComponents.push(comp);
+    }
+    rawComponents.sort((a, b) => b.length - a.length);
 
-    // Fallback: if a cycle prevented any root, pick the first question or highest-indegree claim.
-    if (roots.length === 0 && Object.keys(nodes).length > 0) {
-      const first = Object.values(nodes).find((n) => n.kind === "question") ?? Object.values(nodes)[0];
-      roots.push({ node: first, size: Object.keys(nodes).length });
+    const secondaryMap: Record<string, SecondaryTarget[]> = {};
+    const components: ComponentTree[] = [];
+
+    for (const comp of rawComponents) {
+      if (comp.length === 1 && !["question", "claim"].includes(nodes[comp[0]].kind)) continue;
+      const compSet = new Set(comp);
+      const sinks = comp.filter((id) => !hasUpwardParent.has(id));
+      const candidates = sinks.length > 0 ? sinks : comp;
+
+      let bestRoot = candidates[0];
+      let bestReach = collectReachable(bestRoot);
+      for (const cid of candidates.slice(1)) {
+        const r = collectReachable(cid);
+        const better =
+          r.size > bestReach.size ||
+          (r.size === bestReach.size && nodes[cid].kind === "question" && nodes[bestRoot].kind !== "question");
+        if (better) {
+          bestRoot = cid;
+          bestReach = r;
+        }
+      }
+
+      // Attach secondary sinks in this same component inline onto the primary-tree nodes
+      // that connect to them (e.g. C006 --answers--> Q002, C009 --answers--> N18, C012 --illustrates--> C015).
+      const secondarySinks = new Set(
+        sinks.filter((id) => id !== bestRoot && !bestReach.has(id))
+      );
+      for (const e of edges) {
+        if (!compSet.has(e.from_id) || !compSet.has(e.to_id)) continue;
+        if (bestReach.has(e.from_id) && secondarySinks.has(e.to_id)) {
+          const list = (secondaryMap[e.from_id] ??= []);
+          if (!list.some((item) => item.node.id === e.to_id && item.edge.relation === e.relation)) {
+            list.push({ edge: e, node: nodes[e.to_id] });
+          }
+        }
+      }
+
+      components.push({
+        root: nodes[bestRoot],
+        totalNodes: comp.length,
+        secondaryCount: secondarySinks.size,
+        isMain: comp.length >= 6 || (components.length === 0 && comp.length >= 2),
+      });
     }
 
-    const main = roots.filter((r) => r.size >= 5 || r.node.kind === "question");
-    const side = roots.filter((r) => !main.includes(r));
-    return { childrenByTarget: childMap, mainTrees: main, sideTrees: side };
+    const main = components.filter((c) => c.isMain);
+    const side = components.filter((c) => !c.isMain);
+    return {
+      childrenByTarget: childMap,
+      secondaryBySource: secondaryMap,
+      mainComponents: main,
+      sideComponents: side,
+    };
   }, [unit.graph]);
 
   const submitRuling = async (verdict: "approved" | "needs_revision") => {
@@ -347,34 +439,46 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       {/* Hierarchical Argument Tree View */}
       {viewMode === "tree" && (
         <section className="mt-5 space-y-6">
-          {mainTrees.map(({ node, size }) => (
-            <div key={node.id} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
-              <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
-                <span className="font-semibold text-indigo-700">主論證樹（共 {size} 個節點匯入）</span>
+          {mainComponents.map(({ root, totalNodes, secondaryCount }) => (
+            <div key={root.id} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                <span className="font-semibold text-indigo-700">
+                  主論證網（共 {totalNodes} 個節點相連
+                  {secondaryCount > 0 ? `，其中 ${secondaryCount} 個子問題／延伸原則已直接掛在對應論點上` : ""}）
+                </span>
                 <span>點左側箭頭可收放支線</span>
               </div>
               <ArgumentTreeNode
-                node={node}
+                node={root}
                 childrenByTarget={childrenByTarget}
+                secondaryBySource={secondaryBySource}
                 playAt={playAt}
                 depth={0}
-                ancestors={new Set([node.id])}
+                ancestors={new Set([root.id])}
               />
             </div>
           ))}
 
-          {sideTrees.length > 0 && (
+          {sideComponents.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-bold text-slate-700">本單元內的獨立旁支與方法原則（{sideTrees.length} 組）</h3>
-              {sideTrees.map(({ node, size }) => (
-                <div key={node.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                  <div className="mb-2 text-xs text-slate-500">獨立小樹（{size} 個節點）</div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-700">
+                  獨立旁支（與上方主論證網無直接連邊，共 {sideComponents.length} 組）
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  這些是講員在同一單元內額外補充的結構背景、釋經原則或生活應用小段，在論證圖中與主論證線沒有直接推導邊。
+                </p>
+              </div>
+              {sideComponents.map(({ root, totalNodes }) => (
+                <div key={root.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="mb-2 text-xs text-slate-500">獨立小節（{totalNodes} 個節點）</div>
                   <ArgumentTreeNode
-                    node={node}
+                    node={root}
                     childrenByTarget={childrenByTarget}
+                    secondaryBySource={secondaryBySource}
                     playAt={playAt}
                     depth={0}
-                    ancestors={new Set([node.id])}
+                    ancestors={new Set([root.id])}
                   />
                 </div>
               ))}
@@ -515,6 +619,7 @@ function ArgumentTreeNode({
   node,
   edge,
   childrenByTarget,
+  secondaryBySource,
   playAt,
   depth,
   ancestors,
@@ -522,13 +627,16 @@ function ArgumentTreeNode({
   node: GraphNode;
   edge?: GraphEdge;
   childrenByTarget: Record<string, TreeChild[]>;
+  secondaryBySource: Record<string, SecondaryTarget[]>;
   playAt: (sourceId: string, seconds: number | null) => void;
   depth: number;
   ancestors: Set<string>;
 }) {
   const children = (childrenByTarget[node.id] ?? []).filter((ch) => !ancestors.has(ch.node.id));
+  const secondaryTargets = (secondaryBySource[node.id] ?? []).filter((st) => !ancestors.has(st.node.id));
   const [expanded, setExpanded] = useState(depth < 2);
   const [showQuotes, setShowQuotes] = useState(false);
+  const [openSecondary, setOpenSecondary] = useState<Set<string>>(new Set());
 
   const badgeCls = BADGE_STYLE[node.kind] ?? "bg-slate-100 text-slate-700 border-slate-200";
   const relCls = edge ? (REL_STYLE[edge.relation] ?? "bg-slate-600 text-white") : "";
@@ -597,6 +705,80 @@ function ArgumentTreeNode({
 
             <p className="mt-1 text-sm leading-6 text-slate-900">{node.statement}</p>
 
+            {/* Secondary targets in the same connected DAG (e.g. sub-questions answered or principles illustrated) */}
+            {secondaryTargets.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {secondaryTargets.map((st, idx) => {
+                  const isQ = st.node.kind === "question";
+                  const secChildren = (childrenByTarget[st.node.id] ?? []).filter(
+                    (ch) => ch.node.id !== node.id && !ancestors.has(ch.node.id)
+                  );
+                  const isSecOpen = openSecondary.has(st.node.id);
+                  return (
+                    <div
+                      key={`${st.node.id}-${idx}`}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                        isQ ? "border-violet-200 bg-violet-50/70 text-violet-950" : "border-emerald-200 bg-emerald-50/70 text-emerald-950"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded px-1.5 py-0.5 font-semibold ${isQ ? "bg-violet-600 text-white" : "bg-emerald-600 text-white"}`}>
+                          {isQ ? "同時回答子問題" : `同時${st.edge.relation_label}原則`}
+                        </span>
+                        <span className="text-slate-600">{st.node.lecture_label}</span>
+                        {st.node.start != null && (
+                          <button
+                            onClick={() => playAt(st.node.source_id, st.node.start)}
+                            className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
+                          >
+                            <Play className="h-2.5 w-2.5" />{clock(st.node.start)}
+                          </button>
+                        )}
+                        {secChildren.length > 0 && (
+                          <button
+                            onClick={() =>
+                              setOpenSecondary((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(st.node.id)) next.delete(st.node.id);
+                                else next.add(st.node.id);
+                                return next;
+                              })
+                            }
+                            className="font-medium text-indigo-700 underline"
+                          >
+                            {isSecOpen ? "收起背景／依據" : `看相關背景／依據（${secChildren.length}）`}
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs font-medium leading-5">{st.node.statement}</p>
+                      {st.edge.reason && <p className="mt-0.5 text-[11px] text-slate-600">關聯：{st.edge.reason}</p>}
+                      {isSecOpen && secChildren.length > 0 && (
+                        <div className="mt-2 space-y-1.5 border-t border-slate-200/70 pt-2">
+                          {secChildren.map((ch, cidx) => {
+                            const nextAnc = new Set(ancestors);
+                            nextAnc.add(node.id);
+                            nextAnc.add(st.node.id);
+                            return (
+                              <ArgumentTreeNode
+                                key={`${ch.node.id}-${cidx}`}
+                                node={ch.node}
+                                edge={ch.edge}
+                                childrenByTarget={childrenByTarget}
+                                secondaryBySource={secondaryBySource}
+                                playAt={playAt}
+                                depth={depth + 1}
+                                ancestors={nextAnc}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {node.fidelity_warning && (
               <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900">
                 <b>忠實度提醒（{node.fidelity_warning.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：{node.fidelity_warning.detail}
@@ -633,6 +815,7 @@ function ArgumentTreeNode({
                 node={ch.node}
                 edge={ch.edge}
                 childrenByTarget={childrenByTarget}
+                secondaryBySource={secondaryBySource}
                 playAt={playAt}
                 depth={depth + 1}
                 ancestors={nextAnc}
