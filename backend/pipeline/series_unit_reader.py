@@ -480,6 +480,35 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
             }
         )
 
+    # Build lightweight graph payload (no raw system IDs shown in UI; keys used only for tree/graph layout)
+    graph_nodes = {}
+    for nid, n in nodes.items():
+        first_row = sents[_first_pos(n["at"]) - 1]
+        graph_nodes[nid] = {
+            "id": nid,
+            "kind": n["kind"],
+            "kind_label": NODE_KIND_LABEL.get(n["kind"], n["kind"]),
+            "point_no": point_no_by_id.get(nid),
+            "question_no": q_no_by_id.get(nid),
+            "statement": n["statement"],
+            "source_id": first_row["source_id"],
+            "lecture_label": _short_lecture_label(first_row["source_id"], lec_code_by_sid.get(first_row["source_id"])),
+            "start": _parse_clock_seconds(first_row.get("time")),
+            "quotes": _quotes_for_positions(n["at"]),
+            "fidelity_warning": fidelity_by_node.get(nid),
+        }
+    graph_edges = [
+        {
+            "from_id": e["from_id"],
+            "to_id": e["to_id"],
+            "relation": e["relation"],
+            "relation_label": RELATION_IN_LABEL.get(e["relation"], e["relation"]),
+            "reason": e["reason"],
+            "attribution": e.get("attribution", "explicit"),
+        }
+        for e in edges
+    ]
+
     rulings = _latest_rulings(data_base_dir, series_id)
     return {
         "series_id": series_id,
@@ -492,6 +521,7 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
         "media": media,
         "questions": questions_out,
         "points": points_out,
+        "graph": {"nodes": graph_nodes, "edges": graph_edges},
         "transcript": transcript_lectures,
         "fidelity": fidelity_overview,
         "roundtrip": roundtrip_overview,

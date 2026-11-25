@@ -2,11 +2,32 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Play, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, Play, AlertTriangle, CheckCircle2, GitBranch, List } from "lucide-react";
 
 type Quote = { text: string; source_id: string; lecture_label: string; paragraph: string; start: number | null };
 type FidelityWarn = { id: string; kind: string; verdict: string; detail: string };
+type GraphNode = {
+  id: string;
+  kind: string;
+  kind_label: string;
+  point_no: number | null;
+  question_no: number | null;
+  statement: string;
+  source_id: string;
+  lecture_label: string;
+  start: number | null;
+  quotes: Quote[];
+  fidelity_warning: FidelityWarn | null;
+};
+type GraphEdge = {
+  from_id: string;
+  to_id: string;
+  relation: string;
+  relation_label: string;
+  reason: string;
+  attribution: string;
+};
 type Incoming = {
   kind_label: string;
   relation: string;
@@ -62,6 +83,7 @@ type UnitDetail = {
   media: Record<string, MediaInfo>;
   questions: QuestionItem[];
   points: Point[];
+  graph: { nodes: Record<string, GraphNode>; edges: GraphEdge[] };
   transcript: TranscriptLecture[];
   fidelity: { total: number; faithful: number; changed: number; added: number; findings: FidelityWarn[] } | null;
   roundtrip: {
@@ -80,6 +102,24 @@ function clock(seconds: number | null): string {
   return h ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
 }
 
+const BADGE_STYLE: Record<string, string> = {
+  question: "bg-violet-100 text-violet-800 border-violet-200",
+  claim: "bg-indigo-100 text-indigo-800 border-indigo-200",
+  evidence: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  observation: "bg-sky-50 text-sky-800 border-sky-200",
+  example: "bg-amber-50 text-amber-800 border-amber-200",
+  position: "bg-rose-50 text-rose-800 border-rose-200",
+};
+
+const REL_STYLE: Record<string, string> = {
+  answers: "bg-violet-600 text-white",
+  supports: "bg-emerald-600 text-white",
+  illustrates: "bg-amber-600 text-white",
+  refutes: "bg-rose-600 text-white",
+  qualifies: "bg-sky-600 text-white",
+  contextualizes: "bg-slate-500 text-white",
+};
+
 export default function UnitReviewPage() {
   const params = useParams<{ seriesId: string; unitId: string }>();
   const seriesId = decodeURIComponent(params.seriesId);
@@ -95,18 +135,24 @@ export default function UnitReviewPage() {
   }, [seriesId, unitId]);
   useEffect(load, [load]);
 
-  if (error) return <main className="mx-auto max-w-3xl px-4 py-6 text-rose-700">{error}</main>;
-  if (!unit) return <main className="mx-auto max-w-3xl px-4 py-6 text-slate-400">載入中…</main>;
+  if (error) return <main className="mx-auto max-w-4xl px-4 py-6 text-rose-700">{error}</main>;
+  if (!unit) return <main className="mx-auto max-w-4xl px-4 py-6 text-slate-400">載入中…</main>;
   return <UnitReviewView unit={unit} reload={load} />;
 }
+
+type TreeChild = {
+  edge: GraphEdge;
+  node: GraphNode;
+  direction: "in" | "refuted_position";
+};
 
 function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void }) {
   const mediaList = Object.values(unit.media);
   const [activeSourceId, setActiveSourceId] = useState<string>(mediaList[0]?.source_id ?? "");
   const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeek = useRef<number | null>(null);
-  const [open, setOpen] = useState<Set<number>>(new Set([1]));
-  const [flash, setFlash] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"tree" | "flat">("tree");
+  const [openFlat, setOpenFlat] = useState<Set<number>>(new Set([1]));
   const [leftOutOnly, setLeftOutOnly] = useState(false);
   const [showChecks, setShowChecks] = useState(false);
   const [note, setNote] = useState(unit.ruling?.note ?? "");
@@ -142,21 +188,54 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
     return () => el.removeEventListener("loadedmetadata", onReady);
   }, [activeSourceId]);
 
-  const goToPoint = (no: number) => {
-    setOpen((s) => new Set(s).add(no));
-    window.setTimeout(() => {
-      const id = `point-${no}`;
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      setFlash(id);
-      window.setTimeout(() => setFlash(null), 2000);
-    }, 60);
-  };
+  // Build hierarchical argument trees from the graph:
+  // Roots = top-level questions/claims that do not point upward into another claim/question via supports/answers.
+  const { childrenByTarget, mainTrees, sideTrees } = useMemo(() => {
+    const nodes = unit.graph?.nodes ?? {};
+    const edges = unit.graph?.edges ?? [];
+    const childMap: Record<string, TreeChild[]> = {};
+    const hasUpwardParent = new Set<string>();
 
-  const toggle = (no: number) => setOpen((s) => {
-    const next = new Set(s);
-    if (next.has(no)) next.delete(no); else next.add(no);
-    return next;
-  });
+    for (const e of edges) {
+      const src = nodes[e.from_id];
+      const dst = nodes[e.to_id];
+      if (!src || !dst) continue;
+      if (e.relation === "refutes" && dst.kind === "position") {
+        // Attach the refuted external position under the refuting claim so it reads top-down.
+        (childMap[e.from_id] ??= []).push({ edge: e, node: dst, direction: "refuted_position" });
+        hasUpwardParent.add(e.to_id);
+      } else {
+        (childMap[e.to_id] ??= []).push({ edge: e, node: src, direction: "in" });
+        hasUpwardParent.add(e.from_id);
+      }
+    }
+
+    // Count reachable subtree size to distinguish main argument trees from side branches.
+    const countSubtree = (id: string, seen = new Set<string>()): number => {
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      let total = 1;
+      for (const ch of childMap[id] ?? []) {
+        total += countSubtree(ch.node.id, seen);
+      }
+      return total;
+    };
+
+    const roots = Object.values(nodes)
+      .filter((n) => !hasUpwardParent.has(n.id) && (n.kind === "question" || n.kind === "claim" || (childMap[n.id]?.length ?? 0) > 0))
+      .map((n) => ({ node: n, size: countSubtree(n.id) }))
+      .sort((a, b) => b.size - a.size);
+
+    // Fallback: if a cycle prevented any root, pick the first question or highest-indegree claim.
+    if (roots.length === 0 && Object.keys(nodes).length > 0) {
+      const first = Object.values(nodes).find((n) => n.kind === "question") ?? Object.values(nodes)[0];
+      roots.push({ node: first, size: Object.keys(nodes).length });
+    }
+
+    const main = roots.filter((r) => r.size >= 5 || r.node.kind === "question");
+    const side = roots.filter((r) => !main.includes(r));
+    return { childrenByTarget: childMap, mainTrees: main, sideTrees: side };
+  }, [unit.graph]);
 
   const submitRuling = async (verdict: "approved" | "needs_revision") => {
     setSaving(true);
@@ -172,10 +251,10 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
   };
 
   return (
-    <main className="mx-auto max-w-3xl px-4 pb-28">
+    <main className="mx-auto max-w-4xl px-4 pb-28">
       {/* Sticky header + multi-lecture audio player */}
       <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <div className="flex items-center justify-between gap-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <Link href={`/admin/wang/series/${encodeURIComponent(unit.series_id)}`} className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />{unit.series_title}
           </Link>
@@ -241,70 +320,82 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
         </section>
       )}
 
-      {/* Questions -> Answers overview */}
-      {unit.questions.length > 0 && (
-        <section className="mt-6 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-          <h2 className="text-base font-bold text-slate-900">本單元提出與回答的問題</h2>
-          <p className="mt-1 text-xs text-slate-600">從教授留下的問題直接跳到他後來作答的論點，核對跨講呼應是否接上。</p>
-          <ul className="mt-3 space-y-3">
-            {unit.questions.map((q) => (
-              <li key={q.no} className="rounded-lg border border-indigo-100 bg-white p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">問題 {q.no}：{q.statement}</p>
-                  {q.start != null && (
-                    <button onClick={() => playAt(q.source_id, q.start)} className="shrink-0 inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700 hover:bg-indigo-100">
-                      <Play className="h-3 w-3" />{q.lecture_label} {clock(q.start)}
-                    </button>
-                  )}
+      {/* View Mode Switcher */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">論證結構</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            自上而下展開：從頂層問題／總結論往下追每一層支線、依據、例證與反方看法；每一層皆可直接展開原話與播放錄音。
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
+          <button
+            onClick={() => setViewMode("tree")}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 ${viewMode === "tree" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
+          >
+            <GitBranch className="h-3.5 w-3.5" />層級論證樹
+          </button>
+          <button
+            onClick={() => setViewMode("flat")}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 ${viewMode === "flat" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
+          >
+            <List className="h-3.5 w-3.5" />時間順序清單（{unit.points.length}）
+          </button>
+        </div>
+      </div>
+
+      {/* Hierarchical Argument Tree View */}
+      {viewMode === "tree" && (
+        <section className="mt-5 space-y-6">
+          {mainTrees.map(({ node, size }) => (
+            <div key={node.id} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
+              <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+                <span className="font-semibold text-indigo-700">主論證樹（共 {size} 個節點匯入）</span>
+                <span>點左側箭頭可收放支線</span>
+              </div>
+              <ArgumentTreeNode
+                node={node}
+                childrenByTarget={childrenByTarget}
+                playAt={playAt}
+                depth={0}
+                ancestors={new Set([node.id])}
+              />
+            </div>
+          ))}
+
+          {sideTrees.length > 0 && (
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-slate-700">本單元內的獨立旁支與方法原則（{sideTrees.length} 組）</h3>
+              {sideTrees.map(({ node, size }) => (
+                <div key={node.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="mb-2 text-xs text-slate-500">獨立小樹（{size} 個節點）</div>
+                  <ArgumentTreeNode
+                    node={node}
+                    childrenByTarget={childrenByTarget}
+                    playAt={playAt}
+                    depth={0}
+                    ancestors={new Set([node.id])}
+                  />
                 </div>
-                {q.answers.length > 0 ? (
-                  <ul className="mt-2 space-y-1 text-xs text-slate-700">
-                    {q.answers.map((a, i) => (
-                      <li key={i}>
-                        → {a.lecture_label}作答：
-                        {a.point_no ? (
-                          <button onClick={() => goToPoint(a.point_no!)} className="font-medium text-indigo-700 underline">
-                            第 {a.point_no} 點
-                          </button>
-                        ) : null}{" "}
-                        {a.statement}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-1 text-xs text-amber-700">狀態：{q.state} {q.remaining}</p>
-                )}
-              </li>
-            ))}
-          </ul>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
-      {/* Points list */}
-      <section className="mt-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">本單元的論點與推論（{unit.points.length} 點）</h2>
-          <div className="flex gap-2 text-xs">
-            <button onClick={() => setOpen(new Set(unit.points.map((p) => p.no)))} className="text-indigo-700 underline">全部展開</button>
-            <button onClick={() => setOpen(new Set())} className="text-slate-500 underline">全部收起</button>
+      {/* Flat Chronological List View */}
+      {viewMode === "flat" && (
+        <section className="mt-5 space-y-3">
+          <div className="flex justify-end gap-2 text-xs">
+            <button onClick={() => setOpenFlat(new Set(unit.points.map((p) => p.no)))} className="text-indigo-700 underline">全部展開</button>
+            <button onClick={() => setOpenFlat(new Set())} className="text-slate-500 underline">全部收起</button>
           </div>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          點開每一點可看支持它的依據、例證、他反對的看法，以及它如何匯入更上層的總結論；按 ▶ 直接切換對應講次錄音並跳轉原話。
-        </p>
-
-        <div className="mt-4 space-y-3">
           {unit.points.map((p) => {
-            const isOpen = open.has(p.no);
-            const isFlash = flash === `point-${p.no}`;
+            const isOpen = openFlat.has(p.no);
             return (
-              <div
-                key={p.no}
-                id={`point-${p.no}`}
-                className={`rounded-xl border bg-white transition ${isFlash ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}
-              >
+              <div key={p.no} className="rounded-xl border border-slate-200 bg-white">
                 <button
-                  onClick={() => toggle(p.no)}
+                  onClick={() => setOpenFlat((s) => { const n = new Set(s); if (n.has(p.no)) n.delete(p.no); else n.add(p.no); return n; })}
                   className="flex w-full items-start gap-2 px-4 py-3 text-left hover:bg-slate-50"
                 >
                   {isOpen ? <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />}
@@ -321,100 +412,23 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                     <p className="mt-1 text-sm font-medium leading-6 text-slate-900">{p.statement}</p>
                   </div>
                 </button>
-
                 {isOpen && (
-                  <div className="space-y-4 border-t border-slate-100 px-4 py-4 text-sm">
-                    {p.fidelity_warning && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-                        <b>機器忠實度提醒（{p.fidelity_warning.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：{p.fidelity_warning.detail}
+                  <div className="space-y-3 border-t border-slate-100 px-4 py-3 text-sm">
+                    {p.quotes.map((q, i) => (
+                      <div key={i} className="rounded bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-700">
+                        <button onClick={() => playAt(q.source_id, q.start)} className="mr-2 inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200">
+                          <Play className="h-3 w-3" />{q.lecture_label} {clock(q.start)}
+                        </button>
+                        「{q.text}」
                       </div>
-                    )}
-
-                    {/* Direct quotes of this claim */}
-                    {p.quotes.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-slate-500">他的原話</p>
-                        <div className="mt-1 space-y-1.5">
-                          {p.quotes.map((q, i) => (
-                            <div key={i} className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-700">
-                              <button
-                                onClick={() => playAt(q.source_id, q.start)}
-                                className="mr-2 inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 shadow-xs ring-1 ring-slate-200 hover:bg-indigo-50"
-                              >
-                                <Play className="h-3 w-3" />{q.lecture_label} {clock(q.start)}
-                              </button>
-                              「{q.text}」
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Incoming reasons / examples / opposed positions */}
-                    {p.incoming.length > 0 && (
-                      <div className="space-y-2.5">
-                        {p.incoming.map((inc, idx) => (
-                          <div key={idx} className={`rounded-lg border p-3 ${inc.kind_label === "他反對的看法" ? "border-rose-200 bg-rose-50/40" : "border-slate-200 bg-white"}`}>
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className={`font-bold ${inc.kind_label === "他反對的看法" ? "text-rose-700" : "text-indigo-700"}`}>
-                                {inc.kind_label}
-                              </span>
-                              {inc.from_point_no && (
-                                <button onClick={() => goToPoint(inc.from_point_no!)} className="text-indigo-600 underline">
-                                  見第 {inc.from_point_no} 點
-                                </button>
-                              )}
-                            </div>
-                            <p className="mt-1 text-sm text-slate-900">{inc.statement}</p>
-                            {inc.reason && <p className="mt-1 text-xs leading-5 text-slate-600">推論連接：{inc.reason}</p>}
-                            {inc.quotes.length > 0 && (
-                              <div className="mt-2 space-y-1">
-                                {inc.quotes.map((q, qi) => (
-                                  <div key={qi} className="text-xs leading-5 text-slate-600">
-                                    <button
-                                      onClick={() => playAt(q.source_id, q.start)}
-                                      className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.5 text-indigo-700 hover:bg-indigo-100"
-                                    >
-                                      <Play className="h-2.5 w-2.5" />{q.lecture_label} {clock(q.start)}
-                                    </button>
-                                    「{q.text}」
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Outgoing links to higher claims or questions */}
-                    {p.outgoing.length > 0 && (
-                      <div className="rounded-lg bg-indigo-50/50 p-3 text-xs">
-                        <p className="font-semibold text-indigo-900">這一點往下支持／回答了：</p>
-                        <ul className="mt-1.5 space-y-1 text-slate-700">
-                          {p.outgoing.map((out, oi) => (
-                            <li key={oi}>
-                              • <b>{out.relation_label}</b> →{" "}
-                              {out.to_point_no ? (
-                                <button onClick={() => goToPoint(out.to_point_no!)} className="font-medium text-indigo-700 underline">
-                                  第 {out.to_point_no} 點
-                                </button>
-                              ) : out.to_question_no ? (
-                                <span className="font-medium text-indigo-700">問題 {out.to_question_no}</span>
-                              ) : null}
-                              ：{out.to_statement}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
             );
           })}
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Owner acceptance ruling */}
       <section className="mt-10 rounded-xl border-2 border-indigo-200 bg-white p-5">
@@ -494,5 +508,139 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
         </div>
       </section>
     </main>
+  );
+}
+
+function ArgumentTreeNode({
+  node,
+  edge,
+  childrenByTarget,
+  playAt,
+  depth,
+  ancestors,
+}: {
+  node: GraphNode;
+  edge?: GraphEdge;
+  childrenByTarget: Record<string, TreeChild[]>;
+  playAt: (sourceId: string, seconds: number | null) => void;
+  depth: number;
+  ancestors: Set<string>;
+}) {
+  const children = (childrenByTarget[node.id] ?? []).filter((ch) => !ancestors.has(ch.node.id));
+  const [expanded, setExpanded] = useState(depth < 2);
+  const [showQuotes, setShowQuotes] = useState(false);
+
+  const badgeCls = BADGE_STYLE[node.kind] ?? "bg-slate-100 text-slate-700 border-slate-200";
+  const relCls = edge ? (REL_STYLE[edge.relation] ?? "bg-slate-600 text-white") : "";
+
+  return (
+    <div className={depth > 0 ? "mt-2.5 border-l-2 border-indigo-100 pl-3.5" : ""}>
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        {/* Incoming edge relation + reason */}
+        {edge && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
+            <span className={`rounded px-1.5 py-0.5 font-semibold ${relCls}`}>
+              {edge.relation_label}
+            </span>
+            <span className="text-slate-600">{edge.reason}</span>
+          </div>
+        )}
+
+        {/* Node header + statement */}
+        <div className="flex items-start gap-2">
+          {children.length > 0 ? (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-0.5 rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              aria-label={expanded ? "收起支線" : "展開支線"}
+            >
+              {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+          ) : (
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className={`rounded border px-1.5 py-0.5 font-semibold ${badgeCls}`}>
+                {node.kind_label}
+                {node.point_no ? ` #${node.point_no}` : node.question_no ? ` #${node.question_no}` : ""}
+              </span>
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{node.lecture_label}</span>
+              {node.start != null && (
+                <button
+                  onClick={() => playAt(node.source_id, node.start)}
+                  className="inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700 hover:bg-indigo-100"
+                >
+                  <Play className="h-2.5 w-2.5" />{clock(node.start)}
+                </button>
+              )}
+              {node.quotes.length > 0 && (
+                <button
+                  onClick={() => setShowQuotes((v) => !v)}
+                  className="text-slate-500 underline hover:text-slate-800"
+                >
+                  {showQuotes ? "收起原話" : `看原話（${node.quotes.length}）`}
+                </button>
+              )}
+              {children.length > 0 && !expanded && (
+                <button onClick={() => setExpanded(true)} className="text-indigo-600 underline">
+                  展開 {children.length} 條下層支線
+                </button>
+              )}
+              {node.fidelity_warning && (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900">
+                  <AlertTriangle className="h-3 w-3" />忠實度提醒
+                </span>
+              )}
+            </div>
+
+            <p className="mt-1 text-sm leading-6 text-slate-900">{node.statement}</p>
+
+            {node.fidelity_warning && (
+              <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900">
+                <b>忠實度提醒（{node.fidelity_warning.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：{node.fidelity_warning.detail}
+              </p>
+            )}
+
+            {showQuotes && node.quotes.length > 0 && (
+              <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
+                {node.quotes.map((q, i) => (
+                  <div key={i} className="rounded bg-slate-50 px-2.5 py-1.5 text-xs leading-5 text-slate-700">
+                    <button
+                      onClick={() => playAt(q.source_id, q.start)}
+                      className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
+                    >
+                      <Play className="h-2.5 w-2.5" />{q.lecture_label} {clock(q.start)}
+                    </button>
+                    「{q.text}」
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {expanded && children.length > 0 && (
+        <div>
+          {children.map((ch, idx) => {
+            const nextAnc = new Set(ancestors);
+            nextAnc.add(ch.node.id);
+            return (
+              <ArgumentTreeNode
+                key={`${ch.node.id}-${idx}`}
+                node={ch.node}
+                edge={ch.edge}
+                childrenByTarget={childrenByTarget}
+                playAt={playAt}
+                depth={depth + 1}
+                ancestors={nextAnc}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
