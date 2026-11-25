@@ -131,7 +131,9 @@ def plan_unit(reading, root, ports):
     """Split transport by actual request size while preserving unit/group identity."""
     runs, questions = [], []
     start = 0
+    batch = 0
     while start < len(reading.sentences):
+        batch += 1
         prior = {r["group"]: r["question"] for r in runs}
         prior_questions = [dict(**q, quote=reading.sentences[q["at"] - 1]["text"]) for q in questions]
 
@@ -161,7 +163,8 @@ def plan_unit(reading, root, ports):
             else:
                 high = mid - 1
         end = low
-        answer = creation.call(root / "plan", ports, "creation_unit_plan", payload(end), PLAN,
+        batch_dir = root / "plan" if (batch == 1 and end == len(reading.sentences)) else root / f"plan-{batch:02d}"
+        answer = creation.call(batch_dir, ports, "creation_unit_plan", payload(end), PLAN,
                                PROMPT, reading.verify)
         new = answer["runs"]
         starts = [r["first"] for r in new]

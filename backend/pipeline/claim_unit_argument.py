@@ -183,24 +183,89 @@ def bind_graph(reading, claims, questions, answer):
     return nodes
 
 
-def connect(root, context, claims, ports):
-    rows = context.reading.sentences
-    questions = {f"Q{i:03d}": dict(kind="question", statement=q["question"], at=[q["at"]])
-                 for i, q in enumerate(context.plan["questions"], 1)}
+def _encode_sentence_lines(rows, start_idx, end_idx):
     lines = []
     previous = None
-    for i, row in enumerate(rows, 1):
+    for i in range(start_idx, end_idx):
+        row = rows[i]
         location = (row["source_id"], row["paragraph"], row["modality"])
         if location != previous:
             lines.append(list(location))
             previous = location
-        lines.append([i, row["text"]])
+        lines.append([i + 1, row["text"]])
+    return lines
+
+
+def _request_bytes(ports, content):
+    req = dict(identity=ports.identity["gpt"], system=GRAPH_PROMPT,
+               input={"task": "creation_unit_connections", **content}, schema=GRAPH)
+    return len(json.dumps(req, ensure_ascii=False).encode())
+
+
+def connect(root, context, claims, ports):
+    rows = context.reading.sentences
+    questions = {f"Q{i:03d}": dict(kind="question", statement=q["question"], at=[q["at"]])
+                 for i, q in enumerate(context.plan["questions"], 1)}
     compact = {cid: {"statement": c["statement"], "group": c["group"], "at": c["at"],
                      "question": c["answers_question"], "support_hint": c["support_hint"]}
                for cid, c in claims.items()}
-    answer = creation.call(root / "connections", ports, "creation_unit_connections",
-        {"sentences": lines, "claims": compact, "questions": questions}, GRAPH, GRAPH_PROMPT,
-        context.reading.verify)
+    full_lines = _encode_sentence_lines(rows, 0, len(rows))
+    full_content = {"sentences": full_lines, "claims": compact, "questions": questions}
+    if _request_bytes(ports, full_content) <= creation.f.GPT_BYTES:
+        answer = creation.call(root / "connections", ports, "creation_unit_connections",
+                               full_content, GRAPH, GRAPH_PROMPT, context.reading.verify)
+    else:
+        merged_nodes = {}
+        merged_edges = []
+        edge_sigs = set()
+        merged_states = {}
+        merged_gaps = []
+        start = 0
+        batch = 0
+        while start < len(rows):
+            batch += 1
+
+            def batch_content(end):
+                content = {
+                    "sentences": _encode_sentence_lines(rows, start, end),
+                    "claims": compact,
+                    "questions": questions,
+                }
+                if merged_nodes or merged_edges:
+                    content["earlier_nodes"] = list(merged_nodes.values())
+                    content["earlier_edges"] = merged_edges
+                return content
+
+            low, high = start + 1, len(rows)
+            if _request_bytes(ports, batch_content(low)) > creation.f.GPT_BYTES:
+                raise ValueError("unit connections request cannot fit one sentence with its argument context")
+            while low < high:
+                mid = (low + high + 1) // 2
+                if _request_bytes(ports, batch_content(mid)) <= creation.f.GPT_BYTES:
+                    low = mid
+                else:
+                    high = mid - 1
+            end = low
+            part = creation.call(root / f"connections-{batch:02d}", ports, "creation_unit_connections",
+                                 batch_content(end), GRAPH, GRAPH_PROMPT, context.reading.verify)
+            for node in part["new_nodes"]:
+                merged_nodes[node["id"]] = node
+            for link in part["edges"]:
+                sig = (link["from_id"], link["to_id"], link["relation"],
+                       link["reason"].strip(), tuple(sorted(link["at"])))
+                if sig not in edge_sigs:
+                    edge_sigs.add(sig)
+                    merged_edges.append(link)
+            for row in part["question_states"]:
+                merged_states[row["question_id"]] = row
+            merged_gaps.extend(part["gaps"])
+            start = end
+        answer = {
+            "new_nodes": list(merged_nodes.values()),
+            "edges": merged_edges,
+            "question_states": list(merged_states.values()),
+            "gaps": merged_gaps,
+        }
     nodes = bind_graph(context.reading, claims, questions, answer)
     result = dict(version="unit_argument_candidate_v1", status="candidate_with_gaps" if answer["gaps"] else "candidate",
                   unit_plan_sha256=artifacts.digest(context.plan), sources=context.reading.sources,

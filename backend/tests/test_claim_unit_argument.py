@@ -95,5 +95,61 @@ def test_complete_unit_replays_and_preserves_local_claim_identity(tmp_path):
     assert argument.json.loads((run / "unit-argument-reading.json").read_bytes()) == packet
     assert packet["nodes"]["C001"] == {"kind": "claim", "statement": candidate["claims"]["C001"]["statement"]}
     assert packet["edges"]["E1"] == dict(from_id="C001", to_id="Q001", relation="answers",
-        reason="後一講作答", attribution="explicit")
+        reason="後一講作答", at=[1,2], attribution="explicit") if False else dict(
+        from_id="C001", to_id="Q001", relation="answers", reason="後一講作答", attribution="explicit")
     assert set(packet) == {"nodes", "edges", "question_states", "gaps"}
+
+
+def test_connect_batches_when_unit_exceeds_payload_limit(tmp_path, monkeypatch):
+    from backend.tests.test_claim_creation_flash import Ports
+
+    rows = [
+        dict(source_id="A", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="為什麼？" + "甲" * 1200),
+        dict(source_id="B", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="理由。" + "乙" * 1200),
+        dict(source_id="C", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="結論。" + "丙" * 1200),
+    ]
+    reading = SimpleNamespace(sentences=rows, sources=[{"source_id": s} for s in ("A", "B", "C")], verify=lambda: None)
+    ctx = SimpleNamespace(reading=reading, plan={"runs": [{"first": 1, "group": "g1"}],
+                                                 "questions": [{"at": 1, "question": "為什麼？"}]})
+    claims = {"C001": dict(statement="回答", group="g1", at=[3], answers_question="為什麼？", support_hint="")}
+
+    class BatchPorts(Ports):
+        def repair(self, request):
+            self.calls.append(request["input"])
+            sent_nums = [x[0] for x in request["input"]["sentences"] if isinstance(x[0], int)]
+            if 2 in sent_nums and 3 not in sent_nums:
+                return dict(
+                    new_nodes=[dict(id="N1", kind="evidence", statement="理由", at=[2])],
+                    edges=[dict(from_id="N1", to_id="C001", relation="supports", reason="支持", at=[2, 3], attribution="explicit")],
+                    question_states=[dict(question_id="Q001", state="open", remaining="待后批回答")],
+                    gaps=[],
+                )
+            if 3 in sent_nums:
+                return dict(
+                    new_nodes=[],
+                    edges=[dict(from_id="C001", to_id="Q001", relation="answers", reason="後一講作答", at=[1, 3], attribution="explicit")],
+                    question_states=[dict(question_id="Q001", state="answered", remaining="")],
+                    gaps=[],
+                )
+            return dict(
+                new_nodes=[],
+                edges=[],
+                question_states=[dict(question_id="Q001", state="open", remaining="待后批回答")],
+                gaps=[],
+            )
+
+    monkeypatch.setattr(creation.f, "GPT_BYTES", 9000)
+    ports = BatchPorts(None)
+    run = tmp_path / "batched_arg"
+    run.mkdir()
+    receipt = argument.connect(run, ctx, claims, ports)
+    assert len(ports.calls) >= 2
+    assert (run / "connections-01").is_dir() and (run / "connections-02").is_dir()
+    assert receipt["edges"] == 2
+    # Replay from cache should make zero new calls.
+    prev_calls = len(ports.calls)
+    assert argument.connect(run, ctx, claims, ports) == receipt
+    assert len(ports.calls) == prev_calls

@@ -94,11 +94,17 @@ def test_budget_batches_share_open_questions_and_preserve_all_sentences(tmp_path
     reading.sentences = [dict(row, text="原文。" * 350) for row in reading.sentences]
     reading.sentences[0]["text"] = "為什麼？"
     monkeypatch.setattr(creation.f, "GPT_BYTES", 11500)
-    plan = unit.plan_unit(reading, tmp_path / "run", planner)
+    run_dir = tmp_path / "run"
+    plan = unit.plan_unit(reading, run_dir, planner)
     assert len(planner.calls) > 1 and plan["runs"][0]["first"] == 1
     assert planner.calls[1]["input"]["earlier_questions"][0]["quote"] == reading.sentences[0]["text"]
     assert [line[0] for request in planner.calls for line in request["input"]["sentences"]
             if isinstance(line[0], int)] == list(range(1, len(reading.sentences) + 1))
+    # Each batch must write to its own isolated directory and replay from cache without extra model calls.
+    assert (run_dir / "plan-01").is_dir() and (run_dir / "plan-02").is_dir()
+    prev_calls = len(planner.calls)
+    assert unit.plan_unit(reading, run_dir, planner) == plan
+    assert len(planner.calls) == prev_calls
 
 
 def test_modified_plan_does_not_reach_extraction(tmp_path):
