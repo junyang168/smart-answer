@@ -147,8 +147,48 @@ GROUP = __import__('re').compile(r'-P\d+-')
 MAX_WORDS = 4000  # characters of his words per record; a Claim's whole argument rarely needs more
 
 
+UNIT_KIND_MAP = {
+    'claim': 'Claim',
+    'evidence': 'Evidence',
+    'observation': 'Observation',
+    'example': 'Evidence',
+    'position': 'Position',
+    'question': 'Question',
+}
+
+
+def _unit_argument_records(candidate):
+    """Adapt #845 unit_argument_candidate_v1 nodes into fidelity-check rows."""
+    sents = candidate['sentences']
+    by_para, para_order = {}, []
+    for s in sents:
+        k = (s['source_id'], s['paragraph'])
+        if k not in by_para:
+            by_para[k] = ''
+            para_order.append(k)
+        by_para[k] += s['text']
+    para_idx = {k: i for i, k in enumerate(para_order)}
+    out = []
+    for nid, node in candidate['nodes'].items():
+        at_positions = sorted(node['at'])
+        if not at_positions:
+            raise ValueError(f'{nid}: no sentence positions to check it against')
+        words = '\n'.join(sents[i - 1]['text'] for i in at_positions)
+        touched = sorted({para_idx[(sents[i - 1]['source_id'], sents[i - 1]['paragraph'])] for i in at_positions})
+        ctx_indices = {j for pi in touched for j in range(max(0, pi - 1), min(len(para_order), pi + 2))}
+        near = '\n'.join(by_para[para_order[j]] for j in sorted(ctx_indices))
+        out.append({'job_id': nid, 'kind': UNIT_KIND_MAP.get(node['kind'], node['kind']),
+                    'statement': node['statement'],
+                    'his_words': words if len(words) <= MAX_WORDS else words[:MAX_WORDS] + '……',
+                    'context': near if len(near) <= MAX_WORDS else near[:MAX_WORDS] + '……',
+                    'group': 'unit'})
+    return out
+
+
 def records(candidate):
     """Every statement GPT wrote, with his words from its SourceFragments, in source order."""
+    if candidate.get('version') == 'unit_argument_candidate_v1' and 'nodes' in candidate and 'sentences' in candidate:
+        return _unit_argument_records(candidate)
     text = {f['fragment_id']: f['verbatim_excerpt'] for f in candidate['source_fragments']}
     out = []
     for kind, key, field, label in KINDS:
