@@ -3,7 +3,20 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Play, AlertTriangle, CheckCircle2, GitBranch, List } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Play,
+  AlertTriangle,
+  CheckCircle2,
+  GitBranch,
+  List,
+  Network,
+} from "lucide-react";
+import { ArgumentDagMap } from "./ArgumentDagMap";
 
 type Quote = { text: string; source_id: string; lecture_label: string; paragraph: string; start: number | null };
 type FidelityWarn = { id: string; kind: string; verdict: string; detail: string };
@@ -102,6 +115,24 @@ function clock(seconds: number | null): string {
   return h ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
 }
 
+function nodeDisplayLabel(n: GraphNode): string {
+  if (n.point_no) return `論點 #${n.point_no}`;
+  if (n.question_no) return `問題 #${n.question_no}`;
+  return n.kind_label;
+}
+
+// Replace raw internal IDs (C005, Q001, N14) in edge rationales with readable UI labels.
+function formatReason(reason: string, nodes: Record<string, GraphNode>): string {
+  if (!reason) return "";
+  return reason.replace(/\b([CQN]\d{1,3})\b/g, (id) => {
+    const n = nodes[id];
+    if (!n) return id;
+    if (n.point_no) return `論點 #${n.point_no}`;
+    if (n.question_no) return `問題 #${n.question_no}`;
+    return `${n.kind_label}（${n.statement.slice(0, 10)}…）`;
+  });
+}
+
 const BADGE_STYLE: Record<string, string> = {
   question: "bg-violet-100 text-violet-800 border-violet-200",
   claim: "bg-indigo-100 text-indigo-800 border-indigo-200",
@@ -135,24 +166,15 @@ export default function UnitReviewPage() {
   }, [seriesId, unitId]);
   useEffect(load, [load]);
 
-  if (error) return <main className="mx-auto max-w-4xl px-4 py-6 text-rose-700">{error}</main>;
-  if (!unit) return <main className="mx-auto max-w-4xl px-4 py-6 text-slate-400">載入中…</main>;
+  if (error) return <main className="mx-auto max-w-5xl px-4 py-6 text-rose-700">{error}</main>;
+  if (!unit) return <main className="mx-auto max-w-5xl px-4 py-6 text-slate-400">載入中…</main>;
   return <UnitReviewView unit={unit} reload={load} />;
 }
 
-type TreeChild = {
-  edge: GraphEdge;
-  node: GraphNode;
-  direction: "in" | "refuted_position";
-};
-
-type SecondaryTarget = {
-  edge: GraphEdge;
-  node: GraphNode;
-};
-
-type ComponentTree = {
+type TreeChild = { edge: GraphEdge; node: GraphNode };
+type ComponentInfo = {
   root: GraphNode;
+  nodeIds: Set<string>;
   totalNodes: number;
   secondaryCount: number;
   isMain: boolean;
@@ -163,7 +185,12 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
   const [activeSourceId, setActiveSourceId] = useState<string>(mediaList[0]?.source_id ?? "");
   const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeek = useRef<number | null>(null);
-  const [viewMode, setViewMode] = useState<"tree" | "flat">("tree");
+  const localPanelRef = useRef<HTMLDivElement>(null);
+
+  const [viewMode, setViewMode] = useState<"explore" | "tree" | "flat">("explore");
+  const [treeExpandMode, setTreeExpandMode] = useState<"spine" | "all" | "none">("spine");
+  const [treeResetKey, setTreeResetKey] = useState(0);
+  const [showSideInTree, setShowSideInTree] = useState(false);
   const [openFlat, setOpenFlat] = useState<Set<number>>(new Set([1]));
   const [leftOutOnly, setLeftOutOnly] = useState(false);
   const [showChecks, setShowChecks] = useState(false);
@@ -200,42 +227,43 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
     return () => el.removeEventListener("loadedmetadata", onReady);
   }, [activeSourceId]);
 
-  // Build connected-component hierarchical argument trees from the DAG:
-  // 1. Partition nodes into undirected connected components so one connected DAG
-  //    renders as ONE unified tree rather than splitting into many fake "main trees".
-  // 2. Inside each component, pick the single primary root (largest reachable subtree,
-  //    preferring top-level questions) and attach secondary sinks (sub-questions /
-  //    illustrated principles in the same component) inline onto the nodes that
-  //    answer/illustrate them.
-  const { childrenByTarget, secondaryBySource, mainComponents, sideComponents } = useMemo(() => {
-    const nodes = unit.graph?.nodes ?? {};
-    const edges = unit.graph?.edges ?? [];
+  // Connected-component graph analysis
+  const {
+    nodes,
+    edges,
+    childrenByTarget,
+    parentsBySource,
+    secondaryBySource,
+    mainComponents,
+    sideComponents,
+  } = useMemo(() => {
+    const gNodes = unit.graph?.nodes ?? {};
+    const gEdges = unit.graph?.edges ?? [];
     const childMap: Record<string, TreeChild[]> = {};
+    const parentMap: Record<string, { edge: GraphEdge; node: GraphNode }[]> = {};
     const outCount: Record<string, number> = {};
     const undirected: Record<string, Set<string>> = {};
 
-    for (const id of Object.keys(nodes)) {
-      undirected[id] = new Set();
-    }
-    for (const e of edges) {
-      if (!nodes[e.from_id] || !nodes[e.to_id]) continue;
+    for (const id of Object.keys(gNodes)) undirected[id] = new Set();
+    for (const e of gEdges) {
+      if (!gNodes[e.from_id] || !gNodes[e.to_id]) continue;
       outCount[e.from_id] = (outCount[e.from_id] ?? 0) + 1;
       undirected[e.from_id].add(e.to_id);
       undirected[e.to_id].add(e.from_id);
     }
 
     const hasUpwardParent = new Set<string>();
-    for (const e of edges) {
-      const src = nodes[e.from_id];
-      const dst = nodes[e.to_id];
+    for (const e of gEdges) {
+      const src = gNodes[e.from_id];
+      const dst = gNodes[e.to_id];
       if (!src || !dst) continue;
-      // Only invert refutes -> position when the refuted position has no outgoing edges of its own;
-      // if it already contextualizes a question (e.g. N1 -> Q001), keep the refutation nested under it.
       if (e.relation === "refutes" && dst.kind === "position" && (outCount[dst.id] ?? 0) === 0) {
-        (childMap[e.from_id] ??= []).push({ edge: e, node: dst, direction: "refuted_position" });
+        (childMap[e.from_id] ??= []).push({ edge: e, node: dst });
+        (parentMap[e.to_id] ??= []).push({ edge: e, node: src });
         hasUpwardParent.add(e.to_id);
       } else {
-        (childMap[e.to_id] ??= []).push({ edge: e, node: src, direction: "in" });
+        (childMap[e.to_id] ??= []).push({ edge: e, node: src });
+        (parentMap[e.from_id] ??= []).push({ edge: e, node: dst });
         hasUpwardParent.add(e.from_id);
       }
     }
@@ -254,10 +282,9 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       return seen;
     };
 
-    // Find undirected connected components
     const visited = new Set<string>();
     const rawComponents: string[][] = [];
-    for (const id of Object.keys(nodes)) {
+    for (const id of Object.keys(gNodes)) {
       if (visited.has(id)) continue;
       const comp: string[] = [];
       const queue = [id];
@@ -274,11 +301,11 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
     }
     rawComponents.sort((a, b) => b.length - a.length);
 
-    const secondaryMap: Record<string, SecondaryTarget[]> = {};
-    const components: ComponentTree[] = [];
+    const secondaryMap: Record<string, TreeChild[]> = {};
+    const comps: ComponentInfo[] = [];
 
     for (const comp of rawComponents) {
-      if (comp.length === 1 && !["question", "claim"].includes(nodes[comp[0]].kind)) continue;
+      if (comp.length === 1 && !["question", "claim"].includes(gNodes[comp[0]].kind)) continue;
       const compSet = new Set(comp);
       const sinks = comp.filter((id) => !hasUpwardParent.has(id));
       const candidates = sinks.length > 0 ? sinks : comp;
@@ -289,45 +316,62 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
         const r = collectReachable(cid);
         const better =
           r.size > bestReach.size ||
-          (r.size === bestReach.size && nodes[cid].kind === "question" && nodes[bestRoot].kind !== "question");
+          (r.size === bestReach.size && gNodes[cid].kind === "question" && gNodes[bestRoot].kind !== "question");
         if (better) {
           bestRoot = cid;
           bestReach = r;
         }
       }
 
-      // Attach secondary sinks in this same component inline onto the primary-tree nodes
-      // that connect to them (e.g. C006 --answers--> Q002, C009 --answers--> N18, C012 --illustrates--> C015).
-      const secondarySinks = new Set(
-        sinks.filter((id) => id !== bestRoot && !bestReach.has(id))
-      );
-      for (const e of edges) {
+      const secondarySinks = new Set(sinks.filter((id) => id !== bestRoot && !bestReach.has(id)));
+      for (const e of gEdges) {
         if (!compSet.has(e.from_id) || !compSet.has(e.to_id)) continue;
         if (bestReach.has(e.from_id) && secondarySinks.has(e.to_id)) {
           const list = (secondaryMap[e.from_id] ??= []);
           if (!list.some((item) => item.node.id === e.to_id && item.edge.relation === e.relation)) {
-            list.push({ edge: e, node: nodes[e.to_id] });
+            list.push({ edge: e, node: gNodes[e.to_id] });
           }
         }
       }
 
-      components.push({
-        root: nodes[bestRoot],
+      comps.push({
+        root: gNodes[bestRoot],
+        nodeIds: compSet,
         totalNodes: comp.length,
         secondaryCount: secondarySinks.size,
-        isMain: comp.length >= 6 || (components.length === 0 && comp.length >= 2),
+        isMain: comp.length >= 6 || (comps.length === 0 && comp.length >= 2),
       });
     }
 
-    const main = components.filter((c) => c.isMain);
-    const side = components.filter((c) => !c.isMain);
     return {
+      nodes: gNodes,
+      edges: gEdges,
       childrenByTarget: childMap,
+      parentsBySource: parentMap,
       secondaryBySource: secondaryMap,
-      mainComponents: main,
-      sideComponents: side,
+      mainComponents: comps.filter((c) => c.isMain),
+      sideComponents: comps.filter((c) => !c.isMain),
     };
   }, [unit.graph]);
+
+  const primaryComp = mainComponents[0] ?? sideComponents[0] ?? null;
+  const [selectedId, setSelectedId] = useState<string>(primaryComp?.root.id ?? "");
+
+  // Keep selectedId valid if unit changes
+  useEffect(() => {
+    if (primaryComp && (!selectedId || !nodes[selectedId])) {
+      setSelectedId(primaryComp.root.id);
+    }
+  }, [primaryComp, selectedId, nodes]);
+
+  const selectNodeAndScroll = useCallback((id: string, shouldScroll = false) => {
+    setSelectedId(id);
+    if (shouldScroll) {
+      setTimeout(() => {
+        localPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 40);
+    }
+  }, []);
 
   const submitRuling = async (verdict: "approved" | "needs_revision") => {
     setSaving(true);
@@ -343,49 +387,52 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
   };
 
   return (
-    <main className="mx-auto max-w-4xl px-4 pb-28">
-      {/* Sticky header + multi-lecture audio player */}
-      <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <Link href={`/admin/wang/series/${encodeURIComponent(unit.series_id)}`} className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />{unit.series_title}
-          </Link>
-          <span className="text-xs text-slate-500">{unit.passage} · 約 {unit.chars.toLocaleString()} 字</span>
-        </div>
-        <h1 className="mt-1 text-lg font-bold text-slate-900">{unit.title}</h1>
-        {mediaList.length > 1 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {mediaList.map((m) => (
-              <button
-                key={m.source_id}
-                onClick={() => setActiveSourceId(m.source_id)}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium ${m.source_id === activeSourceId ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
-              >
-                {m.label}錄音
-              </button>
-            ))}
+    <main className="mx-auto max-w-5xl px-4 pb-24">
+      {/* Compact sticky header + audio player */}
+      <div className="sticky top-0 z-20 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-2 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Link href={`/admin/wang/series/${encodeURIComponent(unit.series_id)}`} className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800">
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />{unit.series_title}
+            </Link>
+            <span className="text-slate-300">/</span>
+            <h1 className="font-bold text-slate-900">{unit.title}</h1>
+            <span className="text-xs text-slate-500">({unit.passage} · {unit.chars.toLocaleString()} 字)</span>
           </div>
-        )}
+          {mediaList.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              {mediaList.map((m) => (
+                <button
+                  key={m.source_id}
+                  onClick={() => setActiveSourceId(m.source_id)}
+                  className={`rounded px-2 py-0.5 text-xs font-medium ${m.source_id === activeSourceId ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {activeMedia?.media_url ? (
-          <audio ref={audioRef} src={activeMedia.media_url} controls preload="metadata" className="mt-2 w-full" />
+          <audio ref={audioRef} src={activeMedia.media_url} controls preload="metadata" className="mt-1.5 h-8 w-full" />
         ) : (
-          <p className="mt-2 text-xs text-slate-500">{activeMedia?.label ?? "本單元"}無可用錄音檔。</p>
+          <p className="mt-1 text-xs text-slate-500">{activeMedia?.label ?? "本單元"}無可用錄音檔。</p>
         )}
       </div>
 
       {/* Machine dual-check disclosure */}
       {(unit.fidelity || unit.roundtrip) && (
-        <section className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span className="font-semibold text-slate-800">機器雙校驗參考</span>
+            <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
+              <span className="font-semibold text-slate-800">機器雙校驗</span>
               {unit.fidelity && (
-                <span className={unit.fidelity.changed + unit.fidelity.added > 0 ? "text-amber-700 font-medium" : "text-emerald-700 font-medium"}>
+                <span className={unit.fidelity.changed + unit.fidelity.added > 0 ? "font-medium text-amber-700" : "font-medium text-emerald-700"}>
                   逐點忠實度：{unit.fidelity.faithful}/{unit.fidelity.total}（改寫 {unit.fidelity.changed}、多加 {unit.fidelity.added}）
                 </span>
               )}
               {unit.roundtrip && (
-                <span className={unit.roundtrip.metrics.distortion_count > 0 ? "text-rose-700 font-medium" : "text-emerald-700 font-medium"}>
+                <span className={unit.roundtrip.metrics.distortion_count > 0 ? "font-medium text-rose-700" : "font-medium text-emerald-700"}>
                   盲測重構：{unit.roundtrip.metrics.core_units_covered}/{unit.roundtrip.metrics.core_units_total} 核心覆蓋，{unit.roundtrip.metrics.distortion_count} 扭曲
                 </span>
               )}
@@ -395,10 +442,10 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
             </button>
           </div>
           {showChecks && (
-            <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-xs leading-5 text-slate-700">
+            <div className="mt-2.5 space-y-1.5 border-t border-slate-200 pt-2.5 text-xs leading-5 text-slate-700">
               {unit.fidelity?.findings.map((f, i) => (
                 <p key={i} className="rounded bg-amber-50 p-2 text-amber-900">
-                  <b>忠實度提醒（{f.verdict === "added" ? "多加內容" : "改寫判斷"}）</b>：{f.detail}
+                  <b>忠實度提醒（{f.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：{f.detail}
                 </p>
               ))}
               {unit.roundtrip?.metrics.overall_assessment && (
@@ -413,83 +460,191 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       )}
 
       {/* View Mode Switcher */}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">論證結構</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            自上而下展開：從頂層問題／總結論往下追每一層支線、依據、例證與反方看法；每一層皆可直接展開原話與播放錄音。
+          <h2 className="text-lg font-bold text-slate-900">論證結構</h2>
+          <p className="text-xs text-slate-500">
+            先從全局論證地圖看清支線匯聚，點任一節點切入下方局部詳情查對原話與錄音。
           </p>
         </div>
         <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
           <button
+            onClick={() => setViewMode("explore")}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 ${viewMode === "explore" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
+          >
+            <Network className="h-3.5 w-3.5" />全局 → 局部
+          </button>
+          <button
             onClick={() => setViewMode("tree")}
             className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 ${viewMode === "tree" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
           >
-            <GitBranch className="h-3.5 w-3.5" />層級論證樹
+            <GitBranch className="h-3.5 w-3.5" />完整樹（去重）
           </button>
           <button
             onClick={() => setViewMode("flat")}
             className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 ${viewMode === "flat" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
           >
-            <List className="h-3.5 w-3.5" />時間順序清單（{unit.points.length}）
+            <List className="h-3.5 w-3.5" />時間清單（{unit.points.length}）
           </button>
         </div>
       </div>
 
-      {/* Hierarchical Argument Tree View */}
-      {viewMode === "tree" && (
-        <section className="mt-5 space-y-6">
-          {mainComponents.map(({ root, totalNodes, secondaryCount }) => (
-            <div key={root.id} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                <span className="font-semibold text-indigo-700">
-                  主論證網（共 {totalNodes} 個節點相連
-                  {secondaryCount > 0 ? `，其中 ${secondaryCount} 個子問題／延伸原則已直接掛在對應論點上` : ""}）
-                </span>
-                <span>點左側箭頭可收放支線</span>
-              </div>
-              <ArgumentTreeNode
-                node={root}
-                childrenByTarget={childrenByTarget}
-                secondaryBySource={secondaryBySource}
-                playAt={playAt}
-                depth={0}
-                ancestors={new Set([root.id])}
-              />
-            </div>
-          ))}
+      {/* MODE 1: Global -> Local Navigation */}
+      {viewMode === "explore" && primaryComp && (
+        <section className="mt-4 space-y-4">
+          {/* Global DAG Map */}
+          <ArgumentDagMap
+            nodes={nodes}
+            edges={edges}
+            rootId={primaryComp.root.id}
+            componentIds={primaryComp.nodeIds}
+            selectedId={selectedId}
+            onSelect={(id) => selectNodeAndScroll(id, true)}
+          />
 
+          {/* Compact Side Branches Strip */}
           {sideComponents.length > 0 && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-700">
-                  獨立旁支（與上方主論證網無直接連邊，共 {sideComponents.length} 組）
-                </h3>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  這些是講員在同一單元內額外補充的結構背景、釋經原則或生活應用小段，在論證圖中與主論證線沒有直接推導邊。
-                </p>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-slate-600">獨立旁支（無主網連邊，共 {sideComponents.length} 組）：</span>
+                {sideComponents.map((sc) => {
+                  const active = sc.nodeIds.has(selectedId);
+                  return (
+                    <button
+                      key={sc.root.id}
+                      onClick={() => selectNodeAndScroll(sc.root.id, true)}
+                      className={`rounded-full border px-2.5 py-1 text-left transition ${
+                        active
+                          ? "border-indigo-500 bg-indigo-600 font-semibold text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700"
+                      }`}
+                    >
+                      {nodeDisplayLabel(sc.root)}：{sc.root.statement.slice(0, 14)}…（{sc.totalNodes}）
+                    </button>
+                  );
+                })}
               </div>
-              {sideComponents.map(({ root, totalNodes }) => (
-                <div key={root.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                  <div className="mb-2 text-xs text-slate-500">獨立小節（{totalNodes} 個節點）</div>
-                  <ArgumentTreeNode
-                    node={root}
-                    childrenByTarget={childrenByTarget}
-                    secondaryBySource={secondaryBySource}
-                    playAt={playAt}
-                    depth={0}
-                    ancestors={new Set([root.id])}
-                  />
-                </div>
-              ))}
+            </div>
+          )}
+
+          {/* Local Focused Inspector */}
+          {selectedId && nodes[selectedId] && (
+            <div ref={localPanelRef}>
+              <LocalNodeInspector
+                node={nodes[selectedId]}
+                nodes={nodes}
+                parents={parentsBySource[selectedId] ?? []}
+                childrenList={childrenByTarget[selectedId] ?? []}
+                secondaryTargets={secondaryBySource[selectedId] ?? []}
+                childrenByTarget={childrenByTarget}
+                onSelectNode={(id) => selectNodeAndScroll(id, false)}
+                playAt={playAt}
+                rootId={primaryComp.root.id}
+              />
             </div>
           )}
         </section>
       )}
 
-      {/* Flat Chronological List View */}
+      {/* MODE 2: Deduplicated Full Argument Tree */}
+      {viewMode === "tree" && (
+        <section className="mt-4 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-slate-500">共享多父節點僅於首次出現處展開，其餘處改顯示跳轉引用，避免重複。</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setTreeExpandMode("spine"); setTreeResetKey((k) => k + 1); }}
+                className={`rounded px-2 py-1 font-medium ${treeExpandMode === "spine" ? "bg-indigo-100 text-indigo-800" : "text-indigo-700 hover:bg-slate-100"}`}
+              >
+                只看主幹（前 2 層）
+              </button>
+              <button
+                onClick={() => { setTreeExpandMode("all"); setTreeResetKey((k) => k + 1); }}
+                className={`rounded px-2 py-1 font-medium ${treeExpandMode === "all" ? "bg-indigo-100 text-indigo-800" : "text-indigo-700 hover:bg-slate-100"}`}
+              >
+                全部展開
+              </button>
+              <button
+                onClick={() => { setTreeExpandMode("none"); setTreeResetKey((k) => k + 1); }}
+                className={`rounded px-2 py-1 font-medium ${treeExpandMode === "none" ? "bg-indigo-100 text-indigo-800" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                全部收起
+              </button>
+            </div>
+          </div>
+
+          {mainComponents.map((comp) => {
+            const renderedOnce = new Set<string>([comp.root.id]);
+            return (
+              <div key={`${comp.root.id}-${treeResetKey}`} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
+                <div className="mb-3 text-xs font-semibold text-indigo-700">
+                  主論證網（共 {comp.totalNodes} 個節點相連）
+                </div>
+                <DedupTreeNode
+                  node={comp.root}
+                  nodes={nodes}
+                  childrenByTarget={childrenByTarget}
+                  secondaryBySource={secondaryBySource}
+                  playAt={playAt}
+                  depth={0}
+                  ancestors={new Set([comp.root.id])}
+                  renderedOnce={renderedOnce}
+                  expandMode={treeExpandMode}
+                  onJumpToExplore={(id) => {
+                    setSelectedId(id);
+                    setViewMode("explore");
+                  }}
+                />
+              </div>
+            );
+          })}
+
+          {sideComponents.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <button
+                onClick={() => setShowSideInTree((v) => !v)}
+                className="flex w-full items-center justify-between text-left text-sm font-bold text-slate-700"
+              >
+                <span>獨立旁支（與主論證無直接連邊，共 {sideComponents.length} 組）</span>
+                <span className="text-xs font-medium text-indigo-700 underline">
+                  {showSideInTree ? "收起旁支" : "展開旁支"}
+                </span>
+              </button>
+              {showSideInTree && (
+                <div className="mt-3 space-y-3">
+                  {sideComponents.map((comp) => {
+                    const renderedOnce = new Set<string>([comp.root.id]);
+                    return (
+                      <div key={`${comp.root.id}-${treeResetKey}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 text-xs text-slate-500">獨立小節（{comp.totalNodes} 個節點）</div>
+                        <DedupTreeNode
+                          node={comp.root}
+                          nodes={nodes}
+                          childrenByTarget={childrenByTarget}
+                          secondaryBySource={secondaryBySource}
+                          playAt={playAt}
+                          depth={0}
+                          ancestors={new Set([comp.root.id])}
+                          renderedOnce={renderedOnce}
+                          expandMode={treeExpandMode}
+                          onJumpToExplore={(id) => {
+                            setSelectedId(id);
+                            setViewMode("explore");
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* MODE 3: Flat Chronological List */}
       {viewMode === "flat" && (
-        <section className="mt-5 space-y-3">
+        <section className="mt-4 space-y-3">
           <div className="flex justify-end gap-2 text-xs">
             <button onClick={() => setOpenFlat(new Set(unit.points.map((p) => p.no)))} className="text-indigo-700 underline">全部展開</button>
             <button onClick={() => setOpenFlat(new Set())} className="text-slate-500 underline">全部收起</button>
@@ -505,7 +660,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                   {isOpen ? <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-bold text-indigo-700">第 {p.no} 點</span>
+                      <span className="text-xs font-bold text-indigo-700">論點 #{p.no}</span>
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{p.lecture_label}</span>
                       {p.fidelity_warning && (
                         <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">
@@ -517,7 +672,12 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                   </div>
                 </button>
                 {isOpen && (
-                  <div className="space-y-3 border-t border-slate-100 px-4 py-3 text-sm">
+                  <div className="space-y-2 border-t border-slate-100 px-4 py-3 text-sm">
+                    {p.fidelity_warning && (
+                      <p className="rounded bg-amber-50 p-2 text-xs text-amber-900">
+                        <b>忠實度提醒</b>：{p.fidelity_warning.detail}
+                      </p>
+                    )}
                     {p.quotes.map((q, i) => (
                       <div key={i} className="rounded bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-700">
                         <button onClick={() => playAt(q.source_id, q.start)} className="mr-2 inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200">
@@ -535,7 +695,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       )}
 
       {/* Owner acceptance ruling */}
-      <section className="mt-10 rounded-xl border-2 border-indigo-200 bg-white p-5">
+      <section className="mt-8 rounded-xl border-2 border-indigo-200 bg-white p-5">
         <h2 className="text-base font-bold text-slate-900">人工驗收裁定</h2>
         {unit.ruling && (
           <p className="mt-1 text-xs text-slate-600">
@@ -571,18 +731,18 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
         </div>
       </section>
 
-      {/* Multi-lecture transcript with highlight/gray-out */}
-      <section id="transcript" className="mt-10">
+      {/* Multi-lecture transcript */}
+      <section id="transcript" className="mt-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900">本單元完整逐字稿</h2>
+          <h2 className="text-lg font-bold text-slate-900">本單元完整逐字稿</h2>
           <label className="inline-flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" checked={leftOutOnly} onChange={(e) => setLeftOutOnly(e.target.checked)} />
             只看沒整理進任何一點的話
           </label>
         </div>
-        <p className="mt-1 text-xs text-slate-500">有底色的句子已被上方論證引用，灰字為未引用原話；點任一句可直接播放錄音。</p>
+        <p className="mt-1 text-xs text-slate-500">有底色的句子已被論證引用，灰字為未引用原話；點任一句可直接播放錄音。</p>
 
-        <div className="mt-4 space-y-6">
+        <div className="mt-3 space-y-5">
           {unit.transcript.map((lec) => (
             <div key={lec.source_id} className="rounded-xl border border-slate-200 bg-white p-4">
               <h3 className="text-sm font-bold text-indigo-800">{lec.lecture_label} · {lec.title}</h3>
@@ -597,7 +757,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                         <span
                           key={pi}
                           onClick={() => playAt(lec.source_id, pc.start)}
-                          title={pc.uses.length ? `用於第 ${pc.uses.join("、")} 點` : "未引用"}
+                          title={pc.uses.length ? `用於論點 #${pc.uses.join("、#")}` : "未引用"}
                           className={`cursor-pointer rounded px-0.5 ${pc.uses.length ? "bg-amber-100/70 text-slate-900 hover:bg-amber-200" : "text-slate-400 hover:text-slate-700"}`}
                         >
                           {pc.text}
@@ -615,53 +775,318 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
   );
 }
 
-function ArgumentTreeNode({
+/**
+ * Local Focused Inspector: displays ONLY the currently selected node's immediate neighborhood
+ * (upstream targets, current node + quotes, inline sub-questions/principles, and direct children).
+ */
+function LocalNodeInspector({
+  node,
+  nodes,
+  parents,
+  childrenList,
+  secondaryTargets,
+  childrenByTarget,
+  onSelectNode,
+  playAt,
+  rootId,
+}: {
+  node: GraphNode;
+  nodes: Record<string, GraphNode>;
+  parents: { edge: GraphEdge; node: GraphNode }[];
+  childrenList: TreeChild[];
+  secondaryTargets: TreeChild[];
+  childrenByTarget: Record<string, TreeChild[]>;
+  onSelectNode: (id: string) => void;
+  playAt: (sourceId: string, seconds: number | null) => void;
+  rootId: string;
+}) {
+  const [showQuotes, setShowQuotes] = useState(true);
+  const [openLeafQuotes, setOpenLeafQuotes] = useState<Set<string>>(new Set());
+
+  const badgeCls = BADGE_STYLE[node.kind] ?? "bg-slate-100 text-slate-700 border-slate-200";
+  const claimChildren = childrenList.filter((c) => c.node.kind === "claim" || c.node.kind === "question");
+  const detailChildren = childrenList.filter((c) => c.node.kind !== "claim" && c.node.kind !== "question");
+
+  return (
+    <div className="rounded-xl border-2 border-indigo-300 bg-white p-5 shadow-xs">
+      {/* Top navigation: back to root + upstream targets */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-bold text-indigo-700">局部詳情</span>
+          {node.id !== rootId && (
+            <button
+              onClick={() => onSelectNode(rootId)}
+              className="rounded bg-slate-100 px-2 py-0.5 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+            >
+              回到總問題
+            </button>
+          )}
+        </div>
+        {parents.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-slate-500">向上連往：</span>
+            {parents.map((p, idx) => (
+              <button
+                key={`${p.node.id}-${idx}`}
+                onClick={() => onSelectNode(p.node.id)}
+                className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 font-medium text-indigo-800 hover:bg-indigo-100"
+              >
+                <ArrowUpRight className="h-3 w-3" />
+                {p.edge.relation_label} → {nodeDisplayLabel(p.node)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Selected Node Main Content */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`rounded border px-2 py-0.5 font-bold ${badgeCls}`}>
+          {node.id === rootId ? "總問題" : nodeDisplayLabel(node)}
+        </span>
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{node.lecture_label}</span>
+        {node.start != null && (
+          <button
+            onClick={() => playAt(node.source_id, node.start)}
+            className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-0.5 font-medium text-white hover:bg-indigo-700"
+          >
+            <Play className="h-3 w-3" />播放 {clock(node.start)}
+          </button>
+        )}
+        {node.quotes.length > 0 && (
+          <button onClick={() => setShowQuotes((v) => !v)} className="text-slate-500 underline hover:text-slate-800">
+            {showQuotes ? "收起原話" : `看原話（${node.quotes.length}）`}
+          </button>
+        )}
+      </div>
+
+      <p className="mt-2 text-base font-semibold leading-7 text-slate-900">{node.statement}</p>
+
+      {node.fidelity_warning && (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+          <b>忠實度提醒（{node.fidelity_warning.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：
+          {node.fidelity_warning.detail}
+        </p>
+      )}
+
+      {showQuotes && node.quotes.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {node.quotes.map((q, i) => (
+            <div key={i} className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-700">
+              <button
+                onClick={() => playAt(q.source_id, q.start)}
+                className="mr-2 inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
+              >
+                <Play className="h-2.5 w-2.5" />{q.lecture_label} {clock(q.start)}
+              </button>
+              「{q.text}」
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Secondary Sub-Questions & Principles linked from this node */}
+      {secondaryTargets.length > 0 && (
+        <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3">
+          <div className="text-xs font-bold text-slate-600">本節點同時關聯的子問題與原則（{secondaryTargets.length}）</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {secondaryTargets.map((st, idx) => {
+              const isQ = st.node.kind === "question";
+              return (
+                <button
+                  key={`${st.node.id}-${idx}`}
+                  onClick={() => onSelectNode(st.node.id)}
+                  className={`rounded-lg border p-2.5 text-left text-xs transition hover:shadow-xs ${
+                    isQ ? "border-violet-200 bg-violet-50/70 hover:bg-violet-50" : "border-emerald-200 bg-emerald-50/70 hover:bg-emerald-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={`rounded px-1.5 py-0.5 font-semibold text-white ${isQ ? "bg-violet-600" : "bg-emerald-600"}`}>
+                      {isQ ? "同時回答子問題" : "同時引申原則"}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-indigo-700 font-medium">
+                      查看 <ArrowRight className="h-3 w-3" />
+                    </span>
+                  </div>
+                  <p className="mt-1.5 font-medium leading-5 text-slate-900">{st.node.statement}</p>
+                  {st.node.fidelity_warning && (
+                    <p className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+                      <AlertTriangle className="h-3 w-3" />忠實度待核對
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Child Sub-Branches (Core Claims/Questions to drill into) */}
+      {claimChildren.length > 0 && (
+        <div className="mt-4 space-y-2 border-t border-slate-100 pt-3">
+          <div className="text-xs font-bold text-slate-700">
+            下層核心支線（點卡片進入該支線 · {claimChildren.length}）
+          </div>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {claimChildren.map((ch, idx) => {
+              const subCount = (childrenByTarget[ch.node.id] ?? []).length;
+              const relCls = REL_STYLE[ch.edge.relation] ?? "bg-slate-600 text-white";
+              return (
+                <button
+                  key={`${ch.node.id}-${idx}`}
+                  onClick={() => onSelectNode(ch.node.id)}
+                  className="group rounded-lg border border-indigo-200 bg-indigo-50/30 p-3 text-left transition hover:border-indigo-400 hover:bg-indigo-50"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-1 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`rounded px-1.5 py-0.5 font-semibold ${relCls}`}>{ch.edge.relation_label}</span>
+                      <span className="font-bold text-indigo-800">{nodeDisplayLabel(ch.node)}</span>
+                      <span className="text-slate-500">{ch.node.lecture_label}</span>
+                    </div>
+                    <span className="inline-flex items-center gap-0.5 font-semibold text-indigo-700 group-hover:translate-x-0.5 transition">
+                      進入支線（{subCount}）<ArrowRight className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-sm font-medium leading-6 text-slate-900">{ch.node.statement}</p>
+                  {ch.edge.reason && (
+                    <p className="mt-1 text-xs text-slate-600">{formatReason(ch.edge.reason, nodes)}</p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Direct Supporting Evidence / Observations / Examples / Refuted Positions */}
+      {detailChildren.length > 0 && (
+        <div className="mt-4 space-y-2 border-t border-slate-100 pt-3">
+          <div className="text-xs font-bold text-slate-700">
+            直接依據、例證與反方細節（{detailChildren.length}）
+          </div>
+          <div className="space-y-2">
+            {detailChildren.map((ch, idx) => {
+              const relCls = REL_STYLE[ch.edge.relation] ?? "bg-slate-600 text-white";
+              const bCls = BADGE_STYLE[ch.node.kind] ?? "bg-slate-100 text-slate-700 border-slate-200";
+              const subChildren = childrenByTarget[ch.node.id] ?? [];
+              const qOpen = openLeafQuotes.has(ch.node.id);
+              return (
+                <div key={`${ch.node.id}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded px-1.5 py-0.5 font-semibold ${relCls}`}>{ch.edge.relation_label}</span>
+                    <span className={`rounded border px-1.5 py-0.5 font-semibold ${bCls}`}>{ch.node.kind_label}</span>
+                    <span className="text-slate-500">{ch.node.lecture_label}</span>
+                    {ch.node.start != null && (
+                      <button
+                        onClick={() => playAt(ch.node.source_id, ch.node.start)}
+                        className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
+                      >
+                        <Play className="h-2.5 w-2.5" />{clock(ch.node.start)}
+                      </button>
+                    )}
+                    {ch.node.quotes.length > 0 && (
+                      <button
+                        onClick={() =>
+                          setOpenLeafQuotes((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(ch.node.id)) next.delete(ch.node.id);
+                            else next.add(ch.node.id);
+                            return next;
+                          })
+                        }
+                        className="text-slate-600 underline hover:text-slate-900"
+                      >
+                        {qOpen ? "收起原話" : `看原話（${ch.node.quotes.length}）`}
+                      </button>
+                    )}
+                    {subChildren.length > 0 && (
+                      <button
+                        onClick={() => onSelectNode(ch.node.id)}
+                        className="ml-auto inline-flex items-center gap-0.5 font-semibold text-indigo-700 underline"
+                      >
+                        展開下層（{subChildren.length}）<ArrowRight className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-sm leading-6 text-slate-900">{ch.node.statement}</p>
+                  {ch.edge.reason && <p className="mt-0.5 text-slate-600">關聯：{formatReason(ch.edge.reason, nodes)}</p>}
+                  {qOpen && ch.node.quotes.length > 0 && (
+                    <div className="mt-2 space-y-1 border-t border-slate-200/70 pt-2">
+                      {ch.node.quotes.map((q, qi) => (
+                        <div key={qi} className="rounded bg-white px-2.5 py-1.5 leading-5 text-slate-700">
+                          <button
+                            onClick={() => playAt(q.source_id, q.start)}
+                            className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700"
+                          >
+                            <Play className="h-2.5 w-2.5" />{q.lecture_label} {clock(q.start)}
+                          </button>
+                          「{q.text}」
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Deduplicated Tree Node for Mode 2: renders each shared DAG node in full only ONCE,
+ * and shows a compact jump stub on secondary parent occurrences.
+ */
+function DedupTreeNode({
   node,
   edge,
+  nodes,
   childrenByTarget,
   secondaryBySource,
   playAt,
   depth,
   ancestors,
+  renderedOnce,
+  expandMode,
+  onJumpToExplore,
 }: {
   node: GraphNode;
   edge?: GraphEdge;
+  nodes: Record<string, GraphNode>;
   childrenByTarget: Record<string, TreeChild[]>;
-  secondaryBySource: Record<string, SecondaryTarget[]>;
+  secondaryBySource: Record<string, TreeChild[]>;
   playAt: (sourceId: string, seconds: number | null) => void;
   depth: number;
   ancestors: Set<string>;
+  renderedOnce: Set<string>;
+  expandMode: "spine" | "all" | "none";
+  onJumpToExplore: (id: string) => void;
 }) {
   const children = (childrenByTarget[node.id] ?? []).filter((ch) => !ancestors.has(ch.node.id));
   const secondaryTargets = (secondaryBySource[node.id] ?? []).filter((st) => !ancestors.has(st.node.id));
-  const [expanded, setExpanded] = useState(depth < 2);
+  const defaultOpen = expandMode === "all" ? true : expandMode === "none" ? false : depth < 2;
+  const [expanded, setExpanded] = useState(defaultOpen);
   const [showQuotes, setShowQuotes] = useState(false);
-  const [openSecondary, setOpenSecondary] = useState<Set<string>>(new Set());
+  const [showAllSecondary, setShowAllSecondary] = useState(secondaryTargets.length <= 2);
 
   const badgeCls = BADGE_STYLE[node.kind] ?? "bg-slate-100 text-slate-700 border-slate-200";
   const relCls = edge ? (REL_STYLE[edge.relation] ?? "bg-slate-600 text-white") : "";
 
   return (
-    <div className={depth > 0 ? "mt-2.5 border-l-2 border-indigo-100 pl-3.5" : ""}>
+    <div className={depth > 0 ? "mt-2 border-l-2 border-indigo-100 pl-3" : ""}>
       <div className="rounded-lg border border-slate-200 bg-white p-3">
-        {/* Incoming edge relation + reason */}
         {edge && (
-          <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
-            <span className={`rounded px-1.5 py-0.5 font-semibold ${relCls}`}>
-              {edge.relation_label}
-            </span>
-            <span className="text-slate-600">{edge.reason}</span>
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+            <span className={`rounded px-1.5 py-0.5 font-semibold ${relCls}`}>{edge.relation_label}</span>
+            <span className="text-slate-600">{formatReason(edge.reason, nodes)}</span>
           </div>
         )}
 
-        {/* Node header + statement */}
         <div className="flex items-start gap-2">
           {children.length > 0 ? (
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className="mt-0.5 rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label={expanded ? "收起支線" : "展開支線"}
-            >
+            <button onClick={() => setExpanded((v) => !v)} className="mt-0.5 rounded p-0.5 text-slate-500 hover:bg-slate-100">
               {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </button>
           ) : (
@@ -670,129 +1095,58 @@ function ArgumentTreeNode({
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className={`rounded border px-1.5 py-0.5 font-semibold ${badgeCls}`}>
-                {node.kind_label}
-                {node.point_no ? ` #${node.point_no}` : node.question_no ? ` #${node.question_no}` : ""}
-              </span>
+              <span className={`rounded border px-1.5 py-0.5 font-semibold ${badgeCls}`}>{nodeDisplayLabel(node)}</span>
               <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{node.lecture_label}</span>
               {node.start != null && (
-                <button
-                  onClick={() => playAt(node.source_id, node.start)}
-                  className="inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700 hover:bg-indigo-100"
-                >
+                <button onClick={() => playAt(node.source_id, node.start)} className="inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700">
                   <Play className="h-2.5 w-2.5" />{clock(node.start)}
                 </button>
               )}
               {node.quotes.length > 0 && (
-                <button
-                  onClick={() => setShowQuotes((v) => !v)}
-                  className="text-slate-500 underline hover:text-slate-800"
-                >
+                <button onClick={() => setShowQuotes((v) => !v)} className="text-slate-500 underline">
                   {showQuotes ? "收起原話" : `看原話（${node.quotes.length}）`}
                 </button>
               )}
-              {children.length > 0 && !expanded && (
-                <button onClick={() => setExpanded(true)} className="text-indigo-600 underline">
-                  展開 {children.length} 條下層支線
-                </button>
-              )}
-              {node.fidelity_warning && (
-                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900">
-                  <AlertTriangle className="h-3 w-3" />忠實度提醒
-                </span>
-              )}
+              <button onClick={() => onJumpToExplore(node.id)} className="ml-auto text-indigo-600 underline">
+                在全局圖聚焦
+              </button>
             </div>
-
             <p className="mt-1 text-sm leading-6 text-slate-900">{node.statement}</p>
 
-            {/* Secondary targets in the same connected DAG (e.g. sub-questions answered or principles illustrated) */}
             {secondaryTargets.length > 0 && (
-              <div className="mt-2 space-y-1.5">
-                {secondaryTargets.map((st, idx) => {
-                  const isQ = st.node.kind === "question";
-                  const secChildren = (childrenByTarget[st.node.id] ?? []).filter(
-                    (ch) => ch.node.id !== node.id && !ancestors.has(ch.node.id)
-                  );
-                  const isSecOpen = openSecondary.has(st.node.id);
-                  return (
-                    <div
-                      key={`${st.node.id}-${idx}`}
-                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
-                        isQ ? "border-violet-200 bg-violet-50/70 text-violet-950" : "border-emerald-200 bg-emerald-50/70 text-emerald-950"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded px-1.5 py-0.5 font-semibold ${isQ ? "bg-violet-600 text-white" : "bg-emerald-600 text-white"}`}>
-                          {isQ ? "同時回答子問題" : `同時${st.edge.relation_label}原則`}
+              <div className="mt-2">
+                {!showAllSecondary ? (
+                  <button
+                    onClick={() => setShowAllSecondary(true)}
+                    className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-100"
+                  >
+                    同時關聯 {secondaryTargets.length} 項子問題／原則（點擊展開）
+                  </button>
+                ) : (
+                  <div className="space-y-1">
+                    {secondaryTargets.map((st, idx) => (
+                      <div key={`${st.node.id}-${idx}`} className="rounded border border-violet-200/70 bg-violet-50/50 px-2.5 py-1.5 text-xs">
+                        <span className="mr-1.5 font-semibold text-violet-800">
+                          {st.node.kind === "question" ? "同時回答子問題：" : "同時引申原則："}
                         </span>
-                        <span className="text-slate-600">{st.node.lecture_label}</span>
-                        {st.node.start != null && (
-                          <button
-                            onClick={() => playAt(st.node.source_id, st.node.start)}
-                            className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 font-medium text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
-                          >
-                            <Play className="h-2.5 w-2.5" />{clock(st.node.start)}
-                          </button>
-                        )}
-                        {secChildren.length > 0 && (
-                          <button
-                            onClick={() =>
-                              setOpenSecondary((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(st.node.id)) next.delete(st.node.id);
-                                else next.add(st.node.id);
-                                return next;
-                              })
-                            }
-                            className="font-medium text-indigo-700 underline"
-                          >
-                            {isSecOpen ? "收起背景／依據" : `看相關背景／依據（${secChildren.length}）`}
-                          </button>
+                        <span className="text-slate-800">{st.node.statement}</span>
+                        {st.node.fidelity_warning && (
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+                            <AlertTriangle className="h-3 w-3" />忠實度待核對
+                          </span>
                         )}
                       </div>
-                      <p className="mt-1 text-xs font-medium leading-5">{st.node.statement}</p>
-                      {st.edge.reason && <p className="mt-0.5 text-[11px] text-slate-600">關聯：{st.edge.reason}</p>}
-                      {isSecOpen && secChildren.length > 0 && (
-                        <div className="mt-2 space-y-1.5 border-t border-slate-200/70 pt-2">
-                          {secChildren.map((ch, cidx) => {
-                            const nextAnc = new Set(ancestors);
-                            nextAnc.add(node.id);
-                            nextAnc.add(st.node.id);
-                            return (
-                              <ArgumentTreeNode
-                                key={`${ch.node.id}-${cidx}`}
-                                node={ch.node}
-                                edge={ch.edge}
-                                childrenByTarget={childrenByTarget}
-                                secondaryBySource={secondaryBySource}
-                                playAt={playAt}
-                                depth={depth + 1}
-                                ancestors={nextAnc}
-                              />
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {node.fidelity_warning && (
-              <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900">
-                <b>忠實度提醒（{node.fidelity_warning.verdict === "added" ? "疑似多加" : "疑似改寫"}）</b>：{node.fidelity_warning.detail}
-              </p>
-            )}
-
             {showQuotes && node.quotes.length > 0 && (
-              <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
+              <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
                 {node.quotes.map((q, i) => (
                   <div key={i} className="rounded bg-slate-50 px-2.5 py-1.5 text-xs leading-5 text-slate-700">
-                    <button
-                      onClick={() => playAt(q.source_id, q.start)}
-                      className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-indigo-700 ring-1 ring-slate-200 hover:bg-indigo-50"
-                    >
+                    <button onClick={() => playAt(q.source_id, q.start)} className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-indigo-700 ring-1 ring-slate-200">
                       <Play className="h-2.5 w-2.5" />{q.lecture_label} {clock(q.start)}
                     </button>
                     「{q.text}」
@@ -807,18 +1161,41 @@ function ArgumentTreeNode({
       {expanded && children.length > 0 && (
         <div>
           {children.map((ch, idx) => {
+            if (renderedOnce.has(ch.node.id)) {
+              // DAG deduplication stub: do not duplicate entire subtree
+              return (
+                <div key={`${ch.node.id}-stub-${idx}`} className="mt-2 border-l-2 border-dashed border-indigo-200 pl-3">
+                  <button
+                    onClick={() => onJumpToExplore(ch.node.id)}
+                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 px-3 py-2 text-left text-xs text-indigo-900 hover:bg-indigo-50"
+                  >
+                    <span className={`rounded px-1.5 py-0.5 font-semibold ${REL_STYLE[ch.edge.relation] ?? "bg-slate-600 text-white"}`}>
+                      {ch.edge.relation_label}
+                    </span>
+                    <span className="font-bold">↳ 共享節點：{nodeDisplayLabel(ch.node)}</span>
+                    <span className="text-slate-700">{ch.node.statement.slice(0, 40)}…</span>
+                    <span className="ml-auto font-semibold text-indigo-700 underline">已於他處展開 · 點此聚焦</span>
+                  </button>
+                </div>
+              );
+            }
+            renderedOnce.add(ch.node.id);
             const nextAnc = new Set(ancestors);
             nextAnc.add(ch.node.id);
             return (
-              <ArgumentTreeNode
+              <DedupTreeNode
                 key={`${ch.node.id}-${idx}`}
                 node={ch.node}
                 edge={ch.edge}
+                nodes={nodes}
                 childrenByTarget={childrenByTarget}
                 secondaryBySource={secondaryBySource}
                 playAt={playAt}
                 depth={depth + 1}
                 ancestors={nextAnc}
+                renderedOnce={renderedOnce}
+                expandMode={expandMode}
+                onJumpToExplore={onJumpToExplore}
               />
             );
           })}
