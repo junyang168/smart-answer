@@ -217,7 +217,7 @@ def load_series(series_name: str, specs: list[LectureSpec]) -> ProjectedSeries:
             all_pks.append(pk)
             if p.is_empty:
                 empty_pks.add(pk)
-        headings = [{"text": h.text, "level": h.level} for h in getattr(proj, "headings", [])]
+        headings = [{"title": getattr(h, "title", str(h)), "level": getattr(h, "level", 0)} for h in getattr(proj, "headings", [])]
         lectures.append(
             ProjectedLecture(
                 spec=spec,
@@ -241,9 +241,9 @@ def load_series(series_name: str, specs: list[LectureSpec]) -> ProjectedSeries:
 def _call_json(client: Any, system_prompt: str, payload: Any, schema: dict[str, Any]) -> dict[str, Any]:
     prompt_text = json.dumps(payload, ensure_ascii=False)
     return client.generate_json(
-        prompt=prompt_text,
-        system_instruction=system_prompt,
-        response_schema=schema,
+        system_prompt=system_prompt,
+        user_prompt=prompt_text,
+        json_schema=schema,
     )
 
 

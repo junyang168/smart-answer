@@ -47,8 +47,8 @@ class FakeClient:
         self.handler = handler
         self.calls = []
 
-    def generate_json(self, *, prompt, system_instruction, response_schema):
-        payload = json.loads(prompt)
+    def generate_json(self, *, system_prompt, user_prompt, json_schema):
+        payload = json.loads(user_prompt)
         self.calls.append(payload)
         return self.handler(payload)
 
