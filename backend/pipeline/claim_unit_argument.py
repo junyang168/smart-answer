@@ -214,6 +214,15 @@ def connect(root, context, claims, ports):
     if _request_bytes(ports, full_content) <= creation.f.GPT_BYTES:
         answer = creation.call(root / "connections", ports, "creation_unit_connections",
                                full_content, GRAPH, GRAPH_PROMPT, context.reading.verify)
+        try:
+            nodes = bind_graph(context.reading, claims, questions, answer)
+        except ValueError as exc:
+            retry_content = {**full_content, "previous_validation_error": str(exc)}
+            if _request_bytes(ports, retry_content) > creation.f.GPT_BYTES:
+                raise
+            answer = creation.call(root / "connections-retry-01", ports, "creation_unit_connections",
+                                   retry_content, GRAPH, GRAPH_PROMPT, context.reading.verify)
+            nodes = bind_graph(context.reading, claims, questions, answer)
     else:
         merged_nodes = {}
         merged_edges = []
@@ -266,7 +275,7 @@ def connect(root, context, claims, ports):
             "question_states": list(merged_states.values()),
             "gaps": merged_gaps,
         }
-    nodes = bind_graph(context.reading, claims, questions, answer)
+        nodes = bind_graph(context.reading, claims, questions, answer)
     result = dict(version="unit_argument_candidate_v1", status="candidate_with_gaps" if answer["gaps"] else "candidate",
                   unit_plan_sha256=artifacts.digest(context.plan), sources=context.reading.sources,
                   sentences=rows, group_runs=context.plan["runs"], claims=claims, nodes=nodes, edges=answer["edges"],
