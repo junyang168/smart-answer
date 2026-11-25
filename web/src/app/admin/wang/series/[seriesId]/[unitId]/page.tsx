@@ -574,7 +574,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
           </div>
 
           {mainComponents.map((comp) => {
-            const renderedOnce = new Set<string>([comp.root.id]);
+            const canonicalParent = buildCanonicalParents(comp.root.id, childrenByTarget);
             return (
               <div key={`${comp.root.id}-${treeResetKey}`} className="rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
                 <div className="mb-3 text-xs font-semibold text-indigo-700">
@@ -588,7 +588,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                   playAt={playAt}
                   depth={0}
                   ancestors={new Set([comp.root.id])}
-                  renderedOnce={renderedOnce}
+                  canonicalParent={canonicalParent}
                   expandMode={treeExpandMode}
                   onJumpToExplore={(id) => {
                     setSelectedId(id);
@@ -613,7 +613,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
               {showSideInTree && (
                 <div className="mt-3 space-y-3">
                   {sideComponents.map((comp) => {
-                    const renderedOnce = new Set<string>([comp.root.id]);
+                    const canonicalParent = buildCanonicalParents(comp.root.id, childrenByTarget);
                     return (
                       <div key={`${comp.root.id}-${treeResetKey}`} className="rounded-lg border border-slate-200 bg-white p-3">
                         <div className="mb-2 text-xs text-slate-500">獨立小節（{comp.totalNodes} 個節點）</div>
@@ -625,7 +625,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                           playAt={playAt}
                           depth={0}
                           ancestors={new Set([comp.root.id])}
-                          renderedOnce={renderedOnce}
+                          canonicalParent={canonicalParent}
                           expandMode={treeExpandMode}
                           onJumpToExplore={(id) => {
                             setSelectedId(id);
@@ -1036,8 +1036,32 @@ function LocalNodeInspector({
 }
 
 /**
- * Deduplicated Tree Node for Mode 2: renders each shared DAG node in full only ONCE,
- * and shows a compact jump stub on secondary parent occurrences.
+ * Pure BFS precomputation of each node's single canonical parent in the DAG tree,
+ * avoiding render-time Set mutation bugs under React StrictMode.
+ */
+function buildCanonicalParents(
+  rootId: string,
+  childrenByTarget: Record<string, TreeChild[]>
+): Map<string, string> {
+  const parentOf = new Map<string, string>();
+  const visited = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const ch of childrenByTarget[cur] ?? []) {
+      if (!visited.has(ch.node.id)) {
+        visited.add(ch.node.id);
+        parentOf.set(ch.node.id, cur);
+        queue.push(ch.node.id);
+      }
+    }
+  }
+  return parentOf;
+}
+
+/**
+ * Deduplicated Tree Node for Mode 2: renders each shared DAG node in full only ONCE
+ * under its canonical BFS parent, and shows a compact jump stub under secondary parents.
  */
 function DedupTreeNode({
   node,
@@ -1048,7 +1072,7 @@ function DedupTreeNode({
   playAt,
   depth,
   ancestors,
-  renderedOnce,
+  canonicalParent,
   expandMode,
   onJumpToExplore,
 }: {
@@ -1060,7 +1084,7 @@ function DedupTreeNode({
   playAt: (sourceId: string, seconds: number | null) => void;
   depth: number;
   ancestors: Set<string>;
-  renderedOnce: Set<string>;
+  canonicalParent: Map<string, string>;
   expandMode: "spine" | "all" | "none";
   onJumpToExplore: (id: string) => void;
 }) {
@@ -1161,7 +1185,7 @@ function DedupTreeNode({
       {expanded && children.length > 0 && (
         <div>
           {children.map((ch, idx) => {
-            if (renderedOnce.has(ch.node.id)) {
+            if (canonicalParent.get(ch.node.id) !== node.id) {
               // DAG deduplication stub: do not duplicate entire subtree
               return (
                 <div key={`${ch.node.id}-stub-${idx}`} className="mt-2 border-l-2 border-dashed border-indigo-200 pl-3">
@@ -1179,7 +1203,6 @@ function DedupTreeNode({
                 </div>
               );
             }
-            renderedOnce.add(ch.node.id);
             const nextAnc = new Set(ancestors);
             nextAnc.add(ch.node.id);
             return (
@@ -1193,7 +1216,7 @@ function DedupTreeNode({
                 playAt={playAt}
                 depth={depth + 1}
                 ancestors={nextAnc}
-                renderedOnce={renderedOnce}
+                canonicalParent={canonicalParent}
                 expandMode={expandMode}
                 onJumpToExplore={onJumpToExplore}
               />

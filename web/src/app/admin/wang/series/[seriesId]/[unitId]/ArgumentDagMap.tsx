@@ -66,6 +66,25 @@ function nodeColors(kind: string, isRoot: boolean, selected: boolean) {
   return { fill: "#f8fafc", stroke: "#94a3b8", badgeBg: "#e2e8f0", badgeText: "#334155" };
 }
 
+function shortRelLabel(relation: string): string {
+  switch (relation) {
+    case "answers":
+      return "回答";
+    case "supports":
+      return "支持";
+    case "refutes":
+      return "反駁";
+    case "illustrates":
+      return "例證";
+    case "qualifies":
+      return "限定";
+    case "contextualizes":
+      return "背景";
+    default:
+      return "關聯";
+  }
+}
+
 function edgeStroke(relation: string, active: boolean): string {
   if (!active) return "#cbd5e1";
   switch (relation) {
@@ -255,7 +274,7 @@ export function ArgumentDagMap({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-bold text-indigo-700">全局論證地圖（先看全貌，點任一節點切入下方局部詳情）</span>
           <span className="text-slate-500">
-            顯示 {layoutNodes.length} 個主幹節點 · 箭頭方向為「推導／支持／回答 → 目標」
+            顯示 {layoutNodes.length} 個{showSubQuestions ? "節點（含子問題）" : "主幹節點"} · 箭頭方向為「推導／支持／回答 → 目標」
           </span>
         </div>
         {hiddenSubQuestionTotal > 0 && (
@@ -273,9 +292,8 @@ export function ArgumentDagMap({
 
       <div className="overflow-x-auto bg-slate-50/50 p-2">
         <svg
-          width={svgWidth}
-          height={svgHeight}
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          style={{ width: "100%", maxWidth: `${svgWidth}px`, height: "auto" }}
           className="mx-auto block select-none"
           role="img"
           aria-label="論證結構全局圖"
@@ -322,9 +340,9 @@ export function ArgumentDagMap({
               y1 = src.y + src.h / 2;
               x2 = leftToRight ? dst.x : dst.x + dst.w;
               y2 = dst.y + dst.h / 2;
-              const arch = -22;
+              const arch = -36;
               d = `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${y1 + arch} ${x2} ${y2}`;
-              labelY = y1 + arch / 2 - 4;
+              labelY = y1 + arch * 0.62;
             } else {
               const midY = (y1 + y2) / 2;
               d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
@@ -341,9 +359,9 @@ export function ArgumentDagMap({
                 />
                 {isHighlighted && (
                   <g transform={`translate(${labelX}, ${labelY})`}>
-                    <rect x={-26} y={-9} width={52} height={16} rx={4} fill="#ffffff" stroke={stroke} strokeWidth={0.8} />
-                    <text textAnchor="middle" y={2.5} fontSize={9.5} fontWeight={600} fill={stroke}>
-                      {e.relation_label.slice(0, 4)}
+                    <rect x={-18} y={-9} width={36} height={16} rx={4} fill="#ffffff" stroke={stroke} strokeWidth={0.9} />
+                    <text textAnchor="middle" y={2.5} fontSize={10} fontWeight={700} fill={stroke}>
+                      {shortRelLabel(e.relation)}
                     </text>
                   </g>
                 )}
