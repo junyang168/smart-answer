@@ -300,18 +300,45 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       const sinks = comp.filter((id) => !hasUpwardParent.has(id));
       const candidates = sinks.length > 0 ? sinks : comp;
 
-      let bestRoot = candidates[0];
-      let bestReach = collectReachable(bestRoot);
-      for (const cid of candidates.slice(1)) {
-        const r = collectReachable(cid);
-        const better =
-          r.size > bestReach.size ||
-          (r.size === bestReach.size && gNodes[cid].kind === "question" && gNodes[bestRoot].kind !== "question");
-        if (better) {
-          bestRoot = cid;
-          bestReach = r;
+      // Pick the primary root of this component:
+      // 1. Prefer a unit-level planned Question sink (Q001, Q002...) with meaningful reach (>= 3),
+      //    so an illustrated methodological takeaway Claim (like C005 in U07) doesn't hijack the root.
+      // 2. Otherwise pick by substantive reach (excluding `illustrates` takeaway inflation), breaking ties by total reach & question kind.
+      const substantiveReach = (rootId: string): number => {
+        const seen = new Set<string>();
+        const stack = [rootId];
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          if (seen.has(cur)) continue;
+          seen.add(cur);
+          for (const ch of childMap[cur] ?? []) {
+            if (ch.edge.relation === "illustrates") continue;
+            if (!seen.has(ch.node.id)) stack.push(ch.node.id);
+          }
         }
-      }
+        return seen.size;
+      };
+
+      const scoreCandidate = (cid: string) => {
+        const n = gNodes[cid];
+        const isPlannedQ = n.kind === "question" && cid.startsWith("Q");
+        const totalR = collectReachable(cid).size;
+        const subR = substantiveReach(cid);
+        return {
+          cid,
+          tier: isPlannedQ && totalR >= 3 ? 2 : n.kind === "question" && subR >= 4 ? 1 : 0,
+          subR,
+          totalR,
+        };
+      };
+
+      const scored = candidates.map(scoreCandidate).sort((a, b) => {
+        if (b.tier !== a.tier) return b.tier - a.tier;
+        if (b.subR !== a.subR) return b.subR - a.subR;
+        return b.totalR - a.totalR;
+      });
+      const bestRoot = scored[0].cid;
+      const bestReach = collectReachable(bestRoot);
 
       const secondarySinks = new Set(sinks.filter((id) => id !== bestRoot && !bestReach.has(id)));
       for (const e of gEdges) {
@@ -832,7 +859,7 @@ function LocalNodeInspector({
       {/* Selected Node Main Content */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className={`rounded border px-2 py-0.5 font-bold ${badgeCls}`}>
-          {node.id === rootId ? "總問題" : nodeDisplayLabel(node)}
+          {node.id === rootId ? `${node.id} ${node.kind === "question" ? "總問題" : "總結論"}` : nodeDisplayLabel(node)}
         </span>
         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{node.lecture_label}</span>
         {node.start != null && (

@@ -439,7 +439,7 @@ export function ArgumentDagMap({
             const isRelated = !selectedId || neighborIds.has(ln.node.id);
             const c = nodeColors(ln.node.kind, ln.isRoot, isSelected);
             const tagText = ln.isRoot
-              ? `${ln.node.id} 總問題`
+              ? `${ln.node.id} ${ln.node.kind === "question" ? "總問題" : "總結論"}`
               : `${ln.node.id} ${ln.node.kind_label.slice(0, 2)}`;
             const title = shortTitle(ln.node.statement, 30);
             const line1 = title.slice(0, 15);
