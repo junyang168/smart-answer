@@ -1,0 +1,121 @@
+{
+  "model": "gpt-6.1-sol",
+  "effort": "medium",
+  "prompt": "你正在整理同一系列講課的連續逐字稿。先通讀全部輸入，自行辨識教授實際回答的不同問題，再按論證分組；同一問題跨講的開題、續講與收束可以同組。每組可有多條主張。只提取教授在材料內實際提出的判斷，用中性中文忠實概括。為每組寫清楚他回答了什麼、採用哪些依據以及每項依據如何推出下一步。用 ID 和關係明確連起原文中的推理，同時保存限定、反方、例證和插問各自的作用。尚未回答的問題留空，不補答案。只在需要時拆步，不把敘事細節、口頭重複或轉場升為 Claim。每項結論和依據要附原段 ID 與一小段連續逐字引文。組內節點用全結果唯一 ID，關係端點用節點 ID。外部資料和工具一律不使用。",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "groups": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "claim",
+                      "evidence",
+                      "observation",
+                      "question",
+                      "position",
+                      "example"
+                    ]
+                  },
+                  "statement": {
+                    "type": "string"
+                  },
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "quote": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "quote"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "type",
+                  "statement",
+                  "sources"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "title",
+            "nodes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "relations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from_id": {
+              "type": "string"
+            },
+            "to_id": {
+              "type": "string"
+            },
+            "relation": {
+              "type": "string",
+              "enum": [
+                "supports",
+                "answers",
+                "refutes",
+                "illustrates",
+                "qualifies"
+              ]
+            },
+            "explanation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_id",
+            "to_id",
+            "relation",
+            "explanation"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "groups",
+      "relations"
+    ],
+    "additionalProperties": false
+  },
+  "source_hashes": [
+    "e85aaab913ef85340905e4dea29203f8c16d37e46a1cd03b31c3b9d85b8ddc8b",
+    "b6a0dd4a91c9e8899255a9adb23ccfd5960048a40c76d9d24245dd4b0119125c",
+    "60f86ab75e3b58b41b3f2ed293e15cca52285f2a824cdd71ea9db6469caa92d2"
+  ]
+}
