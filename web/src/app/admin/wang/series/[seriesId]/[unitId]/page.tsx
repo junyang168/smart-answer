@@ -373,6 +373,10 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
 
   const primaryComp = mainComponents[0] ?? sideComponents[0] ?? null;
   const [selectedId, setSelectedId] = useState<string>(primaryComp?.root.id ?? "");
+  const activeComp =
+    mainComponents.find((c) => c.nodeIds.has(selectedId)) ??
+    sideComponents.find((c) => c.nodeIds.has(selectedId)) ??
+    primaryComp;
 
   // Keep selectedId valid if unit changes
   useEffect(() => {
@@ -509,15 +513,18 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
       {/* MODE 1: Global -> Local Navigation */}
       {viewMode === "explore" && primaryComp && (
         <section className="mt-4 space-y-4">
-          {/* Global DAG Map */}
-          <ArgumentDagMap
-            nodes={nodes}
-            edges={edges}
-            rootId={primaryComp.root.id}
-            componentIds={primaryComp.nodeIds}
-            selectedId={selectedId}
-            onSelect={(id) => selectNodeAndScroll(id, true)}
-          />
+          {/* Global DAG Maps (render every main component so none are hidden) */}
+          {(mainComponents.length > 0 ? mainComponents : [primaryComp]).map((comp) => (
+            <ArgumentDagMap
+              key={comp.root.id}
+              nodes={nodes}
+              edges={edges}
+              rootId={comp.root.id}
+              componentIds={comp.nodeIds}
+              selectedId={selectedId}
+              onSelect={(id) => selectNodeAndScroll(id, true)}
+            />
+          ))}
 
           {/* Compact Side Branches Strip */}
           {sideComponents.length > 0 && (
@@ -556,7 +563,7 @@ function UnitReviewView({ unit, reload }: { unit: UnitDetail; reload: () => void
                 childrenByTarget={childrenByTarget}
                 onSelectNode={(id) => selectNodeAndScroll(id, false)}
                 playAt={playAt}
-                rootId={primaryComp.root.id}
+                rootId={activeComp?.root.id ?? primaryComp.root.id}
               />
             </div>
           )}
