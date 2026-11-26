@@ -141,7 +141,7 @@ def test_connect_batches_when_unit_exceeds_payload_limit(tmp_path, monkeypatch):
                 gaps=[],
             )
 
-    monkeypatch.setattr(creation.f, "GPT_BYTES", 9000)
+    monkeypatch.setattr(creation.f, "GPT_BYTES", 10500)
     ports = BatchPorts(None)
     run = tmp_path / "batched_arg"
     run.mkdir()

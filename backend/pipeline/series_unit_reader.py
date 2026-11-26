@@ -183,10 +183,20 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
         if rtv_file.exists():
             rd = json.loads(rtv_file.read_text(encoding="utf-8"))
             m = rd.get("summary_metrics", {})
+            attr_file = udir / "roundtrip_attribution.json"
+            dist_count = m.get("distortion_count", 0)
+            if attr_file.exists():
+                ad = json.loads(attr_file.read_text(encoding="utf-8"))
+                rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
+                dists = rd.get("stance_and_logic_distortions", [])
+                dist_count = sum(
+                    1 for d in dists
+                    if rc_by_id.get(d.get("distortion_id"), "extraction_defect") in ("extraction_defect", "mixed")
+                )
             roundtrip_summary = {
                 "core_covered": m.get("core_units_covered", 0),
                 "core_total": m.get("core_units_total", 0),
-                "distortions": m.get("distortion_count", 0),
+                "distortions": dist_count,
                 "omissions": m.get("omission_count", 0),
             }
 
@@ -286,6 +296,23 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
             "distortions": rd.get("stance_and_logic_distortions", []),
             "noise": rd.get("non_argument_noise", []),
         }
+        attr_file = folder / "units" / unit_id / "roundtrip_attribution.json"
+        if attr_file.exists():
+            ad = json.loads(attr_file.read_text(encoding="utf-8"))
+            rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
+            roundtrip_overview["distortions"] = [
+                d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
+                for d in roundtrip_overview["distortions"]
+            ]
+            roundtrip_overview["omissions"] = [
+                o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
+                for o in roundtrip_overview["omissions"]
+            ]
+            roundtrip_overview["metrics"] = dict(roundtrip_overview["metrics"])
+            roundtrip_overview["metrics"]["distortion_count"] = sum(
+                1 for d in roundtrip_overview["distortions"]
+                if d.get("root_cause") in ("extraction_defect", "mixed")
+            )
 
     def _first_pos(at_list: list[int]) -> int:
         return min(at_list) if at_list else 10**9
