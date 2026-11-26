@@ -265,6 +265,7 @@ def unit_argument_to_package(
         frag_ids = _fragments_for_at(cdata.get("at"), cdata.get("source_id"))
         claims_by_id[full_id] = {
             "claim_id": full_id,
+            "unit_node_id": cid,
             "statement": str(cdata.get("statement") or ""),
             "claim_type": str(cdata.get("claim_kind") or "interpretive_judgment"),
             "attribution": str(cdata.get("attribution") or "professor"),
@@ -274,6 +275,7 @@ def unit_argument_to_package(
             "evidence_step_ids": [],
             "opposed_position_ids": [],
             "source_fragment_ids": frag_ids,
+            "at": list(cdata.get("at") or []),
             "review_status": review_status,
             "maturity": review_status,
         }
@@ -292,6 +294,7 @@ def unit_argument_to_package(
             questions.append(
                 {
                     "question_id": full_id,
+                    "unit_node_id": nid,
                     "text": statement,
                     "questioner": "professor",
                     "question_type": "open_question",
@@ -299,6 +302,7 @@ def unit_argument_to_package(
                     "answer_claim_ids": [],
                     "source_fragment_id": frag_ids[0],
                     "source_fragment_ids": frag_ids,
+                    "at": list(ndata.get("at") or []),
                     "review_status": review_status,
                 }
             )
@@ -307,9 +311,11 @@ def unit_argument_to_package(
             position_nodes.append(
                 {
                     "position_id": full_id,
+                    "unit_node_id": nid,
                     "title": statement,
                     "attribution": "external_position",
                     "source_fragment_ids": frag_ids,
+                    "at": list(ndata.get("at") or []),
                     "review_status": review_status,
                 }
             )
@@ -318,10 +324,12 @@ def unit_argument_to_package(
             observations.append(
                 {
                     "observation_id": full_id,
+                    "unit_node_id": nid,
                     "statement": statement,
                     "observation_type": "text_observation",
                     "source_fragment_id": frag_ids[0],
                     "source_fragment_ids": frag_ids,
+                    "at": list(ndata.get("at") or []),
                     "review_status": review_status,
                 }
             )
@@ -329,20 +337,23 @@ def unit_argument_to_package(
             node_collection[nid] = "claims"
             claims_by_id[full_id] = {
                 "claim_id": full_id,
+                "unit_node_id": nid,
                 "statement": statement,
                 "claim_type": "local_claim",
                 "attribution": "professor",
                 "evidence_step_ids": [],
                 "opposed_position_ids": [],
                 "source_fragment_ids": frag_ids,
+                "at": list(ndata.get("at") or []),
                 "review_status": review_status,
-                "maturity": "approved",
+                "maturity": review_status,
             }
         else:
             # 'evidence' or 'example'
             node_collection[nid] = "evidence_steps"
             evidence_steps_by_id[full_id] = {
                 "evidence_step_id": full_id,
+                "unit_node_id": nid,
                 "statement": statement,
                 "step_type": kind,
                 "speaker": "professor",
@@ -350,6 +361,7 @@ def unit_argument_to_package(
                 "source_fragment_id": frag_ids[0],
                 "source_fragment_ids": frag_ids,
                 "produced_claim_ids": [],
+                "at": list(ndata.get("at") or []),
                 "review_status": review_status,
             }
 
@@ -400,8 +412,11 @@ def unit_argument_to_package(
                     "claim_relation_id": f"{ns}-CR{cr_idx:04d}",
                     "from_id": from_id,
                     "to_id": to_id,
+                    "unit_from_id": raw_from,
+                    "unit_to_id": raw_to,
                     "relation_type": rel_type,
                     "reason": str(edge.get("reason") or ""),
+                    "at": list(edge.get("at") or []),
                     "review_status": review_status,
                 }
             )
@@ -416,8 +431,11 @@ def unit_argument_to_package(
                     "relation_id": f"{ns}-KR{kr_idx:04d}",
                     "from_id": from_id,
                     "to_id": to_id,
+                    "unit_from_id": raw_from,
+                    "unit_to_id": raw_to,
                     "relation_type": rel_type,
                     "reason": str(edge.get("reason") or ""),
+                    "at": list(edge.get("at") or []),
                     "review_status": review_status,
                 }
             )
@@ -557,6 +575,9 @@ def load_unit(
         "unit_id": unit_id,
         "unit_plan_sha256": unit_data.get("unit_plan_sha256"),
         "source_ids": [s["source_id"] for s in unit_data.get("sources") or []],
+        "sources": unit_data.get("sources") or [],
+        "sentences": unit_data.get("sentences") or [],
+        "question_states": unit_data.get("question_states") or [],
         "ruling": gates["ruling"],
         "fidelity_sha256": gates["fidelity_sha256"],
         "roundtrip_diff_sha256": gates["roundtrip_diff_sha256"],

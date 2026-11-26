@@ -178,6 +178,90 @@ def _loaded_unit_keys(series_id: Optional[str] = None) -> set[tuple[str, str]]:
         return set()
 
 
+def _read_unit_from_db(series_id: str, unit_id: str) -> Optional[dict[str, Any]]:
+    """Read a loaded unit's graph & sentences from ``ARGUMENT_DATABASE_URL``, or ``None`` if not loaded."""
+    try:
+        from backend.pipeline import argument_review
+
+        unit_key = f"{series_id}/{unit_id}"
+        with argument_review.connect() as conn:
+            cs_row = conn.execute(
+                """
+                SELECT change_set_id, metadata
+                  FROM wang_knowledge.change_sets
+                 WHERE status = 'applied'
+                   AND metadata->>'unit_key' = %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM wang_knowledge.change_sets r
+                        WHERE r.status = 'applied'
+                          AND r.metadata->>'replaces' = wang_knowledge.change_sets.change_set_id
+                   )
+                 ORDER BY applied_at DESC
+                 LIMIT 1
+                """,
+                (unit_key,),
+            ).fetchone()
+            if not cs_row:
+                return None
+            cs_id, meta = cs_row[0], cs_row[1] or {}
+            rows = conn.execute(
+                """
+                SELECT v.collection, v.object_id, v.payload
+                  FROM wang_knowledge.object_versions v
+                 WHERE v.change_set_id = %s
+                """,
+                (cs_id,),
+            ).fetchall()
+    except Exception:
+        return None
+
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    for col, oid, payload in rows:
+        p = dict(payload or {})
+        if p.get("review_status") == "retired":
+            continue
+        if col == "claims":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "claim", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col == "evidence_steps":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {
+                "kind": str(p.get("step_type") or "evidence"),
+                "statement": p.get("statement", ""),
+                "at": list(p.get("at") or []),
+            }
+        elif col == "questions":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "question", "statement": p.get("text", ""), "at": list(p.get("at") or [])}
+        elif col == "position_nodes":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "position", "statement": p.get("title", ""), "at": list(p.get("at") or [])}
+        elif col == "observations":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "observation", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col in {"knowledge_relations", "claim_relations"}:
+            edges.append(
+                {
+                    "from_id": str(p.get("unit_from_id") or p.get("from_id") or ""),
+                    "to_id": str(p.get("unit_to_id") or p.get("to_id") or ""),
+                    "relation": str(p.get("relation_type") or ""),
+                    "reason": str(p.get("reason") or ""),
+                    "at": list(p.get("at") or []),
+                }
+            )
+
+    return {
+        "source": "db",
+        "change_set_id": cs_id,
+        "sources": list(meta.get("sources") or []),
+        "sentences": list(meta.get("sentences") or []),
+        "question_states": list(meta.get("question_states") or []),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
     root = _series_root(data_base_dir)
     if not root.exists():
@@ -232,9 +316,15 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
             if lec not in lectures_in_unit:
                 lectures_in_unit.append(lec)
 
-        ready = arg_file.exists()
+        loaded_in_db = (series_id, uid) in loaded_keys
+        cand = _read_unit_from_db(series_id, uid) if loaded_in_db else None
+        ready = bool(cand) or arg_file.exists()
         node_count = edge_count = claim_count = 0
-        if ready:
+        if cand:
+            node_count = len(cand.get("nodes", {}))
+            edge_count = len(cand.get("edges", []))
+            claim_count = sum(1 for n in cand.get("nodes", {}).values() if n.get("kind") == "claim")
+        elif arg_file.exists():
             cand = json.loads(arg_file.read_text(encoding="utf-8"))
             node_count = len(cand.get("nodes", {}))
             edge_count = len(cand.get("edges", []))
@@ -319,7 +409,8 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     folder = _series_root(data_base_dir) / series_id
     seg_file = folder / "segmentation.json"
     arg_file = folder / "units" / unit_id / "unit-argument.json"
-    if not seg_file.exists() or not arg_file.exists():
+    cand = _read_unit_from_db(series_id, unit_id)
+    if not seg_file.exists() or (cand is None and not arg_file.exists()):
         raise ValueError(f"unit not ready: {series_id}/{unit_id}")
 
     seg = json.loads(seg_file.read_text(encoding="utf-8"))
@@ -327,7 +418,8 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     if not unit_meta:
         raise ValueError(f"unit metadata missing: {unit_id}")
 
-    cand = json.loads(arg_file.read_text(encoding="utf-8"))
+    if cand is None:
+        cand = json.loads(arg_file.read_text(encoding="utf-8"))
     lec_code_by_sid = {s["source_id"]: s["lecture"] for s in seg.get("sources", [])}
     media = _resolve_media_map(data_base_dir, cand.get("sources", []), lec_code_by_sid)
 
