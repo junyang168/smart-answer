@@ -59,6 +59,41 @@ def _parse_clock_seconds(value: str | None) -> float | None:
     return None
 
 
+def _load_matching_attribution(rd: dict[str, Any], attr_file: Path) -> dict[str, str] | None:
+    """Return {finding_id: root_cause} only if attribution is cryptographically bound to this diff report."""
+    if not attr_file.exists():
+        return None
+    from backend.pipeline.argument_roundtrip_verify import sha256_json
+
+    ad = json.loads(attr_file.read_text(encoding="utf-8"))
+    expected_diff_sha = sha256_json(rd)
+    if not ad.get("diff_sha256") or ad.get("diff_sha256") != expected_diff_sha:
+        return None
+    return {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
+
+
+def _apply_roundtrip_attribution(rd: dict[str, Any], attr_file: Path) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Apply bound Stage 3 attribution to distortions/omissions; fail closed if stale or unbound."""
+    rc_by_id = _load_matching_attribution(rd, attr_file)
+    dists = rd.get("stance_and_logic_distortions", [])
+    omissions = rd.get("core_argument_omissions", [])
+    if rc_by_id is None:
+        return rd.get("summary_metrics", {}).get("distortion_count", 0), omissions, dists, False
+    tagged_dists = [
+        d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
+        for d in dists
+    ]
+    tagged_omissions = [
+        o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
+        for o in omissions
+    ]
+    filtered_dist_count = sum(
+        1 for d in tagged_dists
+        if d.get("root_cause") in ("extraction_defect", "mixed")
+    )
+    return filtered_dist_count, tagged_omissions, tagged_dists, True
+
+
 def _short_lecture_label(source_id: str, lecture_code: str | None = None) -> str:
     if lecture_code and re.fullmatch(r"L(\d+)", lecture_code):
         return f"第 {lecture_code[1:]} 講"
@@ -183,21 +218,13 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
         if rtv_file.exists():
             rd = json.loads(rtv_file.read_text(encoding="utf-8"))
             m = rd.get("summary_metrics", {})
-            attr_file = udir / "roundtrip_attribution.json"
-            dist_count = m.get("distortion_count", 0)
-            if attr_file.exists():
-                ad = json.loads(attr_file.read_text(encoding="utf-8"))
-                rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
-                dists = rd.get("stance_and_logic_distortions", [])
-                dist_count = sum(
-                    1 for d in dists
-                    if rc_by_id.get(d.get("distortion_id"), "extraction_defect") in ("extraction_defect", "mixed")
-                )
+            dist_count, _, _, attr_verified = _apply_roundtrip_attribution(rd, udir / "roundtrip_attribution.json")
             roundtrip_summary = {
                 "core_covered": m.get("core_units_covered", 0),
                 "core_total": m.get("core_units_total", 0),
                 "distortions": dist_count,
                 "omissions": m.get("omission_count", 0),
+                "attribution_verified": attr_verified,
             }
 
         unit_rows.append(
@@ -290,29 +317,18 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     roundtrip_overview = None
     if (udir / "roundtrip_diff.json").exists():
         rd = json.loads((udir / "roundtrip_diff.json").read_text(encoding="utf-8"))
+        dist_count, tagged_omissions, tagged_dists, attr_verified = _apply_roundtrip_attribution(
+            rd, udir / "roundtrip_attribution.json"
+        )
+        metrics = dict(rd.get("summary_metrics", {}))
+        metrics["distortion_count"] = dist_count
         roundtrip_overview = {
-            "metrics": rd.get("summary_metrics", {}),
-            "omissions": rd.get("core_argument_omissions", []),
-            "distortions": rd.get("stance_and_logic_distortions", []),
+            "metrics": metrics,
+            "omissions": tagged_omissions,
+            "distortions": tagged_dists,
             "noise": rd.get("non_argument_noise", []),
+            "attribution_verified": attr_verified,
         }
-        attr_file = folder / "units" / unit_id / "roundtrip_attribution.json"
-        if attr_file.exists():
-            ad = json.loads(attr_file.read_text(encoding="utf-8"))
-            rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
-            roundtrip_overview["distortions"] = [
-                d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
-                for d in roundtrip_overview["distortions"]
-            ]
-            roundtrip_overview["omissions"] = [
-                o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
-                for o in roundtrip_overview["omissions"]
-            ]
-            roundtrip_overview["metrics"] = dict(roundtrip_overview["metrics"])
-            roundtrip_overview["metrics"]["distortion_count"] = sum(
-                1 for d in roundtrip_overview["distortions"]
-                if d.get("root_cause") in ("extraction_defect", "mixed")
-            )
 
     def _first_pos(at_list: list[int]) -> int:
         return min(at_list) if at_list else 10**9

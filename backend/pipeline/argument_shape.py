@@ -62,10 +62,11 @@ def prefilter(items, root, ports):
     return out
 
 
-def prefilter_report(items, risk):
+def prefilter_report(items, risk, *, candidate=None):
     looks = [{'id': r['job_id'], 'statement': r['statement'], 'jev_risk': risk[r['job_id']]}
              for r in items if risk[r['job_id']] >= SHAPE_RISK]
-    return {'claims': len(items), 'findings': [], 'needs_look': sorted(looks, key=lambda x: -x['jev_risk']),
+    return {**af.candidate_binding(candidate, items),
+            'claims': len(items), 'findings': [], 'needs_look': sorted(looks, key=lambda x: -x['jev_risk']),
             'threshold': SHAPE_RISK, 'judge': 'Claude reads each look against his words; the owner rules on what Claude finds'}
 
 
@@ -121,6 +122,23 @@ def calibrate(root, ports, runs_dir):
             'his_own_top_risks': sorted(mine)[-4:]}
 
 
+def run_judge(candidate, out_dir, client, *, day=None):
+    """Verify prefilter.json matches the exact current candidate before judging and writing shape-final.json."""
+    out = Path(out_dir)
+    final = out / 'shape-final.json'
+    if final.exists():
+        raise SystemExit(f'{final} exists; it may hold the owner\'s rulings, not overwritten')
+    pre = json.loads((out / 'prefilter.json').read_text())
+    items = rows(candidate)
+    try:
+        todo = af.verify_prefilter_binding(pre, candidate, items, count_key='claims', check_by_kind=False)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    report = judged_report(pre, items, judge(todo, out, client) if todo else {}, model=client.model, day=day)
+    final.write_text(json.dumps(report, ensure_ascii=False, indent=1))
+    return report
+
+
 def main():
     from dotenv import load_dotenv
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
@@ -140,27 +158,23 @@ def main():
         return
     if not a.candidate:
         raise SystemExit('--candidate is required')
-    items = rows(json.loads(Path(a.candidate).read_text()))
+    candidate = json.loads(Path(a.candidate).read_text())
+    items = rows(candidate)
     if a.prefilter == a.judge:
         raise SystemExit('give exactly one of --prefilter and --judge')
     if a.prefilter:
         client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
-        report = prefilter_report(items, prefilter(items, out, Models(client, out)))
+        report = prefilter_report(items, prefilter(items, out, Models(client, out)), candidate=candidate)
         out.mkdir(parents=True, exist_ok=True)
         (out / 'prefilter.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
         print(json.dumps({'claims': report['claims'], 'to_judge': len(report['needs_look'])}, ensure_ascii=False))
         return
-    final = out / 'shape-final.json'
-    if final.exists():
-        raise SystemExit(f'{final} exists; it may hold the owner\'s rulings, not overwritten')
     from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
-    pre = json.loads((out / 'prefilter.json').read_text())
-    asked = {l['id'] for l in pre['needs_look']}
     client = ClaudeSubscriptionClient(model=af.JUDGE_MODEL, reasoning_effort='high')
-    todo = [r for r in items if r['job_id'] in asked]
-    report = judged_report(pre, items, judge(todo, out, client) if todo else {})
-    final.write_text(json.dumps(report, ensure_ascii=False, indent=1))
-    print(json.dumps({'looks': len(asked), 'his_own': len(report['needs_look']), 'to_owner': len(report['findings'])}, ensure_ascii=False))
+    report = run_judge(candidate, out, client)
+    print(json.dumps({'looks': len(report['needs_look']) + len(report['findings']),
+                      'his_own': len(report['needs_look']),
+                      'to_owner': len(report['findings'])}, ensure_ascii=False))
 
 
 if __name__ == '__main__':

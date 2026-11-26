@@ -71,11 +71,66 @@ def prefilter_question(kind):
 PREFILTER_RISK = 0.3  # 2026-11-17 calibration: 18/18 planted errors at or above it, 36/142 faithful records
 
 
-def prefilter_report(rows, risk):
+def _sha256_json(obj) -> str:
+    import hashlib
+    return hashlib.sha256(json.dumps(obj, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def candidate_binding(candidate, rows) -> dict:
+    """Compute canonical digests binding a prefilter/final report to an exact candidate and its check rows."""
+    row_digest_input = [
+        {
+            'job_id': r['job_id'],
+            'kind': r.get('kind', ''),
+            'statement': r['statement'],
+            'his_words': r.get('his_words', ''),
+            'context': r.get('context', ''),
+            'evidence': r.get('evidence', []),
+        }
+        for r in rows
+    ]
+    out = {'records_sha256': _sha256_json(row_digest_input)}
+    if candidate is not None:
+        out['candidate_sha256'] = _sha256_json(candidate)
+    return out
+
+
+def verify_prefilter_binding(pre, candidate, rows, *, count_key='records', check_by_kind=True):
+    """Fail closed unless prefilter.json matches the exact current candidate, records, and look statements."""
+    if not isinstance(pre, dict):
+        raise ValueError('prefilter.json must be a JSON object')
+    expected = candidate_binding(candidate, rows)
+    if not pre.get('candidate_sha256') or pre.get('candidate_sha256') != expected.get('candidate_sha256'):
+        raise ValueError('prefilter.json candidate_sha256 does not match the current candidate; re-run --prefilter')
+    if not pre.get('records_sha256') or pre.get('records_sha256') != expected['records_sha256']:
+        raise ValueError('prefilter.json records_sha256 does not match the current candidate records; re-run --prefilter')
+    if pre.get(count_key) != len(rows):
+        raise ValueError(f'prefilter.json {count_key} count ({pre.get(count_key)}) != current ({len(rows)}); re-run --prefilter')
+    if check_by_kind:
+        expected_kinds = {k: sum(r['kind'] == k for r in rows) for _, _, _, k in KINDS}
+        if pre.get('by_kind') != expected_kinds:
+            raise ValueError('prefilter.json by_kind does not match current candidate records; re-run --prefilter')
+    by_id = {r['job_id']: r for r in rows}
+    looks = pre.get('needs_look')
+    if not isinstance(looks, list):
+        raise ValueError('prefilter.json needs_look must be a list')
+    wanted = set()
+    for look in looks:
+        lid = look.get('id')
+        if lid not in by_id:
+            raise ValueError(f'prefilter.json names record {lid!r} absent from the current candidate')
+        if look.get('statement') != by_id[lid]['statement']:
+            raise ValueError(f'prefilter.json statement for {lid!r} does not match the current candidate')
+        wanted.add(lid)
+    return [r for r in rows if r['job_id'] in wanted]
+
+
+def prefilter_report(rows, risk, *, candidate=None):
     """Records at or above the measured risk go to Claude to judge against his words; Jev decides nothing."""
     looks = [{'id': r['job_id'], 'kind': r['kind'], 'statement': r['statement'], 'jev_risk': risk[r['job_id']]}
              for r in rows if risk[r['job_id']] >= PREFILTER_RISK]
-    return {'records': len(rows), 'findings': [], 'needs_look': sorted(looks, key=lambda x: -x['jev_risk']),
+    return {**candidate_binding(candidate, rows),
+            'records': len(rows), 'findings': [], 'needs_look': sorted(looks, key=lambda x: -x['jev_risk']),
             'threshold': PREFILTER_RISK, 'by_kind': {k: sum(r['kind'] == k for r in rows) for _, _, _, k in KINDS},
             'judge': 'Claude reads each look against his words; owner rules on what Claude finds changed'}
 
@@ -160,11 +215,11 @@ UNIT_KIND_MAP = {
 def _unit_argument_records(candidate):
     """Adapt #845 unit_argument_candidate_v1 nodes into fidelity-check rows.
 
-    Matches single-lecture ``records()`` semantics: a Claim's ``his_words`` puts its
-    own conclusion anchor first, followed by sentences from its direct incoming
-    supporting/answering/contextualizing edges and child nodes (so cross-paragraph
-    synthesis isn't falsely flagged as 'added'), and ``context`` covers a wider ±3
-    paragraph window around its anchor.
+    A node's ``his_words`` puts its own anchor sentences first (tagged by speaker/node
+    role). For Claims, direct incoming edge/source sentences follow with explicit
+    ``[關聯邊 <relation>｜<role>]`` tags—in particular marking ``refutes`` / ``position``
+    lines as ``[被反駁的他方立場]`` so a judge never mistakes an opponent's wording
+    for the speaker's own Claim.
     """
     sents = candidate['sentences']
     nodes = candidate['nodes']
@@ -178,17 +233,12 @@ def _unit_argument_records(candidate):
         by_para[k] += s['text']
     para_idx = {k: i for i, k in enumerate(para_order)}
 
-    # Collect direct incoming supporting/contextualizing sentence positions per node
-    incoming_pos: dict[str, list[int]] = {}
+    # Collect direct incoming edges per destination node, preserving relation and source kind
+    incoming_by_dst: dict[str, list[dict]] = {}
     for e in edges:
         dst = e.get('to_id')
-        src = e.get('from_id')
-        if not dst or dst not in nodes:
-            continue
-        bucket = incoming_pos.setdefault(dst, [])
-        bucket.extend(e.get('at') or [])
-        if src and src in nodes:
-            bucket.extend(nodes[src].get('at') or [])
+        if dst and dst in nodes:
+            incoming_by_dst.setdefault(dst, []).append(e)
 
     out = []
     for nid, node in nodes.items():
@@ -196,9 +246,25 @@ def _unit_argument_records(candidate):
         if not at_positions:
             raise ValueError(f'{nid}: no sentence positions to check it against')
         own_set = set(at_positions)
-        behind = sorted({p for p in incoming_pos.get(nid, []) if p not in own_set}) if node['kind'] == 'claim' else []
-        ordered_pos = at_positions + behind
-        words = '\n'.join(sents[i - 1]['text'] for i in ordered_pos)
+        own_tag = '被轉述／反駁的他方立場' if node['kind'] == 'position' else '本節點結論原話' if node['kind'] == 'claim' else '本節點原話'
+        word_lines = [f'[{own_tag}] {sents[i - 1]["text"]}' for i in at_positions]
+        if node['kind'] == 'claim':
+            seen_behind: set[tuple[str, int]] = set()
+            for e in incoming_by_dst.get(nid, []):
+                rel = e.get('relation', 'supports')
+                src = nodes.get(e.get('from_id') or '')
+                src_kind = src.get('kind', '') if src else ''
+                is_opposing = (rel == 'refutes') or (src_kind == 'position')
+                role_label = '被反駁的他方立場，非本Claim主張' if is_opposing else UNIT_KIND_MAP.get(src_kind, src_kind or '關聯')
+                tag = f'關聯邊 {rel}｜{role_label}'
+                positions = sorted({p for p in (*(e.get('at') or ()), *(src.get('at') or () if src else ())) if p not in own_set})
+                for p in positions:
+                    key = (tag, p)
+                    if key in seen_behind:
+                        continue
+                    seen_behind.add(key)
+                    word_lines.append(f'[{tag}] {sents[p - 1]["text"]}')
+        words = '\n'.join(word_lines)
         touched = sorted({para_idx[(sents[i - 1]['source_id'], sents[i - 1]['paragraph'])] for i in at_positions})
         ctx_indices = {j for pi in touched for j in range(max(0, pi - 3), min(len(para_order), pi + 4))}
         near = '\n'.join(by_para[para_order[j]] for j in sorted(ctx_indices))
@@ -297,6 +363,24 @@ def usage(root):
     return totals
 
 
+def run_judge(candidate, out_dir, client, *, day=None):
+    """Verify prefilter.json matches the exact current candidate before judging and writing fidelity-final.json."""
+    out = Path(out_dir)
+    final = out / 'fidelity-final.json'
+    if final.exists():
+        raise SystemExit(f'{final} exists; it may hold owner rulings')
+    pre = json.loads((out / 'prefilter.json').read_text())
+    all_rows = records(candidate)
+    try:
+        rows = verify_prefilter_binding(pre, candidate, all_rows, count_key='records', check_by_kind=True)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    decided = judge(rows, out, client) if rows else {}
+    result = judged_report(pre, all_rows, decided, model=client.model, day=day)
+    final.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    return result
+
+
 def main():
     from dotenv import load_dotenv
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
@@ -315,19 +399,10 @@ def main():
     candidate = json.loads(Path(a.candidate).read_text())
     if a.judge:
         from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
-        out = Path(a.out)
-        final = out / 'fidelity-final.json'
-        if final.exists():
-            raise SystemExit(f'{final} exists; it may hold owner rulings')
-        pre = json.loads((out / 'prefilter.json').read_text())
-        wanted = {look['id'] for look in pre['needs_look']}
-        rows = [r for r in records(candidate) if r['job_id'] in wanted]
-        if {r['job_id'] for r in rows} != wanted:
-            raise SystemExit('prefilter.json names records this candidate does not have')
         client = ClaudeSubscriptionClient(model=JUDGE_MODEL, reasoning_effort='high')
-        result = judged_report(pre, rows, judge(rows, out, client))
-        final.write_text(json.dumps(result, ensure_ascii=False, indent=1))
-        print(json.dumps({'looks': len(wanted), 'faithful': len(result['needs_look']),
+        result = run_judge(candidate, a.out, client)
+        print(json.dumps({'looks': len(result['needs_look']) + len(result['findings']),
+                          'faithful': len(result['needs_look']),
                           'to_owner': [f['id'] for f in result['findings']]}, ensure_ascii=False))
         return
     if a.count:
@@ -340,7 +415,7 @@ def main():
     ports = Models(client, Path(a.out))
     if a.prefilter:
         rows = records(candidate)
-        result = prefilter_report(rows, prefilter(rows, a.out, ports))
+        result = prefilter_report(rows, prefilter(rows, a.out, ports), candidate=candidate)
         result['usage'] = usage(a.out)
         Path(a.out).mkdir(parents=True, exist_ok=True)
         (Path(a.out) / 'prefilter.json').write_text(json.dumps(result, ensure_ascii=False, indent=1))

@@ -709,11 +709,16 @@ def run_verification(
     )
     diff_report = judge_client.generate_json(JUDGE_SYSTEM, stage2_user, JUDGE_SCHEMA)
     t2 = time.time()
+    diff_sha256 = sha256_json(diff_report)
     (out_dir / "04_structured_diff_report.json").write_text(
         json.dumps(diff_report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     # Stage 3: Post-hoc Root-Cause Attribution (only if there are findings)
+    # Remove any stale attribution file from an earlier run in the same directory so it
+    # can never masquerade as belonging to this diff report.
+    attr_out_path = out_dir / "05_root_cause_attribution.json"
+    attr_out_path.unlink(missing_ok=True)
     attribution_report = None
     t3 = t2
     all_findings = {
@@ -732,8 +737,10 @@ def run_verification(
         attribution_report = attributor_client.generate_json(
             ATTRIBUTION_SYSTEM, stage3_user, ATTRIBUTION_SCHEMA
         )
+        attribution_report["blind_graph_sha256"] = stats["blind_graph_sha256"]
+        attribution_report["diff_sha256"] = diff_sha256
         t3 = time.time()
-        (out_dir / "05_root_cause_attribution.json").write_text(
+        attr_out_path.write_text(
             json.dumps(attribution_report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
