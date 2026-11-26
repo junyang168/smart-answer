@@ -155,7 +155,70 @@ export function ArgumentDagMap({
       }
     }
 
-    const vEdges = compEdges.filter((e) => visibleIds.has(e.from_id) && visibleIds.has(e.to_id));
+    const directEdges = compEdges.filter((e) => visibleIds.has(e.from_id) && visibleIds.has(e.to_id));
+    const directPairs = new Set(directEdges.map((e) => `${e.from_id}->${e.to_id}`));
+
+    // Synthesize dashed 2-hop bridge edges when two visible spine nodes are connected
+    // through a hidden intermediate node (e.g. C016 -> C007 -> hidden N10 <- C009, or C017 -> hidden N17 -> C009).
+    const hiddenEdgesByNode: Record<string, { incoming: DagGraphEdge[]; outgoing: DagGraphEdge[] }> = {};
+    for (const e of compEdges) {
+      if (!visibleIds.has(e.to_id)) {
+        (hiddenEdgesByNode[e.to_id] ??= { incoming: [], outgoing: [] }).incoming.push(e);
+      }
+      if (!visibleIds.has(e.from_id)) {
+        (hiddenEdgesByNode[e.from_id] ??= { incoming: [], outgoing: [] }).outgoing.push(e);
+      }
+    }
+    const bridgeEdges: (DagGraphEdge & { isBridge?: boolean })[] = [];
+    for (const [hid, links] of Object.entries(hiddenEdgesByNode)) {
+      const hNode = nodes[hid];
+      if (!hNode) continue;
+      // Case A: visible A -> hidden H -> visible B (e.g. C017 --ctx--> N17 --supports--> C009)
+      for (const ein of links.incoming) {
+        if (!visibleIds.has(ein.from_id)) continue;
+        for (const eout of links.outgoing) {
+          if (!visibleIds.has(eout.to_id) || ein.from_id === eout.to_id) continue;
+          const k = `${ein.from_id}->${eout.to_id}`;
+          if (!directPairs.has(k)) {
+            directPairs.add(k);
+            bridgeEdges.push({
+              from_id: ein.from_id,
+              to_id: eout.to_id,
+              relation: ein.relation,
+              relation_label: ein.relation_label,
+              reason: `經由 ${hid}`,
+              attribution: "editorial",
+              isBridge: true,
+            });
+          }
+        }
+      }
+      // Case B: hidden sub-question H has contextualizer A -> H and answerer B -> H (e.g. C007 -> N10 <- C009)
+      if (hNode.kind === "question") {
+        const ctxSrcs = links.incoming.filter((e) => visibleIds.has(e.from_id) && e.relation === "contextualizes");
+        const ansSrcs = links.incoming.filter((e) => visibleIds.has(e.from_id) && e.relation === "answers");
+        for (const c of ctxSrcs) {
+          for (const a of ansSrcs) {
+            if (c.from_id === a.from_id) continue;
+            const k = `${c.from_id}->${a.from_id}`;
+            if (!directPairs.has(k)) {
+              directPairs.add(k);
+              bridgeEdges.push({
+                from_id: c.from_id,
+                to_id: a.from_id,
+                relation: "contextualizes",
+                relation_label: "背景",
+                reason: `經由子問題 ${hid}`,
+                attribution: "editorial",
+                isBridge: true,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const vEdges: (DagGraphEdge & { isBridge?: boolean })[] = [...directEdges, ...bridgeEdges];
 
     // Compute top-down depth layers from rootId:
     // Layer 0 = rootId (main question), Layer 1 = nodes pointing directly into rootId,
@@ -355,6 +418,7 @@ export function ArgumentDagMap({
                   fill="none"
                   stroke={stroke}
                   strokeWidth={isHighlighted ? 2 : 1.3}
+                  strokeDasharray={e.isBridge ? "5 4" : undefined}
                   markerEnd={`url(#arrow-${stroke.slice(1)})`}
                 />
                 {isHighlighted && (
@@ -375,12 +439,8 @@ export function ArgumentDagMap({
             const isRelated = !selectedId || neighborIds.has(ln.node.id);
             const c = nodeColors(ln.node.kind, ln.isRoot, isSelected);
             const tagText = ln.isRoot
-              ? "總問題"
-              : ln.node.point_no
-              ? `論點 #${ln.node.point_no}`
-              : ln.node.question_no
-              ? `子問題 #${ln.node.question_no}`
-              : ln.node.kind_label;
+              ? `${ln.node.id} 總問題`
+              : `${ln.node.id} ${ln.node.kind_label.slice(0, 2)}`;
             const title = shortTitle(ln.node.statement, 30);
             const line1 = title.slice(0, 15);
             const line2 = title.slice(15);
@@ -402,11 +462,11 @@ export function ArgumentDagMap({
                   strokeWidth={isSelected ? 2.5 : 1.3}
                 />
                 {/* Top badge + lecture label */}
-                <rect x={8} y={7} width={58} height={17} rx={4} fill={c.badgeBg} />
-                <text x={37} y={18.5} textAnchor="middle" fontSize={10} fontWeight={700} fill={c.badgeText}>
+                <rect x={8} y={7} width={68} height={17} rx={4} fill={c.badgeBg} />
+                <text x={42} y={18.5} textAnchor="middle" fontSize={9.5} fontWeight={700} fill={c.badgeText}>
                   {tagText}
                 </text>
-                <text x={72} y={18.5} fontSize={9.5} fill="#64748b">
+                <text x={81} y={18.5} fontSize={9.5} fill="#64748b">
                   {ln.node.lecture_label}
                 </text>
                 {/* Child evidence / sub-question counts */}

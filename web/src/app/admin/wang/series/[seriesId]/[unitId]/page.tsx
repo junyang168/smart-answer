@@ -116,21 +116,11 @@ function clock(seconds: number | null): string {
 }
 
 function nodeDisplayLabel(n: GraphNode): string {
-  if (n.point_no) return `論點 #${n.point_no}`;
-  if (n.question_no) return `問題 #${n.question_no}`;
-  return n.kind_label;
+  return `${n.id} ${n.kind_label}`;
 }
 
-// Replace raw internal IDs (C005, Q001, N14) in edge rationales with readable UI labels.
-function formatReason(reason: string, nodes: Record<string, GraphNode>): string {
-  if (!reason) return "";
-  return reason.replace(/\b([CQN]\d{1,3})\b/g, (id) => {
-    const n = nodes[id];
-    if (!n) return id;
-    if (n.point_no) return `論點 #${n.point_no}`;
-    if (n.question_no) return `問題 #${n.question_no}`;
-    return `${n.kind_label}（${n.statement.slice(0, 10)}…）`;
-  });
+function formatReason(reason: string, _nodes: Record<string, GraphNode>): string {
+  return reason || "";
 }
 
 const BADGE_STYLE: Record<string, string> = {
