@@ -266,7 +266,17 @@ def connect(root, context, claims, ports):
             part = creation.call(root / f"connections-{batch:02d}", ports, "creation_unit_connections",
                                  batch_content(end), GRAPH, GRAPH_PROMPT, context.reading.verify)
             for node in part["new_nodes"]:
-                merged_nodes[node["id"]] = node
+                nid = node["id"]
+                if nid in claims or nid in questions:
+                    raise ValueError(f"unit connections batch {batch} collided with fixed node {nid}")
+                if nid in merged_nodes:
+                    prev = merged_nodes[nid]
+                    if (prev.get("kind"), prev.get("statement"), sorted(prev.get("at") or ())) != (
+                        node.get("kind"), node.get("statement"), sorted(node.get("at") or ())
+                    ):
+                        raise ValueError(f"unit connections batch {batch} redefined existing node {nid}")
+                else:
+                    merged_nodes[nid] = node
             for link in part["edges"]:
                 sig = (link["from_id"], link["to_id"], link["relation"],
                        link["reason"].strip(), tuple(sorted(link["at"])))

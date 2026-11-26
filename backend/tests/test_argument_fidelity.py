@@ -165,3 +165,29 @@ def test_argument_shape_run_judge_rejects_stale_prefilter_and_accepts_bound(tmp_
     assert client.calls == 1
     assert [x['id'] for x in out['needs_look']] == ['DK-x-CL0001']
     assert (tmp_path / 'shape-final.json').exists()
+
+
+def test_unit_argument_records_tags_refuted_position_and_support_roles():
+    unit_cand = {
+        'version': 'unit_argument_candidate_v1',
+        'sentences': [
+            {'source_id': 'L1', 'paragraph': 'S0001', 'text': '有人說耶穌怕人悔改。'},
+            {'source_id': 'L1', 'paragraph': 'S0002', 'text': '這是錯誤的讀法。'},
+            {'source_id': 'L1', 'paragraph': 'S0003', 'text': '因為原文用的是虛擬式。'},
+        ],
+        'nodes': {
+            'N1': {'kind': 'position', 'statement': '耶穌怕人悔改', 'at': [1]},
+            'C001': {'kind': 'claim', 'statement': '耶穌並非怕人悔改', 'at': [2]},
+            'N2': {'kind': 'evidence', 'statement': '原文用虛擬式', 'at': [3]},
+        },
+        'edges': [
+            {'from_id': 'N1', 'to_id': 'C001', 'relation': 'refutes', 'at': [1, 2]},
+            {'from_id': 'N2', 'to_id': 'C001', 'relation': 'supports', 'at': [2, 3]},
+        ],
+    }
+    by_id = {r['job_id']: r for r in af.records(unit_cand)}
+    hw = by_id['C001']['his_words']
+    assert '[本節點結論原話] 這是錯誤的讀法。' in hw
+    assert '[關聯邊 refutes｜被反駁的他方立場，非本Claim主張] 有人說耶穌怕人悔改。' in hw
+    assert '[關聯邊 supports｜Evidence] 原文用的是虛擬式。' in hw or '[關聯邊 supports｜Evidence] 因為原文用的是虛擬式。' in hw
+    assert '[被轉述／反駁的他方立場] 有人說耶穌怕人悔改。' in by_id['N1']['his_words']
