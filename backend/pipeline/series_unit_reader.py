@@ -146,10 +146,43 @@ def _series_root(data_base_dir: Path) -> Path:
     return Path(data_base_dir) / SERIES_DIR_NAME
 
 
+def _loaded_unit_keys(series_id: Optional[str] = None) -> set[tuple[str, str]]:
+    """Return ``(series_id, unit_id)`` pairs currently loaded in ``ARGUMENT_DATABASE_URL``."""
+    try:
+        from backend.pipeline import argument_review
+
+        with argument_review.connect() as conn:
+            if series_id:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata->>'series_id' = %s
+                       AND metadata ? 'unit_id'
+                    """,
+                    (series_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata ? 'series_id'
+                       AND metadata ? 'unit_id'
+                    """
+                ).fetchall()
+        return {(str(r[0]), str(r[1])) for r in rows if r[0] and r[1]}
+    except Exception:
+        return set()
+
+
 def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
     root = _series_root(data_base_dir)
     if not root.exists():
         return []
+    loaded_keys = _loaded_unit_keys()
     out: list[dict[str, Any]] = []
     for folder in sorted(root.iterdir()):
         seg_file = folder / "segmentation.json"
@@ -158,6 +191,7 @@ def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
         seg = json.loads(seg_file.read_text(encoding="utf-8"))
         units = seg.get("units", [])
         ready = sum(1 for u in units if (folder / "units" / u["unit_id"] / "unit-argument.json").exists())
+        loaded = sum(1 for u in units if (folder.name, u["unit_id"]) in loaded_keys)
         rulings = _latest_rulings(data_base_dir, folder.name)
         approved = sum(1 for r in rulings.values() if r.get("verdict") == "approved")
         out.append(
@@ -167,6 +201,7 @@ def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
                 "lecture_count": len(seg.get("sources", [])),
                 "unit_count": len(units),
                 "ready_count": ready,
+                "loaded_count": loaded,
                 "approved_count": approved,
             }
         )
@@ -180,6 +215,7 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
         raise ValueError(f"series not found: {series_id}")
     seg = json.loads(seg_file.read_text(encoding="utf-8"))
     rulings = _latest_rulings(data_base_dir, series_id)
+    loaded_keys = _loaded_unit_keys(series_id)
     src_by_lec = {s["lecture"]: s for s in seg.get("sources", [])}
 
     unit_rows: list[dict[str, Any]] = []
@@ -236,6 +272,7 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
                 "cross_lecture": bool(u.get("cross_lecture")),
                 "lectures": [_short_lecture_label(src_by_lec.get(l, {}).get("source_id", l), l) for l in lectures_in_unit],
                 "ready": ready,
+                "loaded_in_db": (series_id, uid) in loaded_keys,
                 "node_count": node_count,
                 "edge_count": edge_count,
                 "claim_count": claim_count,
