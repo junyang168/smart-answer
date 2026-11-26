@@ -76,7 +76,18 @@ async function connect() {
     const { Client, LocalAuth } = wweb;
     if (client) await client.destroy().catch(() => {});
     const puppeteer = browserOptions();
-    client = new Client({ authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }), puppeteer });
+    const pinnedWebVersion = process.env.SUNDAY_WHATSAPP_WEB_VERSION;
+    if (pinnedWebVersion && !/^\d+(?:\.\d+)+$/.test(pinnedWebVersion)) {
+      throw new Error("Invalid SUNDAY_WHATSAPP_WEB_VERSION");
+    }
+    const webVersionOptions = pinnedWebVersion ? {
+      webVersion: pinnedWebVersion,
+      webVersionCache: { type: "local", path: join(stateDir, "web-versions"), strict: true },
+    } : {};
+    client = new Client({
+      authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }),
+      puppeteer, ...webVersionOptions,
+    });
     client.on("qr", async code => { qr = await qrcode.toDataURL(code); state = "qr"; });
     client.on("ready", () => { state = "ready"; qr = null; connecting = false; lastHistorySync = 0; });
     client.on("auth_failure", () => { state = "auth_failure"; connecting = false; lastError = "WhatsApp 登入失敗，請重新連接"; });
