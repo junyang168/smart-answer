@@ -121,15 +121,30 @@ def test_dry_run_and_gates(tmp_path: Path):
 
     unit_dir_bad_ruling, data_dir_bad = _stage_unit(tmp_path / "r1", verdict="needs_revision")
     with pytest.raises(ValueError, match="not approved"):
-        U.verify_unit_gates(unit_dir_bad_ruling, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_bad)
+        U.verify_unit_gates(unit_dir_bad_ruling, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_bad, allow_unapproved=False)
 
     unit_dir_bad_fid, data_dir_fid = _stage_unit(tmp_path / "r2", verdict="approved", changed=1)
     with pytest.raises(ValueError, match="unresolved fidelity"):
-        U.verify_unit_gates(unit_dir_bad_fid, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_fid)
+        U.verify_unit_gates(unit_dir_bad_fid, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_fid, allow_unapproved=False)
 
     unit_dir_bad_attr, data_dir_attr = _stage_unit(tmp_path / "r3", verdict="approved", stale_attr=True)
     with pytest.raises(ValueError, match="stale roundtrip_attribution"):
-        U.verify_unit_gates(unit_dir_bad_attr, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_attr)
+        U.verify_unit_gates(unit_dir_bad_attr, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir_attr, allow_unapproved=False)
+
+
+def test_allow_unapproved_loads_as_candidate(tmp_path: Path):
+    unit_dir, data_dir = _stage_unit(tmp_path, verdict="", stale_attr=True, changed=1)
+    res = U.load_unit(
+        None,
+        unit_dir,
+        series_id="2014-nysc-matthew-4",
+        unit_id="U04",
+        data_base_dir=data_dir,
+        dry_run=True,
+        allow_unapproved=True,
+    )
+    assert res["dry_run"] is True
+    assert res["gates"]["approved"] is False
 
 
 def test_load_unit_into_temp_postgres_and_replace(tmp_path: Path):

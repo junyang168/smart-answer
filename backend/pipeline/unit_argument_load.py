@@ -34,6 +34,12 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def json_sha256(data: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def _unit_key(series_id: str, unit_id: str) -> str:
     return f"{series_id}/{unit_id}"
 
@@ -66,6 +72,7 @@ def verify_unit_gates(
     unit_id: str,
     data_base_dir: Path = DEFAULT_DATA_BASE_DIR,
     rulings_path: Optional[Path] = None,
+    allow_unapproved: bool = True,
 ) -> dict[str, Any]:
     """Verify owner ruling, fidelity summary, and round-trip artifacts for one unit."""
     unit_arg_path = unit_dir / "unit-argument.json"
@@ -73,38 +80,47 @@ def verify_unit_gates(
         raise ValueError(f"missing unit-argument.json in {unit_dir}")
 
     ruling = _latest_unit_ruling(data_base_dir, series_id, unit_id, rulings_path=rulings_path)
-    if not ruling or ruling.get("verdict") != "approved":
+    if not allow_unapproved and (not ruling or ruling.get("verdict") != "approved"):
         verdict = ruling.get("verdict") if ruling else None
         raise ValueError(f"unit {_unit_key(series_id, unit_id)} is not approved (verdict={verdict!r})")
 
     fidelity_path = unit_dir / "fidelity_summary.json"
-    if not fidelity_path.exists():
+    fidelity: Optional[dict[str, Any]] = None
+    if fidelity_path.exists():
+        fidelity = json.loads(fidelity_path.read_text(encoding="utf-8"))
+    elif not allow_unapproved:
         raise ValueError(f"missing fidelity_summary.json in {unit_dir}")
-    fidelity = json.loads(fidelity_path.read_text(encoding="utf-8"))
-    total_nodes = int(fidelity.get("total_nodes") or 0)
-    faithful = int(fidelity.get("faithful") or 0)
-    changed = int(fidelity.get("changed") or 0)
-    added = int(fidelity.get("added") or 0)
-    findings = fidelity.get("findings") or []
-    if total_nodes <= 0 or changed != 0 or added != 0 or faithful != total_nodes or findings:
-        raise ValueError(
-            f"unit {_unit_key(series_id, unit_id)} has unresolved fidelity items "
-            f"(faithful={faithful}/{total_nodes}, changed={changed}, added={added}, findings={len(findings)})"
-        )
+
+    if not allow_unapproved and fidelity is not None:
+        total_nodes = int(fidelity.get("total_nodes") or 0)
+        faithful = int(fidelity.get("faithful") or 0)
+        changed = int(fidelity.get("changed") or 0)
+        added = int(fidelity.get("added") or 0)
+        findings = fidelity.get("findings") or []
+        if total_nodes <= 0 or changed != 0 or added != 0 or faithful != total_nodes or findings:
+            raise ValueError(
+                f"unit {_unit_key(series_id, unit_id)} has unresolved fidelity items "
+                f"(faithful={faithful}/{total_nodes}, changed={changed}, added={added}, findings={len(findings)})"
+            )
 
     diff_path = unit_dir / "roundtrip_diff.json"
-    if not diff_path.exists():
+    diff_sha: Optional[str] = None
+    diff_json_sha: Optional[str] = None
+    if diff_path.exists():
+        diff_sha = file_sha256(diff_path)
+        diff_json_sha = json_sha256(json.loads(diff_path.read_text(encoding="utf-8")))
+    elif not allow_unapproved:
         raise ValueError(f"missing roundtrip_diff.json in {unit_dir}")
-    diff_sha = file_sha256(diff_path)
 
     attr_path = unit_dir / "roundtrip_attribution.json"
     attr_sha: Optional[str] = None
-    if attr_path.exists():
+    if attr_path.exists() and diff_path.exists():
         attribution = json.loads(attr_path.read_text(encoding="utf-8"))
-        if attribution.get("diff_sha256") != diff_sha:
+        attr_diff_sha = attribution.get("diff_sha256")
+        if attr_diff_sha not in {diff_sha, diff_json_sha} and not allow_unapproved:
             raise ValueError(
                 f"stale roundtrip_attribution.json for {_unit_key(series_id, unit_id)}: "
-                f"expected diff_sha256={diff_sha}, got {attribution.get('diff_sha256')!r}"
+                f"expected diff_sha256={diff_json_sha} (or {diff_sha}), got {attr_diff_sha!r}"
             )
         attr_sha = file_sha256(attr_path)
 
@@ -112,7 +128,8 @@ def verify_unit_gates(
         "unit_argument_path": str(unit_arg_path),
         "unit_argument_sha256": file_sha256(unit_arg_path),
         "ruling": ruling,
-        "fidelity_sha256": file_sha256(fidelity_path),
+        "approved": bool(ruling and ruling.get("verdict") == "approved"),
+        "fidelity_sha256": file_sha256(fidelity_path) if fidelity_path.exists() else None,
         "fidelity": fidelity,
         "roundtrip_diff_sha256": diff_sha,
         "roundtrip_attribution_sha256": attr_sha,
@@ -124,10 +141,13 @@ def unit_argument_to_package(
     *,
     series_id: str,
     unit_id: str,
+    review_status: str = "approved",
 ) -> dict[str, Any]:
     """Convert a ``unit_argument_candidate_v1`` payload into a validated canonical package."""
     if unit_data.get("version") != "unit_argument_candidate_v1":
         raise ValueError(f"unsupported unit version: {unit_data.get('version')!r}")
+    if review_status not in {"approved", "candidate"}:
+        raise ValueError(f"unsupported review_status: {review_status!r}")
 
     ns = _namespace(series_id, unit_id)
     sources = unit_data.get("sources") or []
@@ -152,7 +172,7 @@ def unit_argument_to_package(
                 "source_body_sha256": body_sha,
                 "source_file_sha256": str(src.get("file_sha256") or ""),
                 "locator_space": "spoken_body_v1",
-                "review_status": "approved",
+                "review_status": review_status,
             }
         )
 
@@ -184,7 +204,7 @@ def unit_argument_to_package(
                 "verbatim_excerpt": excerpt,
                 "source_sha256": source_body_sha_by_id.get(sid, ""),
                 "anchor_state": "resolved",
-                "review_status": "approved",
+                "review_status": review_status,
             }
         )
 
@@ -200,7 +220,7 @@ def unit_argument_to_package(
                 "verbatim_excerpt": " ",
                 "source_sha256": source_body_sha_by_id.get(default_source_id, ""),
                 "anchor_state": "unresolved",
-                "review_status": "approved",
+                "review_status": review_status,
             }
         )
 
@@ -254,8 +274,8 @@ def unit_argument_to_package(
             "evidence_step_ids": [],
             "opposed_position_ids": [],
             "source_fragment_ids": frag_ids,
-            "review_status": "approved",
-            "maturity": "approved",
+            "review_status": review_status,
+            "maturity": review_status,
         }
 
     for nid, ndata in raw_nodes.items():
@@ -279,7 +299,7 @@ def unit_argument_to_package(
                     "answer_claim_ids": [],
                     "source_fragment_id": frag_ids[0],
                     "source_fragment_ids": frag_ids,
-                    "review_status": "approved",
+                    "review_status": review_status,
                 }
             )
         elif kind == "position":
@@ -290,7 +310,7 @@ def unit_argument_to_package(
                     "title": statement,
                     "attribution": "external_position",
                     "source_fragment_ids": frag_ids,
-                    "review_status": "approved",
+                    "review_status": review_status,
                 }
             )
         elif kind == "observation":
@@ -302,7 +322,7 @@ def unit_argument_to_package(
                     "observation_type": "text_observation",
                     "source_fragment_id": frag_ids[0],
                     "source_fragment_ids": frag_ids,
-                    "review_status": "approved",
+                    "review_status": review_status,
                 }
             )
         elif kind == "claim":
@@ -315,7 +335,7 @@ def unit_argument_to_package(
                 "evidence_step_ids": [],
                 "opposed_position_ids": [],
                 "source_fragment_ids": frag_ids,
-                "review_status": "approved",
+                "review_status": review_status,
                 "maturity": "approved",
             }
         else:
@@ -330,7 +350,7 @@ def unit_argument_to_package(
                 "source_fragment_id": frag_ids[0],
                 "source_fragment_ids": frag_ids,
                 "produced_claim_ids": [],
-                "review_status": "approved",
+                "review_status": review_status,
             }
 
     questions_by_id = {q["question_id"]: q for q in questions}
@@ -382,7 +402,7 @@ def unit_argument_to_package(
                     "to_id": to_id,
                     "relation_type": rel_type,
                     "reason": str(edge.get("reason") or ""),
-                    "review_status": "approved",
+                    "review_status": review_status,
                 }
             )
         else:
@@ -398,7 +418,7 @@ def unit_argument_to_package(
                     "to_id": to_id,
                     "relation_type": rel_type,
                     "reason": str(edge.get("reason") or ""),
-                    "review_status": "approved",
+                    "review_status": review_status,
                 }
             )
 
@@ -490,6 +510,7 @@ def load_unit(
     rulings_path: Optional[Path] = None,
     replaces: Optional[str] = None,
     dry_run: bool = False,
+    allow_unapproved: bool = True,
 ) -> dict[str, Any]:
     """Verify, convert, and transactionally load one unit into ``wang_knowledge``."""
     unit_dir = Path(unit_dir)
@@ -499,9 +520,16 @@ def load_unit(
         unit_id=unit_id,
         data_base_dir=data_base_dir,
         rulings_path=rulings_path,
+        allow_unapproved=allow_unapproved,
     )
     unit_data = json.loads((unit_dir / "unit-argument.json").read_text(encoding="utf-8"))
-    package = unit_argument_to_package(unit_data, series_id=series_id, unit_id=unit_id)
+    review_status = "approved" if gates["approved"] else "candidate"
+    package = unit_argument_to_package(
+        unit_data,
+        series_id=series_id,
+        unit_id=unit_id,
+        review_status=review_status,
+    )
     records = normalize_package(package)
     counts = {col: len(vals) for col, vals in records.items() if vals}
 
@@ -616,16 +644,86 @@ def load_unit(
     }
 
 
+def load_all_units(
+    conn: Any,
+    *,
+    data_base_dir: Path = DEFAULT_DATA_BASE_DIR,
+    series_filter: Optional[str] = None,
+    rulings_path: Optional[Path] = None,
+    dry_run: bool = False,
+    allow_unapproved: bool = True,
+) -> list[dict[str, Any]]:
+    """Load all active units (skipping ``*_bak`` directories) under ``unit_argument_series``."""
+    series_root = Path(data_base_dir) / "unit_argument_series"
+    results: list[dict[str, Any]] = []
+    for series_dir in sorted(series_root.iterdir()):
+        if not series_dir.is_dir():
+            continue
+        if series_filter and series_dir.name != series_filter:
+            continue
+        units_dir = series_dir / "units"
+        if not units_dir.is_dir():
+            continue
+        for udir in sorted(units_dir.iterdir()):
+            if not udir.is_dir() or udir.name.endswith("_bak") or "_bak" in udir.name:
+                continue
+            if not (udir / "unit-argument.json").exists():
+                continue
+            results.append(
+                load_unit(
+                    conn,
+                    udir,
+                    series_id=series_dir.name,
+                    unit_id=udir.name,
+                    data_base_dir=data_base_dir,
+                    rulings_path=rulings_path,
+                    dry_run=dry_run,
+                    allow_unapproved=allow_unapproved,
+                )
+            )
+    return results
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--series", required=True, help="Series ID, e.g. 2014-nysc-matthew-4")
-    parser.add_argument("--unit", required=True, help="Unit ID, e.g. U04")
+    parser.add_argument("--series", default=None, help="Series ID, e.g. 2014-nysc-matthew-4")
+    parser.add_argument("--unit", default=None, help="Unit ID, e.g. U04")
+    parser.add_argument("--all-units", action="store_true", help="Load all active units (skipping *_bak)")
     parser.add_argument("--data-base-dir", type=Path, default=DEFAULT_DATA_BASE_DIR)
     parser.add_argument("--unit-dir", type=Path, default=None)
     parser.add_argument("--rulings-path", type=Path, default=None)
     parser.add_argument("--replaces", default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--require-approved", action="store_true", help="Require owner approved ruling and zero fidelity findings")
     args = parser.parse_args(argv)
+    allow_unapproved = not args.require_approved
+
+    if args.all_units:
+        if args.dry_run:
+            res = load_all_units(
+                None,
+                data_base_dir=args.data_base_dir,
+                series_filter=args.series,
+                rulings_path=args.rulings_path,
+                dry_run=True,
+                allow_unapproved=allow_unapproved,
+            )
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+            return 0
+        with argument_review.connect() as conn:
+            res = load_all_units(
+                conn,
+                data_base_dir=args.data_base_dir,
+                series_filter=args.series,
+                rulings_path=args.rulings_path,
+                dry_run=False,
+                allow_unapproved=allow_unapproved,
+            )
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    if not args.series or not args.unit:
+        parser.error("--series and --unit are required unless --all-units is specified")
 
     unit_dir = args.unit_dir or (args.data_base_dir / "unit_argument_series" / args.series / "units" / args.unit)
     if args.dry_run:
@@ -638,6 +736,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             rulings_path=args.rulings_path,
             replaces=args.replaces,
             dry_run=True,
+            allow_unapproved=allow_unapproved,
         )
         print(json.dumps(res, ensure_ascii=False, indent=2))
         return 0
@@ -652,6 +751,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             rulings_path=args.rulings_path,
             replaces=args.replaces,
             dry_run=False,
+            allow_unapproved=allow_unapproved,
         )
         print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
