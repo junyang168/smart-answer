@@ -13,6 +13,7 @@ type UnitRow = {
   cross_lecture: boolean;
   lectures: string[];
   ready: boolean;
+  loaded_in_db?: boolean;
   node_count: number;
   edge_count: number;
   claim_count: number;
@@ -87,7 +88,12 @@ export default function SeriesDetailPage() {
                     </span>
                   )}
                   {!u.ready && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-500">待生成論證</span>}
-                  {u.ready && !u.ruling && <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 font-medium text-indigo-700">待人工驗收</span>}
+                  {u.ready && !u.ruling && u.loaded_in_db && (
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-medium text-emerald-700">已入庫（候選）</span>
+                  )}
+                  {u.ready && !u.ruling && !u.loaded_in_db && (
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 font-medium text-indigo-700">待入庫</span>
+                  )}
                 </div>
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">

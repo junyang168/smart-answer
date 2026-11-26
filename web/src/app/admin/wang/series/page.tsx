@@ -9,6 +9,7 @@ type SeriesItem = {
   lecture_count: number;
   unit_count: number;
   ready_count: number;
+  loaded_count?: number;
   approved_count: number;
 };
 
@@ -39,11 +40,14 @@ export default function SeriesListPage() {
               <div className="flex items-center justify-between gap-3">
                 <span className="font-semibold text-slate-900">{s.title}</span>
                 <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                  {s.ready_count} / {s.unit_count} 單元已生成
+                  {(s.loaded_count ?? 0) > 0
+                    ? `${s.loaded_count} / ${s.unit_count} 單元已入庫`
+                    : `${s.ready_count} / ${s.unit_count} 單元已生成`}
                 </span>
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                共 {s.lecture_count} 講 · {s.unit_count} 個邏輯單元 · 已人工通過 {s.approved_count} 個
+                共 {s.lecture_count} 講 · {s.unit_count} 個邏輯單元 · 已入庫 {s.loaded_count ?? 0} 個
+                {s.approved_count > 0 ? ` · 已人工通過 ${s.approved_count} 個` : ""}
               </p>
             </Link>
           </li>
