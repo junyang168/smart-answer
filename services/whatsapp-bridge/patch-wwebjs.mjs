@@ -7,7 +7,7 @@ const marker = "// sunday-assistant MsgKey compatibility v1";
 const source = readFileSync(filename, "utf8");
 if (!source.includes(marker)) {
   const hash = createHash("sha256").update(source).digest("hex");
-  if (hash !== "0d0f88565f481dbfeb9493b04b24033a2cb60f5fd2fd0e84e543b461d98878fe") throw new Error("Unexpected whatsapp-web.js Utils.js; review compatibility patch before upgrading");
+  if (hash !== "cff56e15b20d81671341815cb097e4fe325885b7551cc7e9b04e4dc108e6088c") throw new Error("Unexpected whatsapp-web.js Utils.js; review compatibility patch before upgrading");
   let patched = source.replace("    window.WWebJS = {};", `    window.WWebJS = {};\n    ${marker}\n    (${installMsgKeyCompatibility.toString()})();`);
   // serialize() returns plain objects: preserve the canonical ID explicitly
   // rather than depending on an inherited getter surviving serialization.
