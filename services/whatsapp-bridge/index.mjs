@@ -84,7 +84,15 @@ async function connect() {
       webVersion: pinnedWebVersion,
       webVersionCache: { type: "local", path: join(stateDir, "web-versions"), strict: true },
     } : {};
-    client = new Client({
+    // A previously registered service worker can serve a different build
+    // before Puppeteer can intercept the navigation to the pinned HTML.
+    const BridgeClient = pinnedWebVersion ? class extends Client {
+      async initWebVersionCache() {
+        await this.pupPage.setBypassServiceWorker(true);
+        await super.initWebVersionCache();
+      }
+    } : Client;
+    client = new BridgeClient({
       authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }),
       puppeteer, ...webVersionOptions,
     });
