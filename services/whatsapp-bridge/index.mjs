@@ -92,14 +92,57 @@ async function connect() {
         await super.initWebVersionCache();
       }
     } : Client;
-    client = new BridgeClient({
+    const current = new BridgeClient({
       authStrategy: new LocalAuth({ dataPath: join(stateDir, "auth") }),
       puppeteer, ...webVersionOptions,
     });
-    client.on("qr", async code => { qr = await qrcode.toDataURL(code); state = "qr"; });
-    client.on("ready", () => { state = "ready"; qr = null; connecting = false; lastHistorySync = 0; });
-    client.on("auth_failure", () => { state = "auth_failure"; connecting = false; lastError = "WhatsApp 登入失敗，請重新連接"; });
-    client.on("disconnected", () => { state = "disconnected"; synced = false; connecting = false; lastError = "WhatsApp 已斷線，請重新連接"; });
+    client = current;
+    let qrRevision = 0;
+    const clearQr = () => { qrRevision += 1; qr = null; };
+    client.on("qr", async code => {
+      if (client !== current) return;
+      clearQr();
+      connecting = true;
+      const revision = qrRevision;
+      try {
+        let pairingCode = code;
+        if (pinnedWebVersion) {
+          // WhatsApp Web adds a prefix to the pairing reference rendered by its UI.
+          // Wait for the same reference so an older code cannot replace a refreshed one.
+          const handle = await current.pupPage.waitForFunction(raw => {
+            const rendered = document.querySelector("[data-ref] canvas")?.closest("[data-ref]")?.getAttribute("data-ref");
+            return rendered?.endsWith(raw) ? rendered : false;
+          }, { polling: 200, timeout: 8000 }, code);
+          try {
+            pairingCode = await handle.jsonValue();
+          } finally {
+            await handle.dispose();
+          }
+        }
+        const image = await qrcode.toDataURL(pairingCode);
+        if (client !== current || revision !== qrRevision) return;
+        qr = image; state = "qr"; lastError = null;
+      } catch {
+        if (client !== current || revision !== qrRevision) return;
+        state = "error"; connecting = false; lastError = "無法讀取 WhatsApp 配對碼，請重新連接";
+      }
+    });
+    client.on("authenticated", () => {
+      if (client !== current || state === "ready") return;
+      clearQr(); state = "connecting"; connecting = true;
+    });
+    client.on("ready", () => {
+      if (client !== current) return;
+      clearQr(); state = "ready"; connecting = false; lastHistorySync = 0;
+    });
+    client.on("auth_failure", () => {
+      if (client !== current) return;
+      clearQr(); state = "auth_failure"; connecting = false; lastError = "WhatsApp 登入失敗，請重新連接";
+    });
+    client.on("disconnected", () => {
+      if (client !== current) return;
+      clearQr(); state = "disconnected"; synced = false; connecting = false; lastError = "WhatsApp 已斷線，請重新連接";
+    });
     client.on("message_create", message => { capture(message).catch(error => { lastError = error.message; synced = false; }); });
     client.on("message_edit", message => { capture(message, true).catch(error => { lastError = error.message; synced = false; }); });
     client.on("message_revoke_everyone", (message, before) => {
@@ -111,7 +154,7 @@ async function connect() {
         sent_at: new Date().toISOString(), text: "已撤回的消息：" + (before?.body || "（原文無法取得）"), revoked: true });
     });
     await client.initialize();
-  } catch (error) { state = "error"; lastError = error.message; connecting = false; }
+  } catch (error) { qr = null; state = "error"; lastError = error.message; connecting = false; }
 }
 
 async function poll() {
