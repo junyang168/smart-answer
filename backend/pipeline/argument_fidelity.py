@@ -147,8 +147,73 @@ GROUP = __import__('re').compile(r'-P\d+-')
 MAX_WORDS = 4000  # characters of his words per record; a Claim's whole argument rarely needs more
 
 
+UNIT_KIND_MAP = {
+    'claim': 'Claim',
+    'evidence': 'Evidence',
+    'observation': 'Observation',
+    'example': 'Evidence',
+    'position': 'Position',
+    'question': 'Question',
+}
+
+
+def _unit_argument_records(candidate):
+    """Adapt #845 unit_argument_candidate_v1 nodes into fidelity-check rows.
+
+    Matches single-lecture ``records()`` semantics: a Claim's ``his_words`` puts its
+    own conclusion anchor first, followed by sentences from its direct incoming
+    supporting/answering/contextualizing edges and child nodes (so cross-paragraph
+    synthesis isn't falsely flagged as 'added'), and ``context`` covers a wider ±3
+    paragraph window around its anchor.
+    """
+    sents = candidate['sentences']
+    nodes = candidate['nodes']
+    edges = candidate.get('edges') or []
+    by_para, para_order = {}, []
+    for s in sents:
+        k = (s['source_id'], s['paragraph'])
+        if k not in by_para:
+            by_para[k] = ''
+            para_order.append(k)
+        by_para[k] += s['text']
+    para_idx = {k: i for i, k in enumerate(para_order)}
+
+    # Collect direct incoming supporting/contextualizing sentence positions per node
+    incoming_pos: dict[str, list[int]] = {}
+    for e in edges:
+        dst = e.get('to_id')
+        src = e.get('from_id')
+        if not dst or dst not in nodes:
+            continue
+        bucket = incoming_pos.setdefault(dst, [])
+        bucket.extend(e.get('at') or [])
+        if src and src in nodes:
+            bucket.extend(nodes[src].get('at') or [])
+
+    out = []
+    for nid, node in nodes.items():
+        at_positions = sorted(node['at'])
+        if not at_positions:
+            raise ValueError(f'{nid}: no sentence positions to check it against')
+        own_set = set(at_positions)
+        behind = sorted({p for p in incoming_pos.get(nid, []) if p not in own_set}) if node['kind'] == 'claim' else []
+        ordered_pos = at_positions + behind
+        words = '\n'.join(sents[i - 1]['text'] for i in ordered_pos)
+        touched = sorted({para_idx[(sents[i - 1]['source_id'], sents[i - 1]['paragraph'])] for i in at_positions})
+        ctx_indices = {j for pi in touched for j in range(max(0, pi - 3), min(len(para_order), pi + 4))}
+        near = '\n'.join(by_para[para_order[j]] for j in sorted(ctx_indices))
+        out.append({'job_id': nid, 'kind': UNIT_KIND_MAP.get(node['kind'], node['kind']),
+                    'statement': node['statement'],
+                    'his_words': words if len(words) <= MAX_WORDS else words[:MAX_WORDS] + '……',
+                    'context': near if len(near) <= MAX_WORDS else near[:MAX_WORDS] + '……',
+                    'group': 'unit'})
+    return out
+
+
 def records(candidate):
     """Every statement GPT wrote, with his words from its SourceFragments, in source order."""
+    if candidate.get('version') == 'unit_argument_candidate_v1' and 'nodes' in candidate and 'sentences' in candidate:
+        return _unit_argument_records(candidate)
     text = {f['fragment_id']: f['verbatim_excerpt'] for f in candidate['source_fragments']}
     out = []
     for kind, key, field, label in KINDS:
