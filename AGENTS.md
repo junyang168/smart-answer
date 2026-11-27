@@ -84,6 +84,18 @@ Reviewer-call invariant for the draft-first pipeline (`draft_first_review_runner
 
 For Matthew exposition articles, a programmatically verified editorial review in which every applicable dimension reaches its own minimum in the quality profile (currently 80% of each dimension's weight) and no hard failure is declared, followed by a passing Program Audit with zero errors, triggers automatic Wang repository publication. There is no total-score threshold: `total_score` is reported for a reader and decides nothing, because one number let a weak dimension be carried by the others. The quality profile is the authority for the bars; do not restate a number here that the profile can change. The runner must create an `automated-publication-decision.v1` bound to the manuscript, editorial review, and audit SHAs; it must never label this as human approval. Publishing to the Wang repository is not deploying: do not deploy as part of this workflow.
 
+# Delivering a repeatable pipeline
+
+When the owner asks for a permanent workflow, take it from the authorized
+ticket through design, eval, design review, implementation and testing.
+Reuse the current ticket or obtain permission for a new one as described below.
+Freeze the expected results before implementation. Review failure modes before
+coding. Test the normal entry point and a retry on representative data, report
+misses as well as successes, and identify any step that still needs an operator.
+A run assembled interactively is a prototype. Keep its evidence for regression
+and put the repeatable steps in the maintained runner. The model-eval signoff
+below and production authorization still apply.
+
 # A model step starts from its eval
 
 Before building or retuning any step a model performs (Claim creation,
