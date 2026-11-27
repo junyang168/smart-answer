@@ -12,7 +12,7 @@ import { betaEditorDestination } from "./review-entry";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
 import {
@@ -90,6 +90,8 @@ type Context = {
     source_holds?: Record<string, unknown>;
     paragraph_states?: Record<string, { status: string }>;
   } | null;
+  legacy_timeline_sha256?: string;
+  legacy_media_filename?: string;
   revision: number;
   paragraph_bindings: Record<
     string,
@@ -221,6 +223,7 @@ async function draftStorage(
   }
 }
 const stamp = (ms: number) => {
+  if (!Number.isFinite(ms)) return "—";
   const sec = Math.floor(ms / 1000);
   return `${Math.floor(sec / 3600)
     .toString()
@@ -340,7 +343,7 @@ function TranscriptProofreader({
   const reviewHeader = useRef<HTMLElement>(null);
   const [navigationTarget, setNavigationTarget] = useState<{ id: string }>();
   const [selected, setSelected] = useState(
-    initial.script.find((p) => p.type !== "subtitle")?.index || "",
+    initial.script.find((p) => p.type !== "subtitle" && p.type !== "comment")?.index || "",
   );
   const [activeGroup, setActiveGroup] = useState<SlideInspection>();
   const [peekSlide, setPeekSlide] = useState<string>();
@@ -379,7 +382,7 @@ function TranscriptProofreader({
   const video = useRef<HTMLMediaElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const selectedParagraph = useRef(
-    initial.script.find((p) => p.type !== "subtitle")?.index || "",
+    initial.script.find((p) => p.type !== "subtitle" && p.type !== "comment")?.index || "",
   );
   const playbackParagraph = useRef<string>();
   const previewTiming = useRef<{ start_ms: number; end_ms: number }>();
@@ -798,7 +801,7 @@ function TranscriptProofreader({
       await flush();
       if (kind === "paragraph_review" && decision === "confirmed") {
         const spoken = current.current.script.filter(
-          (p) => p.type !== "subtitle",
+          (p) => p.type !== "subtitle" && p.type !== "comment",
         );
         const n = spoken.findIndex((p) => p.index === id);
         if (n < spoken.length - 1) {
@@ -948,7 +951,7 @@ function TranscriptProofreader({
     selectParagraph(id);
     playbackParagraph.current = id;
     contextPlayback.current = false;
-    if (video.current) {
+    if (video.current && Number.isFinite(binding?.start_ms) && Number.isFinite(binding?.end_ms)) {
       video.current.currentTime = binding.start_ms / 1000;
       void video.current.play();
     }
@@ -1067,7 +1070,7 @@ function TranscriptProofreader({
       doc.paragraph_shas,
       editedParagraphIds,
     );
-  const spokenRows = doc.script.filter((p) => p.type !== "subtitle");
+  const spokenRows = doc.script.filter((p) => p.type !== "subtitle" && p.type !== "comment");
   const confirmed = spokenRows.filter((p) => paragraphReviewed(p.index)).length;
   const pendingParagraph = spokenRows.find((p) => !paragraphReviewed(p.index));
   const pendingTiming = pendingTimingIds(
@@ -1412,12 +1415,11 @@ function TranscriptProofreader({
                 查看發佈版
               </a>
             )}
-            <a
-              className={button}
-              href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}
-            >
-              舊版 Editor
-            </a>
+            {apiBase === "/api/sc_api/beta" && (
+              <a className={button} href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}>
+                舊版 Editor
+              </a>
+            )}
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
             </button>
@@ -1734,7 +1736,9 @@ function TranscriptProofreader({
               controls
               playsInline={!audioOnly}
               preload="metadata"
-              src={base + "/media"}
+              src={doc.context.legacy_timeline_sha256
+                ? `/web/video/${encodeURIComponent(doc.context.legacy_media_filename ?? `${item}.${audioOnly ? "mp3" : "mp4"}`)}`
+                : base + "/media"}
               aria-label={audioOnly ? "講道音訊" : "講道影片"}
               className={
                 audioOnly ? "block h-14 w-full" : "block w-full bg-black"
@@ -2012,6 +2016,12 @@ function TranscriptProofreader({
         </aside>
         <section className="min-w-0 space-y-3" aria-label="逐段校對">
           {doc.script.map((p) => {
+            if (p.type === "comment")
+              return (
+                <aside key={p.index} className="rounded-lg border bg-slate-50 p-4" aria-label="舊稿附註">
+                  <TranscriptText text={p.text} />
+                </aside>
+              );
             if (p.type === "subtitle")
               return (
                 <section
@@ -2107,7 +2117,7 @@ function TranscriptProofreader({
                     className="text-blue-700"
                     onClick={() => play(p.index)}
                   >
-                    ▶ {stamp(binding.start_ms)}–{stamp(binding.end_ms)}
+                    ▶ {stamp(binding?.start_ms)}–{stamp(binding?.end_ms)}
                   </button>
                   {pendingTiming.includes(p.index) && (
                     <span
@@ -2151,8 +2161,8 @@ function TranscriptProofreader({
                         <label className="mt-2 grid gap-1">
                           播放位置 {timingInput(timingCursor)}
                           <input className="h-8 w-full" type="range" step={1}
-                            min={Math.max(0, Math.min(binding.start_ms - 15000, timingCursor))}
-                            max={Math.max(timingCursor, Math.min(mediaDuration, binding.end_ms + 15000))}
+                            min={Math.max(0, Math.min((binding?.start_ms ?? timingEdit.start_ms) - 15000, timingCursor))}
+                            max={Math.max(timingCursor, Math.min(mediaDuration, (binding?.end_ms ?? timingEdit.end_ms) + 15000))}
                             value={timingCursor} disabled={!mediaDuration}
                             onChange={(e) => seekTiming(e.currentTarget.valueAsNumber)} />
                         </label>
@@ -2193,9 +2203,11 @@ function TranscriptProofreader({
                     ) : (
                       <button className={button} disabled={disabled} onClick={() => {
                         setTimingError("");
-                        setTimingEdit({ id: p.index, start_ms: binding.start_ms, end_ms: binding.end_ms });
-                        setTimingCursor(binding.start_ms);
-                        if (mediaDuration) seekTiming(binding.start_ms);
+                        const start = binding?.start_ms ?? Math.round((video.current?.currentTime ?? 0) * 1000);
+                        const end = binding?.end_ms ?? Math.min(mediaDuration || start + 1000, start + 1000);
+                        setTimingEdit({ id: p.index, start_ms: start, end_ms: end });
+                        setTimingCursor(start);
+                        if (mediaDuration) seekTiming(start);
                       }}>調整時間</button>
                     )}
                   </div>
@@ -2372,7 +2384,25 @@ const TranscriptText = memo(function TranscriptText({
 }: {
   text: string;
 }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={(url, key) => {
+        if (key === "src" && url.startsWith("data%2F")) {
+          try {
+            const parts = decodeURIComponent(url).split("/");
+            if (parts[0] === "data" && parts.slice(1).every((part) => part && part !== "." && part !== ".." && !part.includes("\\")))
+              return `/web/${parts.map(encodeURIComponent).join("/")}`;
+          } catch {
+            return "";
+          }
+        }
+        return defaultUrlTransform(url);
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
 });
 
 function LegacyHistory({ base }: { base: string }) {

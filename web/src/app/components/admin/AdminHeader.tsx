@@ -13,17 +13,17 @@ const navItems = [
   { href: "/", label: "網站首頁", exact: true },
 ];
 
-export const AdminHeader = () => {
+export const AdminHeader = ({ transcriptCutover = false }: { transcriptCutover?: boolean }) => {
   const pathname = usePathname();
-  const isTranscriptEditor = /^\/admin\/transcript-beta\/[^/]+\/?$/.test(pathname);
+  const isTranscriptEditor = /^\/admin\/(?:transcripts|transcript-beta)\/[^/]+\/?$/.test(pathname);
   const { data: session } = useSession();
-  const items = hasTranscriptBetaAccess(
+  const items = (transcriptCutover ? hasEditorAccess(session?.user?.role) : hasTranscriptBetaAccess(
     session?.user?.email,
     session?.user?.role,
-  )
+  ))
     ? [
         ...navItems.slice(0, 1),
-        { href: "/admin/transcript-beta", label: "逐字稿 Beta", exact: false },
+        { href: transcriptCutover ? "/admin/transcripts" : "/admin/transcript-beta", label: transcriptCutover ? "逐字稿" : "逐字稿 Beta", exact: false },
         ...navItems.slice(1),
       ]
     : navItems;

@@ -66,6 +66,8 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
                 raise HTTPException(503, "無法讀取 beta 角色設定")
         if not allowed:
             raise HTTPException(403, "需要 beta tester 角色")
+        if os.getenv("TRANSCRIPT_EDITOR_CUTOVER") == "1" and request.method not in ("GET", "HEAD"):
+            raise HTTPException(409, "逐字稿編輯入口已移至正式 Editor，請保留本機修改並重新開啟該講道。")
 
     router = APIRouter(
         dependencies=[Depends(beta_access)] if (beta_owner or role_root is not None) else [],
@@ -295,10 +297,12 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
         def result():
             from .legacy_editor_snapshot import legacy_history
             selected.require(authenticated_actor(request), item)
-            if not (selected.folder(item) / "beta-promotion.json").exists():
+            folder = selected.folder(item)
+            promoted = (folder / "beta-promotion.json").is_file()
+            if not promoted and not (folder / "legacy-baseline.json").is_file():
                 return None
             try:
-                return legacy_history(selected.root, item)
+                return legacy_history(selected.root, item, include_snapshot=False)
             except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
                 raise ReviewError(409, "無法驗證舊版編輯歷史") from exc
         return call(result)

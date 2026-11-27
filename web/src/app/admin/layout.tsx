@@ -26,7 +26,7 @@ export default async function AdminLayout({
     <>
       <style>{`#global-site-header { display: none !important; }`}</style>
       <div className="min-h-screen bg-gray-50">
-        <AdminHeader />
+        <AdminHeader transcriptCutover={process.env.TRANSCRIPT_EDITOR_CUTOVER === "1"} />
         <main className="container mx-auto px-2 py-6">{children}</main>
       </div>
     </>

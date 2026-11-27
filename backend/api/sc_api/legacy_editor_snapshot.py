@@ -8,7 +8,7 @@ from .script_delta import ScriptDelta
 from .transcript_review import ReviewError, ReviewStore, read
 
 
-def legacy_history(root: Path, item: str):
+def legacy_history(root: Path, item: str, *, include_snapshot=True):
     """Read the production audit entries and the last saved legacy manuscript."""
     path = root / "logs/sermon_meta_audit.log"
     events = []
@@ -25,10 +25,10 @@ def legacy_history(root: Path, item: str):
                         "actor": entry.get("actor_name") or entry.get("actor_id"),
                         "action": entry.get("context"),
                     })
-    snapshot = legacy_editor_document(root, item)
+    snapshot = legacy_editor_document(root, item) if include_snapshot else None
     return {
         "events": sorted(events, key=lambda entry: entry["time"] or "", reverse=True),
-        "snapshot_available": bool(snapshot["script"]),
+        "snapshot_available": bool(snapshot and snapshot["script"]),
     }
 
 

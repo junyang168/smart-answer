@@ -701,6 +701,8 @@ class ReviewStore:
                 raise ReviewError(409,f'還有 {count} 段時間邊界尚未通過原聲核對，不能發佈。')
             missing = []
             for p in rows:
+                if p.get("type") == "comment":
+                    continue
                 if p.get("type") == "subtitle":
                     if not p["text"].lstrip("#").strip():
                         raise ReviewError(409, "小標題不能留空，請填寫或移除")
@@ -729,7 +731,7 @@ class ReviewStore:
 
             script = copy.deepcopy(rows)
             for row in script:
-                if row.get("type") == "subtitle":
+                if row.get("type") in {"subtitle", "comment"}:
                     continue
                 binding = c["paragraph_bindings"][row["index"]]
                 row.update(

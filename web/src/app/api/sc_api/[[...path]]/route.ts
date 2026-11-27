@@ -63,6 +63,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     [
       "media_batches",
       "review_document",
+      "review_items",
       "review_candidate",
       "review_mode",
       "review_public",
@@ -97,7 +98,8 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (
     guarded &&
     process.env.NODE_ENV === "production" &&
-    (reviewEndpoint === "media_batches" || reviewEndpoint === "argument_review"
+    (reviewEndpoint === "media_batches" || reviewEndpoint === "argument_review" ||
+      (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1" && params.path?.[0] !== "beta")
       ? !hasEditorAccess(session?.user?.role)
       : !hasTranscriptBetaAccess(actor, session?.user?.role))
   )

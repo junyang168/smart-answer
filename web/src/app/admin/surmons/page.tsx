@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { SurmonAdminList } from "@/app/components/admin/surmons/SurmonAdminList";
 
@@ -6,6 +7,7 @@ const SurmonListFallback = () => (
 );
 
 export default function AdminSurmonsPage() {
+  if (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1") redirect("/admin/transcripts");
   return (
     <div className="container mx-auto px-6 py-12">
       <Suspense fallback={<SurmonListFallback />}>
