@@ -372,3 +372,117 @@ def test_load_transcript_paragraphs_reads_formal_editor_timings_and_narrows_cand
     untimed_rows = align.load_transcript_paragraphs(untimed_path)
     with pytest.raises(ValueError, match="no start_ms/end_ms timings"):
         align.candidate_paragraphs_for_time(untimed_rows, 2450000)
+
+
+def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_publishes_white_svg(tmp_path):
+    from backend.api.sc_api.transcript_review import ReviewStore, digest
+
+    data_root = tmp_path / "data"
+    (data_root / "config").mkdir(parents=True)
+    (data_root / "script_review").mkdir(parents=True)
+    (data_root / "script_published").mkdir(parents=True)
+    save_json(data_root / "config" / "config.json", {
+        "users": [{"id": "owner@example.com", "name": "Owner"}],
+        "user_roles": [{"user": "owner@example.com", "role": "editor"}],
+        "role_permissions": [
+            {"role": "editor", "permission": p}
+            for p in ["read_any_item", "write_owned_item", "assign_item"]
+        ],
+    })
+    save_json(data_root / "config" / "sermon.json", [{
+        "item": "S 200607",
+        "title": "羅馬書",
+        "assigned_to": "owner@example.com",
+        "assignment_epoch": 1,
+    }])
+    save_json(data_root / "script_review" / "S 200607.json", [
+        {"index": "71", "text": "神集體的揀選", "type": "content"},
+    ])
+    review_dir = data_root / "transcript_review" / "S 200607"
+    (review_dir / "revisions").mkdir(parents=True)
+    (review_dir / "assets" / "existing_a0").mkdir(parents=True)
+    (review_dir / "assets" / "existing_a0" / "original.png").write_bytes(b"old-png")
+    save_json(review_dir / "revisions" / "00000001.json", {"revision": 1, "kind": "initial"})
+
+    initial_ctx = {
+        "schema_version": "transcript-review-context.v1",
+        "script_sha256": file_sha(data_root / "script_review" / "S 200607.json"),
+        "revision": 1,
+        "source_video_sha256": "v" * 64,
+        "editorial_metadata": {"title": "羅馬書"},
+        "paragraph_bindings": {"71": {"start_ms": 140000, "end_ms": 232000, "source_paragraph_id": "71"}},
+        "timing_quality": {"status": "qualified"},
+        "visual_assets": {
+            "existing_a0": {
+                "visible_text": "舊圖",
+                "image": "transcript_review/S 200607/assets/existing_a0/original.png",
+                "image_sha256": file_sha(review_dir / "assets" / "existing_a0" / "original.png"),
+                "width": 100,
+                "height": 80,
+                "content": {"asset_id": "existing_a0", "background": "#001B54", "has_diagram": False, "text_regions": [], "shapes": [], "edges": [], "issues": []},
+            }
+        },
+        "occurrences": {"e-old": {"asset_id": "existing_a0", "time_ms": 10000, "capture_ms": 12000}},
+        "groups": [{"id": "g-e-old", "member_ids": ["e-old"], "slide_id": "e-old", "before_paragraph_id": "71", "hidden": True, "reason": "", "needs_review": False}],
+        "reviews": {},
+    }
+    save_json(review_dir / "context.json", initial_ctx)
+
+    ev = _write_fake_evidence(tmp_path)
+    ev_doc = json.loads((ev / "slide_evidence.json").read_text())
+    ev_doc["assets"][0]["image_sha256"] = file_sha(ev / "assets" / "a1" / "original.png")
+    # Distinct appearance time (235000) vs capture time (236500)
+    ev_doc["occurrences"][0]["time_ms"] = 235000
+    ev_doc["occurrences"][0]["capture_ms"] = 236500
+    save_json(ev / "slide_evidence.json", ev_doc)
+
+    bindings_path = tmp_path / "bindings.json"
+    save_json(bindings_path, {
+        "bindings": [{
+            "event_id": "e-00",
+            "asset_id": "a1",
+            "time_ms": 235000,
+            "important": True,
+            "aligned_paragraph_id": "71",
+            "helps_reader_understand": "說明集體揀選。",
+        }]
+    })
+
+    summary = align.import_bindings_to_review(ev, bindings_path, review_dir)
+    assert summary["revision"] == 2
+    assert (review_dir / "revisions" / "00000001.json").exists()
+    assert (review_dir / "revisions" / "00000002.json").exists()
+
+    store = ReviewStore(data_root)
+    rows, ctx = store.load("S 200607")
+    assert ctx["revision"] == 2
+    # Preserves existing attachments + adds new attachment
+    assert "existing_a0" in ctx["visual_assets"]
+    assert "a1" in ctx["visual_assets"]
+    # Preserves original.png, image dimensions (120x80), and both timestamps
+    assert (review_dir / "assets" / "a1" / "original.png").exists()
+    assert ctx["visual_assets"]["a1"]["width"] == 120
+    assert ctx["visual_assets"]["a1"]["height"] == 80
+    assert ctx["occurrences"]["e-00"]["time_ms"] == 235000
+    assert ctx["occurrences"]["e-00"]["capture_ms"] == 236500
+
+    # Confirm paragraph and both groups, then publish via ReviewStore and verify white-background SVG output
+    ctx["reviews"] = {
+        "p:71": {"decision": "confirmed", "sha256": digest({"text": rows[0]["text"], **ctx["paragraph_bindings"]["71"]})},
+        **{
+            f"g:{g['id']}": {"decision": "confirmed", "sha256": digest(store.group_target(ctx, g))}
+            for g in ctx["groups"]
+        },
+    }
+    save_json(review_dir / "context.json", ctx)
+
+    pub_receipt = store.publish("owner@example.com", "S 200607", {
+        "version": digest(store.document_value(rows, ctx)),
+        "epoch": 1,
+        "operation_id": "pub-test-1",
+    })
+    assert pub_receipt["revision"] == 3
+    published = json.loads((data_root / "script_published" / "S 200607.json").read_text(encoding="utf-8"))
+    published_text = published["script"][0]["text"]
+    assert "<svg " in published_text
+    assert 'fill="#ffffff"' in published_text.lower()
