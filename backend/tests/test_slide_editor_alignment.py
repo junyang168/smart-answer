@@ -448,7 +448,15 @@ def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_p
         }]
     })
 
-    summary = align.import_bindings_to_review(ev, bindings_path, review_dir)
+    store = ReviewStore(data_root)
+    original = digest(store.document_value(*store.load("S 200607")))
+    summary = align.import_bindings_to_review(ev, bindings_path, review_dir, expected_version=original)
+    assert align.import_bindings_to_review(ev, bindings_path, review_dir, expected_version=original) == summary
+    from backend.api.sc_api.transcript_review import ReviewError
+    import pytest
+    with pytest.raises(ReviewError):
+        align.import_bindings_to_review(ev, bindings_path, review_dir,
+                                        expected_version=original, operation_id="another-import")
     assert summary["revision"] == 2
     assert (review_dir / "revisions" / "00000001.json").exists()
     assert (review_dir / "revisions" / "00000002.json").exists()

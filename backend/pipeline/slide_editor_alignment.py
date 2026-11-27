@@ -616,6 +616,7 @@ def import_bindings_to_review(
     *,
     actor: str = "slide_editor_alignment",
     operation_id: str | None = None,
+    expected_version: str | None = None,
 ) -> dict[str, Any]:
     """Attach aligned white-background SVG slides to transcript_review via ReviewStore versioned commit."""
     import copy
@@ -635,13 +636,16 @@ def import_bindings_to_review(
     with store.lock(item):
         rows, context = store.load(item)
         request = {
-            "version": digest(store.document_value(rows, context)),
+            "version": expected_version if expected_version is not None else digest(store.document_value(rows, context)),
             "operation_id": op_id,
             "operations": [
                 {"kind": "attach_visual_slides", "id": f"g-{b['event_id']}"}
                 for b in bindings_doc["bindings"]
             ],
         }
+        if expected_version is not None:
+            request["bindings_sha256"] = file_sha(bindings_path)
+            request["evidence_sha256"] = file_sha(evidence_path)
         prior = store.receipt(item, op_id, actor, request)
         if prior:
             _, current_context = store.load(item)
@@ -654,6 +658,9 @@ def import_bindings_to_review(
                 "visible_groups": sum(1 for g in current_groups if not g["hidden"]),
                 "needs_review_groups": sum(1 for g in current_groups if g["needs_review"] and not g["hidden"]),
             }
+
+        if expected_version is not None:
+            store.version(rows, context, expected_version)
 
         assets_out = review_dir / "assets"
         assets_out.mkdir(parents=True, exist_ok=True)
