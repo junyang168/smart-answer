@@ -603,7 +603,34 @@ def load_unit(
                     "SELECT revision, content_sha256 FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s",
                     (col, oid),
                 ).fetchone()
-                rev = (int(existing[0]) + 1) if existing else 1
+                if not existing and replaces:
+                    other = conn.execute(
+                        "SELECT collection, revision, payload FROM wang_knowledge.objects WHERE object_id=%s AND collection<>%s",
+                        (oid, col),
+                    ).fetchone()
+                    if other:
+                        old_col, old_rev, old_payload = other
+                        ret_rev = int(old_rev) + 1
+                        ret_payload = {**dict(old_payload), "review_status": "retired", "revision": ret_rev}
+                        ret_sha = record_content_sha(ret_payload)
+                        conn.execute(
+                            """
+                            INSERT INTO wang_knowledge.object_versions
+                                (collection, object_id, revision, content_sha256, payload, change_set_id)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (old_col, oid, ret_rev, ret_sha, Jsonb(ret_payload), cs_id),
+                        )
+                        conn.execute(
+                            "DELETE FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s",
+                            (old_col, oid),
+                        )
+                        retired[old_col] = retired.get(old_col, 0) + 1
+                max_ver = conn.execute(
+                    "SELECT COALESCE(MAX(revision), 0) FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s",
+                    (col, oid),
+                ).fetchone()
+                rev = max(int(existing[0]) if existing else 0, int(max_ver[0]) if max_ver else 0) + 1
                 row_payload = {**payload, "revision": rev}
                 sha = record_content_sha(row_payload)
                 if existing and col == "source_documents" and existing[1] == sha:
@@ -640,7 +667,8 @@ def load_unit(
                 written[col] = written.get(col, 0) + 1
 
         if replaces:
-            retired = _retire_unit(conn, replaces, records, cs_id)
+            for rcol, rcnt in _retire_unit(conn, replaces, records, cs_id).items():
+                retired[rcol] = retired.get(rcol, 0) + rcnt
 
     # Read-back verification outside the write loop.
     stored_cs = conn.execute(
