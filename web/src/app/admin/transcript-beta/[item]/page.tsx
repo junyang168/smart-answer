@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { TranscriptReviewEntry } from "@/app/components/admin/surmons/TranscriptProofreader";
 
@@ -7,7 +8,9 @@ export default async function BetaEditor({
   params: Promise<{ item: string }>;
 }) {
   const routeParams = await params;
-  const item = decodeURIComponent(routeParams.item);
+  const item = routeParams.item;
+  if (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1")
+    redirect(`/admin/transcripts/${encodeURIComponent(item)}`);
   return (
     <>
       <div className="mb-3 hidden items-center justify-between text-sm text-slate-600 lg:flex">
