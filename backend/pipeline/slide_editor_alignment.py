@@ -311,7 +311,7 @@ def parse_fidelity_result(text, expected_ids):
             rows.append(row)
             rest = rest[end:].lstrip()
         # Extra members, arrays or syntactically incomplete rows remain errors.
-        if not re.fullmatch(r'\]?\s*[\w\s。]*"?\s*\]?\s*\}', rest):
+        if not re.fullmatch(r'\]?\s*(?:[\w\s。]*"?|\w+\s*:\s*"none")\s*\]?\s*\}', rest):
             raise
         return {"results": rows}
 

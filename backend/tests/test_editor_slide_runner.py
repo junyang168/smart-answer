@@ -14,7 +14,7 @@ from backend.pipeline.slide_change_pilot import file_sha, read_json, save_json
 def test_fidelity_envelope_recovery_preserves_complete_rows():
     rows = [{"asset_id": "a", "passed": False}, {"asset_id": "b", "passed": True}]
     prefix = '{"results":' + json.dumps(rows)
-    for text in [prefix + " trailing}", prefix[:-1] + "箍}", prefix + '损坏了格式。"}']:
+    for text in [prefix + " trailing}", prefix[:-1] + "箍}", prefix + '损坏了格式。"}', prefix[:-1] + ' procedure: "none"]}']:
         assert parse_fidelity_result(text, ["a", "b"]) == {"results": rows}
     for text in [prefix + ', "unexpected":true BROKEN}', prefix[:-8] + "}"]:
         with pytest.raises(ValueError):
