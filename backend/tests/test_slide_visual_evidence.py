@@ -319,3 +319,22 @@ def test_extract_dhash_deduplication_and_all_white_svg(tmp_path, monkeypatch):
     assert record['deduplicated_occurrence_count'] == 1
     assert record['svg_count'] == 1
     assert record['assets'][0]['svg']['background_mode'] == 'white'
+
+
+def test_render_svg_recovers_swapped_yx_bboxes_and_caps_same_line_width():
+    value = content(False)
+    value['background'] = '#001B54'
+    value['text_regions'] = [
+        {'id': 'tr_0', 'text': '神集體地(collectively)揀選以色', 'bbox': [10, 19, 982, 109], 'color': '#FFFF00', 'uncertain': False},
+        {'id': 'tr_1', 'text': '列人(羅9:4-5; 11:1, 28),為他們預', 'bbox': [128, 17, 213, 975], 'color': '#FFFF00', 'uncertain': False},
+        {'id': 'tr_2', 'text': '梗不化的。', 'bbox': [11, 372, 301, 447], 'color': '#FFFFFF', 'uncertain': False},
+        {'id': 'tr_3', 'text': '神就趁這時機', 'bbox': [318, 372, 678, 447], 'color': '#E2DF3B', 'uncertain': False},
+    ]
+    svg = visual.render_svg(value, 854, 480, 'd' * 64, allow_text_only=True, white_background=True)
+    root = ET.fromstring(svg)
+    ns = {'s': 'http://www.w3.org/2000/svg'}
+    tspans = {t.get('id'): t.find('s:tspan', ns) for t in root.findall('s:text', ns)}
+    assert float(tspans['tr_1'].get('y')) > float(tspans['tr_0'].get('y')) + 40
+    assert float(tspans['tr_1'].get('x')) < 30
+    texts = {t.get('id'): t for t in root.findall('s:text', ns)}
+    assert float(texts['tr_2'].get('font-size')) <= float(texts['tr_0'].get('font-size'))
