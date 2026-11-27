@@ -59,6 +59,41 @@ def _parse_clock_seconds(value: str | None) -> float | None:
     return None
 
 
+def _load_matching_attribution(rd: dict[str, Any], attr_file: Path) -> dict[str, str] | None:
+    """Return {finding_id: root_cause} only if attribution is cryptographically bound to this diff report."""
+    if not attr_file.exists():
+        return None
+    from backend.pipeline.argument_roundtrip_verify import sha256_json
+
+    ad = json.loads(attr_file.read_text(encoding="utf-8"))
+    expected_diff_sha = sha256_json(rd)
+    if not ad.get("diff_sha256") or ad.get("diff_sha256") != expected_diff_sha:
+        return None
+    return {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
+
+
+def _apply_roundtrip_attribution(rd: dict[str, Any], attr_file: Path) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Apply bound Stage 3 attribution to distortions/omissions; fail closed if stale or unbound."""
+    rc_by_id = _load_matching_attribution(rd, attr_file)
+    dists = rd.get("stance_and_logic_distortions", [])
+    omissions = rd.get("core_argument_omissions", [])
+    if rc_by_id is None:
+        return rd.get("summary_metrics", {}).get("distortion_count", 0), omissions, dists, False
+    tagged_dists = [
+        d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
+        for d in dists
+    ]
+    tagged_omissions = [
+        o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
+        for o in omissions
+    ]
+    filtered_dist_count = sum(
+        1 for d in tagged_dists
+        if d.get("root_cause") in ("extraction_defect", "mixed")
+    )
+    return filtered_dist_count, tagged_omissions, tagged_dists, True
+
+
 def _short_lecture_label(source_id: str, lecture_code: str | None = None) -> str:
     if lecture_code and re.fullmatch(r"L(\d+)", lecture_code):
         return f"第 {lecture_code[1:]} 講"
@@ -111,10 +146,127 @@ def _series_root(data_base_dir: Path) -> Path:
     return Path(data_base_dir) / SERIES_DIR_NAME
 
 
+def _loaded_unit_keys(series_id: Optional[str] = None) -> set[tuple[str, str]]:
+    """Return ``(series_id, unit_id)`` pairs currently loaded in ``ARGUMENT_DATABASE_URL``."""
+    try:
+        from backend.pipeline import argument_review
+
+        with argument_review.connect() as conn:
+            if series_id:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata->>'series_id' = %s
+                       AND metadata ? 'unit_id'
+                    """,
+                    (series_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata ? 'series_id'
+                       AND metadata ? 'unit_id'
+                    """
+                ).fetchall()
+        return {(str(r[0]), str(r[1])) for r in rows if r[0] and r[1]}
+    except Exception:
+        return set()
+
+
+def _read_unit_from_db(series_id: str, unit_id: str) -> Optional[dict[str, Any]]:
+    """Read a loaded unit's graph & sentences from ``ARGUMENT_DATABASE_URL``, or ``None`` if not loaded."""
+    try:
+        from backend.pipeline import argument_review
+
+        unit_key = f"{series_id}/{unit_id}"
+        with argument_review.connect() as conn:
+            cs_row = conn.execute(
+                """
+                SELECT change_set_id, metadata
+                  FROM wang_knowledge.change_sets
+                 WHERE status = 'applied'
+                   AND metadata->>'unit_key' = %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM wang_knowledge.change_sets r
+                        WHERE r.status = 'applied'
+                          AND r.metadata->>'replaces' = wang_knowledge.change_sets.change_set_id
+                   )
+                 ORDER BY applied_at DESC
+                 LIMIT 1
+                """,
+                (unit_key,),
+            ).fetchone()
+            if not cs_row:
+                return None
+            cs_id, meta = cs_row[0], cs_row[1] or {}
+            rows = conn.execute(
+                """
+                SELECT v.collection, v.object_id, v.payload
+                  FROM wang_knowledge.object_versions v
+                 WHERE v.change_set_id = %s
+                """,
+                (cs_id,),
+            ).fetchall()
+    except Exception:
+        return None
+
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    for col, oid, payload in rows:
+        p = dict(payload or {})
+        if p.get("review_status") == "retired":
+            continue
+        if col == "claims":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "claim", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col == "evidence_steps":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {
+                "kind": str(p.get("step_type") or "evidence"),
+                "statement": p.get("statement", ""),
+                "at": list(p.get("at") or []),
+            }
+        elif col == "questions":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "question", "statement": p.get("text", ""), "at": list(p.get("at") or [])}
+        elif col == "position_nodes":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "position", "statement": p.get("title", ""), "at": list(p.get("at") or [])}
+        elif col == "observations":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "observation", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col in {"knowledge_relations", "claim_relations"}:
+            edges.append(
+                {
+                    "from_id": str(p.get("unit_from_id") or p.get("from_id") or ""),
+                    "to_id": str(p.get("unit_to_id") or p.get("to_id") or ""),
+                    "relation": str(p.get("relation_type") or ""),
+                    "reason": str(p.get("reason") or ""),
+                    "at": list(p.get("at") or []),
+                }
+            )
+
+    return {
+        "source": "db",
+        "change_set_id": cs_id,
+        "sources": list(meta.get("sources") or []),
+        "sentences": list(meta.get("sentences") or []),
+        "question_states": list(meta.get("question_states") or []),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
     root = _series_root(data_base_dir)
     if not root.exists():
         return []
+    loaded_keys = _loaded_unit_keys()
     out: list[dict[str, Any]] = []
     for folder in sorted(root.iterdir()):
         seg_file = folder / "segmentation.json"
@@ -123,6 +275,7 @@ def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
         seg = json.loads(seg_file.read_text(encoding="utf-8"))
         units = seg.get("units", [])
         ready = sum(1 for u in units if (folder / "units" / u["unit_id"] / "unit-argument.json").exists())
+        loaded = sum(1 for u in units if (folder.name, u["unit_id"]) in loaded_keys)
         rulings = _latest_rulings(data_base_dir, folder.name)
         approved = sum(1 for r in rulings.values() if r.get("verdict") == "approved")
         out.append(
@@ -132,6 +285,7 @@ def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
                 "lecture_count": len(seg.get("sources", [])),
                 "unit_count": len(units),
                 "ready_count": ready,
+                "loaded_count": loaded,
                 "approved_count": approved,
             }
         )
@@ -145,6 +299,7 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
         raise ValueError(f"series not found: {series_id}")
     seg = json.loads(seg_file.read_text(encoding="utf-8"))
     rulings = _latest_rulings(data_base_dir, series_id)
+    loaded_keys = _loaded_unit_keys(series_id)
     src_by_lec = {s["lecture"]: s for s in seg.get("sources", [])}
 
     unit_rows: list[dict[str, Any]] = []
@@ -161,9 +316,15 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
             if lec not in lectures_in_unit:
                 lectures_in_unit.append(lec)
 
-        ready = arg_file.exists()
+        loaded_in_db = (series_id, uid) in loaded_keys
+        cand = _read_unit_from_db(series_id, uid) if loaded_in_db else None
+        ready = bool(cand) or arg_file.exists()
         node_count = edge_count = claim_count = 0
-        if ready:
+        if cand:
+            node_count = len(cand.get("nodes", {}))
+            edge_count = len(cand.get("edges", []))
+            claim_count = sum(1 for n in cand.get("nodes", {}).values() if n.get("kind") == "claim")
+        elif arg_file.exists():
             cand = json.loads(arg_file.read_text(encoding="utf-8"))
             node_count = len(cand.get("nodes", {}))
             edge_count = len(cand.get("edges", []))
@@ -183,21 +344,13 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
         if rtv_file.exists():
             rd = json.loads(rtv_file.read_text(encoding="utf-8"))
             m = rd.get("summary_metrics", {})
-            attr_file = udir / "roundtrip_attribution.json"
-            dist_count = m.get("distortion_count", 0)
-            if attr_file.exists():
-                ad = json.loads(attr_file.read_text(encoding="utf-8"))
-                rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
-                dists = rd.get("stance_and_logic_distortions", [])
-                dist_count = sum(
-                    1 for d in dists
-                    if rc_by_id.get(d.get("distortion_id"), "extraction_defect") in ("extraction_defect", "mixed")
-                )
+            dist_count, _, _, attr_verified = _apply_roundtrip_attribution(rd, udir / "roundtrip_attribution.json")
             roundtrip_summary = {
                 "core_covered": m.get("core_units_covered", 0),
                 "core_total": m.get("core_units_total", 0),
                 "distortions": dist_count,
                 "omissions": m.get("omission_count", 0),
+                "attribution_verified": attr_verified,
             }
 
         unit_rows.append(
@@ -209,6 +362,7 @@ def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
                 "cross_lecture": bool(u.get("cross_lecture")),
                 "lectures": [_short_lecture_label(src_by_lec.get(l, {}).get("source_id", l), l) for l in lectures_in_unit],
                 "ready": ready,
+                "loaded_in_db": (series_id, uid) in loaded_keys,
                 "node_count": node_count,
                 "edge_count": edge_count,
                 "claim_count": claim_count,
@@ -255,7 +409,8 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     folder = _series_root(data_base_dir) / series_id
     seg_file = folder / "segmentation.json"
     arg_file = folder / "units" / unit_id / "unit-argument.json"
-    if not seg_file.exists() or not arg_file.exists():
+    cand = _read_unit_from_db(series_id, unit_id)
+    if not seg_file.exists() or (cand is None and not arg_file.exists()):
         raise ValueError(f"unit not ready: {series_id}/{unit_id}")
 
     seg = json.loads(seg_file.read_text(encoding="utf-8"))
@@ -263,7 +418,8 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     if not unit_meta:
         raise ValueError(f"unit metadata missing: {unit_id}")
 
-    cand = json.loads(arg_file.read_text(encoding="utf-8"))
+    if cand is None:
+        cand = json.loads(arg_file.read_text(encoding="utf-8"))
     lec_code_by_sid = {s["source_id"]: s["lecture"] for s in seg.get("sources", [])}
     media = _resolve_media_map(data_base_dir, cand.get("sources", []), lec_code_by_sid)
 
@@ -290,29 +446,18 @@ def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any
     roundtrip_overview = None
     if (udir / "roundtrip_diff.json").exists():
         rd = json.loads((udir / "roundtrip_diff.json").read_text(encoding="utf-8"))
+        dist_count, tagged_omissions, tagged_dists, attr_verified = _apply_roundtrip_attribution(
+            rd, udir / "roundtrip_attribution.json"
+        )
+        metrics = dict(rd.get("summary_metrics", {}))
+        metrics["distortion_count"] = dist_count
         roundtrip_overview = {
-            "metrics": rd.get("summary_metrics", {}),
-            "omissions": rd.get("core_argument_omissions", []),
-            "distortions": rd.get("stance_and_logic_distortions", []),
+            "metrics": metrics,
+            "omissions": tagged_omissions,
+            "distortions": tagged_dists,
             "noise": rd.get("non_argument_noise", []),
+            "attribution_verified": attr_verified,
         }
-        attr_file = folder / "units" / unit_id / "roundtrip_attribution.json"
-        if attr_file.exists():
-            ad = json.loads(attr_file.read_text(encoding="utf-8"))
-            rc_by_id = {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
-            roundtrip_overview["distortions"] = [
-                d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
-                for d in roundtrip_overview["distortions"]
-            ]
-            roundtrip_overview["omissions"] = [
-                o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
-                for o in roundtrip_overview["omissions"]
-            ]
-            roundtrip_overview["metrics"] = dict(roundtrip_overview["metrics"])
-            roundtrip_overview["metrics"]["distortion_count"] = sum(
-                1 for d in roundtrip_overview["distortions"]
-                if d.get("root_cause") in ("extraction_defect", "mixed")
-            )
 
     def _first_pos(at_list: list[int]) -> int:
         return min(at_list) if at_list else 10**9

@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "qrcode": "1.5.4",
-    "whatsapp-web.js": "1.34.7"
+    "whatsapp-web.js": "1.34.8"
   },
   "overrides": {
     "puppeteer": "25.16.0"

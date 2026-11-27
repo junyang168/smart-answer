@@ -153,3 +153,42 @@ def test_connect_batches_when_unit_exceeds_payload_limit(tmp_path, monkeypatch):
     prev_calls = len(ports.calls)
     assert argument.connect(run, ctx, claims, ports) == receipt
     assert len(ports.calls) == prev_calls
+
+
+def test_connect_batches_reject_node_id_collision_across_batches(tmp_path, monkeypatch):
+    from backend.tests.test_claim_creation_flash import Ports
+
+    rows = [
+        dict(source_id="A", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="文法理由。" + "甲" * 1200),
+        dict(source_id="B", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="生活例子。" + "乙" * 1200),
+        dict(source_id="C", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="結論。" + "丙" * 1200),
+    ]
+    reading = SimpleNamespace(sentences=rows, sources=[{"source_id": s} for s in ("A", "B", "C")], verify=lambda: None)
+    ctx = SimpleNamespace(reading=reading, plan={"runs": [{"first": 1, "group": "g1"}], "questions": []})
+    claims = {"C001": dict(statement="結論", group="g1", at=[3], answers_question="", support_hint="")}
+
+    class CollidingPorts(Ports):
+        def repair(self, request):
+            sent_nums = [x[0] for x in request["input"]["sentences"] if isinstance(x[0], int)]
+            if 1 in sent_nums:
+                return dict(
+                    new_nodes=[dict(id="N1", kind="evidence", statement="文法理由", at=[1])],
+                    edges=[dict(from_id="N1", to_id="C001", relation="supports", reason="文法支持", at=[1, 3], attribution="explicit")],
+                    question_states=[],
+                    gaps=[],
+                )
+            return dict(
+                new_nodes=[dict(id="N1", kind="example", statement="生活例子", at=[2])],
+                edges=[],
+                question_states=[],
+                gaps=[],
+            )
+
+    monkeypatch.setattr(creation.f, "GPT_BYTES", 10500)
+    run = tmp_path / "colliding_arg"
+    run.mkdir()
+    with pytest.raises(ValueError, match="redefined existing node N1"):
+        argument.connect(run, ctx, claims, CollidingPorts(None))

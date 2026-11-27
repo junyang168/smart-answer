@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getServerSession } from "next-auth";
 import { hasTranscriptBetaAccess } from "@/app/utils/roles";
@@ -28,6 +29,8 @@ export default async function SurmonEditorPage(props: PageProps) {
   const searchParams = await props.searchParams;
   const params = await props.params;
   const item = decodeURIComponent(params.item);
+  if (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1")
+    redirect(`/admin/transcripts/${encodeURIComponent(item)}`);
   const query = searchParams ?? {};
   const viewChanges =
     toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
