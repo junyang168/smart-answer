@@ -61,6 +61,14 @@ type Asset = {
   image_sha256: string;
   content: { text_regions: { id: string; text: string }[] };
   svg_review_status: string;
+  svg_path?: string;
+  fidelity_review?: {
+    status: string;
+    repaired: boolean;
+    issues: string[];
+    summary: string;
+    before_text?: string;
+  };
 };
 type Decision = { decision: string; sha256: string; actor: string };
 type Verse = { book: string; chapter_verse: string; text: string };
@@ -1833,17 +1841,43 @@ function TranscriptProofreader({
             </div>
             {group && asset && assetId ? (
               <>
-                <a
-                  href={`${base}/assets/${assetId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <img
-                    className="mt-3 w-full rounded"
-                    alt="影片中的原始投影片"
-                    src={`${base}/assets/${assetId}`}
-                  />
-                </a>
+                <div className={`mt-3 grid gap-2 ${asset.svg_path ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                  <a
+                    className="block rounded border border-slate-200 p-1 hover:border-blue-400"
+                    title="在新分頁開啟原圖"
+                    href={`${base}/assets/${assetId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <p className="mb-1 text-[11px] font-medium text-slate-500">原圖</p>
+                    <img
+                      className="w-full rounded"
+                      alt="影片中的原始投影片"
+                      src={`${base}/assets/${assetId}`}
+                    />
+                  </a>
+                  {asset.svg_path && (
+                    <a
+                      className="block rounded border border-slate-200 bg-white p-1 hover:border-blue-400"
+                      title="在新分頁開啟白底 SVG"
+                      href={`${base}/assets/${assetId}/svg`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <p className="mb-1 text-[11px] font-medium text-slate-500">白底 SVG</p>
+                      <img
+                        className="w-full rounded bg-white"
+                        alt="白底 SVG 重建投影片"
+                        src={`${base}/assets/${assetId}/svg`}
+                      />
+                    </a>
+                  )}
+                </div>
+                {group.reason && (
+                  <p className="mt-2 rounded bg-slate-50 p-2 text-xs text-slate-700">
+                    {group.reason}
+                  </p>
+                )}
                 <p className="mt-2 text-xs text-slate-500">
                   影片時間{" "}
                   {stamp(doc.context.occurrences[shownSlide!].time_ms || 0)} ·
@@ -1936,6 +1970,26 @@ function TranscriptProofreader({
                 <p className="mb-2 mt-4 text-sm font-medium">
                   投影片文字（非口述；修改自動儲存）
                 </p>
+                {asset.fidelity_review?.repaired && (
+                  <div className="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                    <p className="font-semibold">
+                      AI 已依原圖自動修正錯字，請對照原圖核對：
+                    </p>
+                    <p className="mt-1">{asset.fidelity_review.summary}</p>
+                    {asset.fidelity_review.issues.length > 0 && (
+                      <ul className="mt-1 list-disc pl-4">
+                        {asset.fidelity_review.issues.map((issue, idx) => (
+                          <li key={idx}>{issue}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {asset.fidelity_review.before_text && (
+                      <p className="mt-1 text-amber-800">
+                        修正前：{asset.fidelity_review.before_text}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <textarea
                   key={assetId}
                   aria-label="投影片文字"
@@ -2096,22 +2150,36 @@ function TranscriptProofreader({
                       !g.hidden &&
                       g.before_paragraph_id === p.index,
                   )
-                  .map((g) => (
+                  .map((g) => {
+                    const thumbAid = doc.context.occurrences[g.slide_id]?.asset_id;
+                    const thumbAsset = thumbAid ? doc.context.visual_assets[thumbAid] : undefined;
+                    return (
                     <button
                       key={g.id}
                       className="mb-3 flex w-full items-center gap-2 rounded-md bg-slate-100 p-2 text-left text-sm"
-                      onClick={() =>
-                        setActiveGroup({ paragraphId: selected, groupId: g.id })
-                      }
+                      onClick={() => {
+                        setSelected(p.index);
+                        setActiveGroup({ paragraphId: p.index, groupId: g.id });
+                      }}
                     >
                       <img
-                        className="h-9 w-14 rounded object-contain"
+                        className="h-9 w-14 rounded bg-white object-contain"
                         alt="投影片錨點"
-                        src={`${base}/assets/${doc.context.occurrences[g.slide_id].asset_id}`}
+                        src={
+                          thumbAsset?.svg_path
+                            ? `${base}/assets/${thumbAid}/svg`
+                            : `${base}/assets/${thumbAid}`
+                        }
                       />{" "}
-                      投影片 · 檢視原圖與文字
+                      投影片 · 檢視白底 SVG 與原圖
+                      {thumbAsset?.fidelity_review?.repaired && (
+                        <span className="ml-auto rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                          AI 已修字待核對
+                        </span>
+                      )}
                     </button>
-                  ))}
+                    );
+                  })}
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <button
                     className="text-blue-700"
