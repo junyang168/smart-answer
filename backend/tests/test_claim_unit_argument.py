@@ -155,6 +155,28 @@ def test_connect_batches_when_unit_exceeds_payload_limit(tmp_path, monkeypatch):
     assert len(ports.calls) == prev_calls
 
 
+def test_bind_graph_rejects_bidirectional_conflicting_support_edges():
+    rows = [
+        dict(source_id="A", paragraph="S0001", time="00:00", sentence_id="S0001#001",
+             start=0, end=10, modality="spoken", text="證據原則。"),
+        dict(source_id="A", paragraph="S0001", time="00:00", sentence_id="S0001#002",
+             start=10, end=20, modality="spoken", text="博士論文例證。"),
+    ]
+    reading = SimpleNamespace(sentences=rows)
+    claims = {"C001": dict(statement="證據原則", at=[1])}
+    answer = dict(
+        new_nodes=[dict(id="N1", kind="example", statement="博士論文例證", at=[2])],
+        edges=[
+            dict(from_id="N1", to_id="C001", relation="illustrates", reason="例證說明原則", at=[2], attribution="explicit"),
+            dict(from_id="C001", to_id="N1", relation="supports", reason="反向互指", at=[1], attribution="explicit"),
+        ],
+        question_states=[],
+        gaps=[],
+    )
+    with pytest.raises(ValueError, match="bidirectional conflicting"):
+        argument.bind_graph(reading, claims, {}, answer)
+
+
 def test_connect_batches_reject_node_id_collision_across_batches(tmp_path, monkeypatch):
     from backend.tests.test_claim_creation_flash import Ports
 
