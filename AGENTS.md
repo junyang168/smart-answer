@@ -92,6 +92,13 @@ Reuse the current ticket or obtain permission for a new one as described below.
 Freeze the expected results before implementation. Review failure modes before
 coding. Test the normal entry point and a retry on representative data, report
 misses as well as successes, and identify any step that still needs an operator.
+When a test exposes a defect, own it through resolution. Reproduce the failure,
+trace its cause, fix it in the maintained code, and add regression coverage
+where needed. Rerun the failing case and the affected workflow through its
+normal entry point against the frozen expectations. Repeat until verified.
+Involve the owner only when a specific decision, permission or external
+dependency prevents further progress within scope.
+
 A run assembled interactively is a prototype. Keep its evidence for regression
 and put the repeatable steps in the maintained runner. The model-eval signoff
 below and production authorization still apply.
