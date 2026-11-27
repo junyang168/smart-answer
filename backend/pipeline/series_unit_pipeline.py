@@ -174,7 +174,7 @@ def run_phase_a(
         cache_dir = series_dir / ".seg_cache"
         cards = seg.build_paragraph_cards(projected, gpt, cache_dir)
         segmentation = seg.segment_series(projected, cards, gpt, cache_dir)
-        seam_findings = seg.verify_split_seams(projected, cards, segmentation, gpt, cache_dir)
+        seam_findings = seg.verify_split_seams(projected, segmentation, cards, gpt, cache_dir)
         if seam_findings:
             (series_dir / "seam_verify.json").write_text(
                 json.dumps(seam_findings, ensure_ascii=False, indent=2), encoding="utf-8"

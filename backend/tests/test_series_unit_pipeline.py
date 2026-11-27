@@ -63,7 +63,11 @@ def test_phase_a_runs_without_opus_and_phase_b_reuses_stage1(tmp_path, monkeypat
             "non_argument_paragraphs": [],
         },
     )
-    monkeypatch.setattr(P.seg, "verify_split_seams", lambda *a, **k: [])
+    def fake_verify_seams(series, segmentation, cards, client, cache_dir):
+        assert "units" in segmentation
+        return []
+
+    monkeypatch.setattr(P.seg, "verify_split_seams", fake_verify_seams)
     monkeypatch.setattr(P.unit_plan, "run", lambda m, u, ports: (u / "unit-plan.json").write_text("{}", encoding="utf-8"))
 
     def fake_unit_arg(plan_dir, root, ports):
