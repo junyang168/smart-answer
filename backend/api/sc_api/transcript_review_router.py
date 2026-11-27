@@ -408,4 +408,22 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
         return call(result)
 
+    @router.get("/argument_source/{item}")
+    def argument_source(item: str, request: Request, include_unconfirmed: bool = False):
+        store = call(lambda: store_for(item))
+
+        def result():
+            actor = authenticated_actor(request)
+            with store.lock(item):
+                store.require(actor, item)
+                from backend.pipeline.argument_source import build_argument_source_package
+
+                return build_argument_source_package(
+                    store.root,
+                    item,
+                    require_confirmed_visuals=not include_unconfirmed,
+                )
+
+        return call(result)
+
     return router
