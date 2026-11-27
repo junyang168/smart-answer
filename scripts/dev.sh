@@ -238,7 +238,11 @@ do_start() {
   printf 'dev: %s  ·  web http://localhost:%s  ·  api http://127.0.0.1:%s\n' \
     "${LABEL}" "$WEB_PORT" "$API_PORT"
 
-  "$BACKEND_PYTHON" -m uvicorn backend.api.main:app \
+  if [[ -z "${TRANSCRIPT_REVIEW_ACTION_SECRET:-}" && -f "$WEB_DIR/.env.local" ]]; then
+    TRANSCRIPT_REVIEW_ACTION_SECRET="$(grep -E '^TRANSCRIPT_REVIEW_ACTION_SECRET=' "$WEB_DIR/.env.local" | tail -n1 | cut -d= -f2- | tr -d '"'\''')"
+    export TRANSCRIPT_REVIEW_ACTION_SECRET
+  fi
+  SMART_ANSWER_DEV_NO_LOGIN=1 "$BACKEND_PYTHON" -m uvicorn backend.api.main:app \
     --reload --host 127.0.0.1 --port "$API_PORT" \
     > >(tee -a "$STATE_DIR/$API_PORT.log") 2>&1 &
   backend_pid=$!
