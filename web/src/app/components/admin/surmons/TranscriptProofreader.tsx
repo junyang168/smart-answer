@@ -354,6 +354,7 @@ function TranscriptProofreader({
     initial.script.find((p) => p.type !== "subtitle" && p.type !== "comment")?.index || "",
   );
   const [activeGroup, setActiveGroup] = useState<SlideInspection>();
+  const [inlineSlideOpen, setInlineSlideOpen] = useState(false);
   const [peekSlide, setPeekSlide] = useState<string>();
   const [baseline, setBaseline] = useState<Row[] | null>(null);
   const [status, setStatus] = useState("已自動儲存");
@@ -410,6 +411,7 @@ function TranscriptProofreader({
       selectedParagraph.current = id;
     }
     setSelected(id);
+    setInlineSlideOpen(false);
     setActiveGroup(undefined);
     setPeekSlide(undefined);
   }, []);
@@ -1344,6 +1346,281 @@ function TranscriptProofreader({
         : status;
   const audioOnly = doc.context.media_mime_type?.startsWith("audio/") ?? false;
   const MediaPlayer = audioOnly ? "audio" : "video";
+  const renderSlidePanel = (inline: boolean) => (
+    <section
+      id={inline ? "transcript-inline-slide" : undefined}
+      className={`rounded-xl border bg-white p-3 ${inline ? "mb-3 lg:hidden" : inlineSlideOpen || !doc.context.groups.length ? "hidden lg:block" : ""}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold">投影片參考</h2>
+        {!inline && (
+          <select
+            aria-label="選擇圖片組"
+            className="max-w-[190px] rounded border p-1 text-sm"
+            value={group?.id || ""}
+            onChange={(e) => {
+              setActiveGroup(
+                e.target.value
+                  ? { paragraphId: selected, groupId: e.target.value }
+                  : undefined,
+              );
+              setPeekSlide(undefined);
+            }}
+          >
+            <option value="">本段圖片</option>
+            {doc.context.groups.map((g, i) => (
+              <option key={g.id} value={g.id}>
+                圖片 {i + 1}
+                {doc.context.reviews["g:" + g.id]?.decision ===
+                  "confirmed" &&
+                doc.context.reviews["g:" + g.id]?.sha256 ===
+                  doc.group_shas[g.id]
+                  ? " ✓"
+                  : ""}
+                {g.hidden ? "（隱藏）" : ""}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {group && asset && assetId ? (
+        <>
+          <div className={`mt-3 grid gap-2 ${asset.svg_path ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+            <a
+              className="block rounded border border-slate-200 p-1 hover:border-blue-400"
+              title="在新分頁開啟原圖"
+              href={`${base}/assets/${assetId}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <p className="mb-1 text-[11px] font-medium text-slate-500">原圖</p>
+              <img
+                className="w-full rounded"
+                alt="影片中的原始投影片"
+                src={`${base}/assets/${assetId}`}
+              />
+            </a>
+            {asset.svg_path && (
+              <a
+                className="block rounded border border-slate-200 bg-white p-1 hover:border-blue-400"
+                title="在新分頁開啟白底 SVG"
+                href={`${base}/assets/${assetId}/svg`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <p className="mb-1 text-[11px] font-medium text-slate-500">白底 SVG</p>
+                <img
+                  className="w-full rounded bg-white"
+                  alt="白底 SVG 重建投影片"
+                  src={`${base}/assets/${assetId}/svg`}
+                />
+              </a>
+            )}
+          </div>
+          {group.reason && (
+            <p className="mt-2 rounded bg-slate-50 p-2 text-xs text-slate-700">
+              {group.reason}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-slate-500">
+            影片時間{" "}
+            {stamp(doc.context.occurrences[shownSlide!].time_ms || 0)} ·
+            原始畫面 · {group.member_ids.length} 個逐步狀態
+          </p>
+          <div
+            className="my-3 flex flex-wrap gap-2"
+            aria-label="本組逐步畫面"
+          >
+            {group.member_ids.map((sid, i) => (
+              <button
+                key={sid}
+                className={`rounded border p-1 ${shownSlide === sid ? "border-blue-600" : "border-slate-200"}`}
+                title={`查看中間畫面 ${i + 1}`}
+                onClick={() => setPeekSlide(sid)}
+              >
+                <img
+                  className="h-10 w-16 object-contain"
+                  alt={`中間畫面 ${i + 1}`}
+                  src={`${base}/assets/${doc.context.occurrences[sid].asset_id}`}
+                />
+              </button>
+            ))}
+          </div>
+          <button
+            className={button}
+            onClick={() => {
+              if (inline) {
+                setInlineSlideOpen(false);
+                setMobileMediaOpen(true);
+                requestAnimationFrame(() => video.current?.scrollIntoView({ block: "center" }));
+              }
+              if (video.current) {
+                clearTimeout(boundaryTimer.current);
+                contextPlayback.current = true;
+                playbackParagraph.current = selected;
+                video.current.currentTime =
+                  (doc.context.occurrences[shownSlide!].time_ms || 0) /
+                  1000;
+                void video.current.play();
+              }
+            }}
+          >
+            觀看此畫面在原片的上下文
+          </button>
+          <label className="mt-3 block text-sm">
+            本組代表畫面
+            <select
+              disabled={disabled}
+              className="mt-1 w-full rounded border p-2"
+              value={group.slide_id}
+              onChange={(e) => {
+                setPeekSlide(undefined);
+                modifyGroup({
+                  kind: "representative",
+                  id: group.id,
+                  slide_id: e.target.value,
+                });
+              }}
+            >
+              {group.member_ids.map((sid, i) => (
+                <option key={sid} value={sid}>
+                  畫面 {i + 1} · {sid}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="mt-3 block text-sm">
+            放在此段之前
+            <select
+              disabled={disabled}
+              className="mt-1 w-full rounded border p-2"
+              value={group.before_paragraph_id || ""}
+              onChange={(e) =>
+                modifyGroup({
+                  kind: "placement",
+                  id: group.id,
+                  paragraph_id: e.target.value,
+                })
+              }
+            >
+              <option value="" disabled>
+                尚未指定
+              </option>
+              {spokenRows.map((p) => (
+                <option key={p.index} value={p.index}>
+                  {stamp(
+                    doc.context.paragraph_bindings[p.index]?.start_ms,
+                  )}{" "}
+                  · {p.text.slice(0, 30)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mb-2 mt-4 text-sm font-medium">
+            投影片文字（非口述；修改自動儲存）
+          </p>
+          {asset.fidelity_review?.repaired && (
+            <div className="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+              <p className="font-semibold">
+                AI 已依原圖自動修正錯字，請對照原圖核對：
+              </p>
+              <p className="mt-1">{asset.fidelity_review.summary}</p>
+              {asset.fidelity_review.issues &&
+                asset.fidelity_review.issues.length > 0 && (
+                  <ul className="mt-1 list-disc pl-4">
+                    {asset.fidelity_review.issues.map((issue, idx) => (
+                      <li key={idx}>{issue}</li>
+                    ))}
+                  </ul>
+                )}
+              {asset.fidelity_review.before_text && (
+                <div className="mt-2 rounded bg-white p-1.5">
+                  <ReviewTextDiff
+                    before={asset.fidelity_review.before_text}
+                    after={asset.visible_text}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          <textarea
+            key={assetId}
+            aria-label="投影片文字"
+            disabled={disabled}
+            value={ocrText(asset.content.text_regions)}
+            className="mb-2 w-full rounded border p-2 text-sm"
+            rows={Math.max(
+              6,
+              Math.min(
+                16,
+                ocrText(asset.content.text_regions).split("\n").length,
+              ),
+            )}
+            onChange={(e) => editOCR(assetId, e.target.value)}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              disabled={disabled}
+              checked={group.hidden}
+              onChange={(e) =>
+                modifyGroup({
+                  kind: "hidden",
+                  id: group.id,
+                  hidden: e.target.checked,
+                  reason:
+                    group.reason || "重複或不適合閱讀展示，保留來源",
+                })
+              }
+            />{" "}
+            在閱讀版隱藏（來源仍保留）
+          </label>
+          <label className="mt-2 block text-xs">
+            本組處置原因
+            <textarea
+              disabled={disabled}
+              className="mt-1 w-full rounded border p-2 text-sm"
+              value={group.reason}
+              onChange={(e) =>
+                modifyGroup({
+                  kind: "hidden",
+                  id: group.id,
+                  hidden: group.hidden,
+                  reason: e.target.value,
+                })
+              }
+            />
+          </label>
+          <p className="my-3 text-xs text-slate-500">
+            確認範圍：代表原圖、文字、閱讀位置及本組中間內容；不等於批准
+            SVG 或文庫來源准入。
+          </p>
+          <div className="flex gap-2">
+            <button
+              disabled={disabled || !group.reason.trim()}
+              className={button}
+              onClick={() =>
+                void confirm("group_review", group.id, "confirmed")
+              }
+            >
+              確認本組處置
+            </button>
+            <button
+              disabled={disabled}
+              className={button}
+              onClick={() =>
+                void confirm("group_review", group.id, "question")
+              }
+            >
+              有疑問
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="py-6 text-sm text-slate-500">本段沒有投影片。</p>
+      )}
+    </section>
+  );
   return (
     <main
       onCompositionStartCapture={() => {
@@ -1397,7 +1674,10 @@ function TranscriptProofreader({
               className={button}
               aria-expanded={mobileMediaOpen}
               aria-controls="transcript-review-media"
-              onClick={() => setMobileMediaOpen((open) => !open)}
+              onClick={() => {
+                setInlineSlideOpen(false);
+                setMobileMediaOpen((open) => !open);
+              }}
             >
               媒體
             </button>
@@ -1808,269 +2088,7 @@ function TranscriptProofreader({
               <span className="text-xs text-slate-500">播放至本段結尾</span>
             </div>
           </section>
-          <section className={`${doc.context.groups.length ? "" : "hidden lg:block"} rounded-xl border bg-white p-3`}>
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-semibold">投影片參考</h2>
-              <select
-                aria-label="選擇圖片組"
-                className="max-w-[190px] rounded border p-1 text-sm"
-                value={group?.id || ""}
-                onChange={(e) => {
-                  setActiveGroup(
-                    e.target.value
-                      ? { paragraphId: selected, groupId: e.target.value }
-                      : undefined,
-                  );
-                  setPeekSlide(undefined);
-                }}
-              >
-                <option value="">本段圖片</option>
-                {doc.context.groups.map((g, i) => (
-                  <option key={g.id} value={g.id}>
-                    圖片 {i + 1}
-                    {doc.context.reviews["g:" + g.id]?.decision ===
-                      "confirmed" &&
-                    doc.context.reviews["g:" + g.id]?.sha256 ===
-                      doc.group_shas[g.id]
-                      ? " ✓"
-                      : ""}
-                    {g.hidden ? "（隱藏）" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {group && asset && assetId ? (
-              <>
-                <div className={`mt-3 grid gap-2 ${asset.svg_path ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
-                  <a
-                    className="block rounded border border-slate-200 p-1 hover:border-blue-400"
-                    title="在新分頁開啟原圖"
-                    href={`${base}/assets/${assetId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <p className="mb-1 text-[11px] font-medium text-slate-500">原圖</p>
-                    <img
-                      className="w-full rounded"
-                      alt="影片中的原始投影片"
-                      src={`${base}/assets/${assetId}`}
-                    />
-                  </a>
-                  {asset.svg_path && (
-                    <a
-                      className="block rounded border border-slate-200 bg-white p-1 hover:border-blue-400"
-                      title="在新分頁開啟白底 SVG"
-                      href={`${base}/assets/${assetId}/svg`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <p className="mb-1 text-[11px] font-medium text-slate-500">白底 SVG</p>
-                      <img
-                        className="w-full rounded bg-white"
-                        alt="白底 SVG 重建投影片"
-                        src={`${base}/assets/${assetId}/svg`}
-                      />
-                    </a>
-                  )}
-                </div>
-                {group.reason && (
-                  <p className="mt-2 rounded bg-slate-50 p-2 text-xs text-slate-700">
-                    {group.reason}
-                  </p>
-                )}
-                <p className="mt-2 text-xs text-slate-500">
-                  影片時間{" "}
-                  {stamp(doc.context.occurrences[shownSlide!].time_ms || 0)} ·
-                  原始畫面 · {group.member_ids.length} 個逐步狀態
-                </p>
-                <div
-                  className="my-3 flex flex-wrap gap-2"
-                  aria-label="本組逐步畫面"
-                >
-                  {group.member_ids.map((sid, i) => (
-                    <button
-                      key={sid}
-                      className={`rounded border p-1 ${shownSlide === sid ? "border-blue-600" : "border-slate-200"}`}
-                      title={`查看中間畫面 ${i + 1}`}
-                      onClick={() => setPeekSlide(sid)}
-                    >
-                      <img
-                        className="h-10 w-16 object-contain"
-                        alt={`中間畫面 ${i + 1}`}
-                        src={`${base}/assets/${doc.context.occurrences[sid].asset_id}`}
-                      />
-                    </button>
-                  ))}
-                </div>
-                <button
-                  className={button}
-                  onClick={() => {
-                    if (video.current) {
-                      clearTimeout(boundaryTimer.current);
-                      contextPlayback.current = true;
-                      playbackParagraph.current = selected;
-                      video.current.currentTime =
-                        (doc.context.occurrences[shownSlide!].time_ms || 0) /
-                        1000;
-                      void video.current.play();
-                    }
-                  }}
-                >
-                  觀看此畫面在原片的上下文
-                </button>
-                <label className="mt-3 block text-sm">
-                  本組代表畫面
-                  <select
-                    disabled={disabled}
-                    className="mt-1 w-full rounded border p-2"
-                    value={group.slide_id}
-                    onChange={(e) => {
-                      setPeekSlide(undefined);
-                      modifyGroup({
-                        kind: "representative",
-                        id: group.id,
-                        slide_id: e.target.value,
-                      });
-                    }}
-                  >
-                    {group.member_ids.map((sid, i) => (
-                      <option key={sid} value={sid}>
-                        畫面 {i + 1} · {sid}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="mt-3 block text-sm">
-                  放在此段之前
-                  <select
-                    disabled={disabled}
-                    className="mt-1 w-full rounded border p-2"
-                    value={group.before_paragraph_id || ""}
-                    onChange={(e) =>
-                      modifyGroup({
-                        kind: "placement",
-                        id: group.id,
-                        paragraph_id: e.target.value,
-                      })
-                    }
-                  >
-                    <option value="" disabled>
-                      尚未指定
-                    </option>
-                    {spokenRows.map((p) => (
-                      <option key={p.index} value={p.index}>
-                        {stamp(
-                          doc.context.paragraph_bindings[p.index]?.start_ms,
-                        )}{" "}
-                        · {p.text.slice(0, 30)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="mb-2 mt-4 text-sm font-medium">
-                  投影片文字（非口述；修改自動儲存）
-                </p>
-                {asset.fidelity_review?.repaired && (
-                  <div className="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-                    <p className="font-semibold">
-                      AI 已依原圖自動修正錯字，請對照原圖核對：
-                    </p>
-                    <p className="mt-1">{asset.fidelity_review.summary}</p>
-                    {asset.fidelity_review.issues &&
-                      asset.fidelity_review.issues.length > 0 && (
-                        <ul className="mt-1 list-disc pl-4">
-                          {asset.fidelity_review.issues.map((issue, idx) => (
-                            <li key={idx}>{issue}</li>
-                          ))}
-                        </ul>
-                      )}
-                    {asset.fidelity_review.before_text && (
-                      <div className="mt-2 rounded bg-white p-1.5">
-                        <ReviewTextDiff
-                          before={asset.fidelity_review.before_text}
-                          after={asset.visible_text}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-                <textarea
-                  key={assetId}
-                  aria-label="投影片文字"
-                  disabled={disabled}
-                  value={ocrText(asset.content.text_regions)}
-                  className="mb-2 w-full rounded border p-2 text-sm"
-                  rows={Math.max(
-                    6,
-                    Math.min(
-                      16,
-                      ocrText(asset.content.text_regions).split("\n").length,
-                    ),
-                  )}
-                  onChange={(e) => editOCR(assetId, e.target.value)}
-                />
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    disabled={disabled}
-                    checked={group.hidden}
-                    onChange={(e) =>
-                      modifyGroup({
-                        kind: "hidden",
-                        id: group.id,
-                        hidden: e.target.checked,
-                        reason:
-                          group.reason || "重複或不適合閱讀展示，保留來源",
-                      })
-                    }
-                  />{" "}
-                  在閱讀版隱藏（來源仍保留）
-                </label>
-                <label className="mt-2 block text-xs">
-                  本組處置原因
-                  <textarea
-                    disabled={disabled}
-                    className="mt-1 w-full rounded border p-2 text-sm"
-                    value={group.reason}
-                    onChange={(e) =>
-                      modifyGroup({
-                        kind: "hidden",
-                        id: group.id,
-                        hidden: group.hidden,
-                        reason: e.target.value,
-                      })
-                    }
-                  />
-                </label>
-                <p className="my-3 text-xs text-slate-500">
-                  確認範圍：代表原圖、文字、閱讀位置及本組中間內容；不等於批准
-                  SVG 或文庫來源准入。
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    disabled={disabled || !group.reason.trim()}
-                    className={button}
-                    onClick={() =>
-                      void confirm("group_review", group.id, "confirmed")
-                    }
-                  >
-                    確認本組處置
-                  </button>
-                  <button
-                    disabled={disabled}
-                    className={button}
-                    onClick={() =>
-                      void confirm("group_review", group.id, "question")
-                    }
-                  >
-                    有疑問
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="py-6 text-sm text-slate-500">本段沒有投影片。</p>
-            )}
-          </section>
+          {renderSlidePanel(false)}
         </aside>
         <section className="min-w-0 space-y-3" aria-label="逐段校對">
           {doc.script.map((p) => {
@@ -2157,31 +2175,42 @@ function TranscriptProofreader({
                   .map((g) => {
                     const thumbAid = doc.context.occurrences[g.slide_id]?.asset_id;
                     const thumbAsset = thumbAid ? doc.context.visual_assets[thumbAid] : undefined;
+                    const expanded = inlineSlideOpen && active && activeGroup?.groupId === g.id;
                     return (
-                    <button
-                      key={g.id}
-                      className="mb-3 flex w-full items-center gap-2 rounded-md bg-slate-100 p-2 text-left text-sm"
-                      onClick={() => {
-                        setSelected(p.index);
-                        setActiveGroup({ paragraphId: p.index, groupId: g.id });
-                      }}
-                    >
-                      <img
-                        className="h-9 w-14 rounded bg-white object-contain"
-                        alt="投影片錨點"
-                        src={
-                          thumbAsset?.svg_path
-                            ? `${base}/assets/${thumbAid}/svg`
-                            : `${base}/assets/${thumbAid}`
-                        }
-                      />{" "}
-                      投影片 · 檢視白底 SVG 與原圖
-                      {thumbAsset?.fidelity_review?.repaired && (
-                        <span className="ml-auto rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                          AI 已修字待核對
-                        </span>
-                      )}
-                    </button>
+                      <div key={g.id}>
+                        <button
+                          type="button"
+                          className="mb-3 flex w-full items-center gap-2 rounded-md bg-slate-100 p-2 text-left text-sm"
+                          aria-expanded={expanded}
+                          aria-controls={expanded ? "transcript-inline-slide" : undefined}
+                          onClick={() => {
+                            if (expanded) {
+                              setInlineSlideOpen(false);
+                              return;
+                            }
+                            selectParagraph(p.index);
+                            setActiveGroup({ paragraphId: p.index, groupId: g.id });
+                            setInlineSlideOpen(true);
+                          }}
+                        >
+                          <img
+                            className="h-9 w-14 rounded bg-white object-contain"
+                            alt="投影片錨點"
+                            src={
+                              thumbAsset?.svg_path
+                                ? `${base}/assets/${thumbAid}/svg`
+                                : `${base}/assets/${thumbAid}`
+                            }
+                          />{" "}
+                          投影片 · 檢視白底 SVG 與原圖
+                          {thumbAsset?.fidelity_review?.repaired && (
+                            <span className="ml-auto rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                              AI 已修字待核對
+                            </span>
+                          )}
+                        </button>
+                        {expanded && renderSlidePanel(true)}
+                      </div>
                     );
                   })}
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
