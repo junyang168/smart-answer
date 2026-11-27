@@ -10,7 +10,7 @@ export default async function TranscriptEditorPage({
   const { item } = await params;
   return (
     <TranscriptReviewEntry
-      item={item}
+      item={decodeURIComponent(item)}
       legacy={<p>這篇逐字稿尚未遷移。</p>}
     />
   );

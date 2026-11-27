@@ -8,7 +8,7 @@ export default async function BetaEditor({
   params: Promise<{ item: string }>;
 }) {
   const routeParams = await params;
-  const item = routeParams.item;
+  const item = decodeURIComponent(routeParams.item);
   if (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1")
     redirect(`/admin/transcripts/${encodeURIComponent(item)}`);
   return (

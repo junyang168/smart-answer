@@ -224,7 +224,7 @@ def archive_clip(root):
     return files
 
 
-def rehearse(snapshot, output, *, media_root=None):
+def rehearse(snapshot, output, *, media_root=None, evidence=None):
     if output.exists():
         raise ValueError("Use a fresh rehearsal output to retain prior results")
     manifest = verify_snapshot(snapshot)
@@ -261,6 +261,11 @@ def rehearse(snapshot, output, *, media_root=None):
             outcome.update(status="blocked", reason=str(exc))
         reports.append(outcome)
     atomic(catalog_path, catalog)
+    if evidence:
+        if media_root is None:
+            raise ValueError("Source media is required to verify rehearsal evidence")
+        from backend.pipeline.transcript_editor_rehearsal_evidence import apply_evidence
+        apply_evidence(target, media_root, evidence, reports)
     converted = {row["item"] for row in reports if row["status"] == "converted"}
     verified_production_files = 0
     for entry in manifest["scopes"]["production"]:
@@ -307,8 +312,9 @@ def main():
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--legacy-media-root", type=Path)
+    parser.add_argument("--evidence", type=Path)
     args = parser.parse_args()
-    print(rehearse(args.snapshot.resolve(), args.output.resolve(), media_root=args.legacy_media_root)["counts"])
+    print(rehearse(args.snapshot.resolve(), args.output.resolve(), media_root=args.legacy_media_root, evidence=args.evidence)["counts"])
 
 
 if __name__ == "__main__":
