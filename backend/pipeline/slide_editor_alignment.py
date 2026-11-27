@@ -569,6 +569,7 @@ def align_and_filter_important_slides(
                 "important": is_important,
                 "source_role": source_role,
                 "time_ms": occ["time_ms"],
+                "capture_ms": occ.get("capture_ms", occ["time_ms"]),
                 "asset_id": occ["asset_id"],
                 "svg_path": asset["svg"]["path"] if asset.get("svg") else None,
                 "original_image": asset["original_image"],
@@ -594,76 +595,150 @@ def align_and_filter_important_slides(
     return result
 
 
+def _image_dimensions(image_path: Path, asset: dict[str, Any]) -> tuple[int, int]:
+    """Return (width, height) from asset metadata or by reading the image file."""
+    w, h = asset.get("width"), asset.get("height")
+    if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
+        return w, h
+    import cv2
+
+    img = cv2.imread(str(image_path))
+    if img is None:
+        raise ValueError(f"Cannot read image dimensions: {image_path}")
+    height, width = img.shape[:2]
+    return int(width), int(height)
+
+
 def import_bindings_to_review(
     evidence_dir: Path,
     bindings_path: Path,
     review_dir: Path,
+    *,
+    actor: str = "slide_editor_alignment",
+    operation_id: str | None = None,
 ) -> dict[str, Any]:
-    """Import aligned white-background SVG slides and fidelity annotations into transcript_review context."""
+    """Attach aligned white-background SVG slides to transcript_review via ReviewStore versioned commit."""
+    import copy
     import shutil
+    from backend.api.sc_api.transcript_review import ReviewStore, digest
 
-    evidence = read_json(evidence_dir / "slide_evidence.json")
+    evidence_path = evidence_dir / "slide_evidence.json"
+    evidence = read_json(evidence_path)
     bindings_doc = read_json(bindings_path)
-    context_path = review_dir / "context.json"
-    context = read_json(context_path)
+    root = review_dir.parent.parent
+    item = review_dir.name
+    store = ReviewStore(root)
 
-    assets_out = review_dir / "assets"
-    assets_out.mkdir(parents=True, exist_ok=True)
-    visual_assets: dict[str, Any] = {}
-    for asset in evidence["assets"]:
-        aid = asset["asset_id"]
-        target_dir = assets_out / aid
-        target_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(evidence_dir / asset["original_image"], target_dir / "original.png")
-        svg_rel = None
-        svg_sha = None
-        if asset.get("svg"):
-            shutil.copyfile(evidence_dir / asset["svg"]["path"], target_dir / "reconstruction.svg")
-            svg_rel = f"transcript_review/{review_dir.name}/assets/{aid}/reconstruction.svg"
-            svg_sha = file_sha(target_dir / "reconstruction.svg")
-        visual_assets[aid] = {
-            "visible_text": asset["visible_text"],
-            "image": f"transcript_review/{review_dir.name}/assets/{aid}/original.png",
-            "image_sha256": asset["image_sha256"],
-            "content": asset["content"],
-            "svg_review_status": "repaired_model_candidate" if asset.get("fidelity_review", {}).get("repaired") else "unreviewed_model_candidate",
-            **({"svg_path": svg_rel, "svg_sha256": svg_sha} if svg_rel else {}),
-            **({"fidelity_review": asset["fidelity_review"]} if asset.get("fidelity_review") else {}),
+    op_id = operation_id or f"import-slides-{file_sha(bindings_path)[:16]}-{file_sha(evidence_path)[:16]}"
+    evidence_occ_by_id = {o["event_id"]: o for o in evidence.get("occurrences", [])}
+
+    with store.lock(item):
+        rows, context = store.load(item)
+        request = {
+            "version": digest(store.document_value(rows, context)),
+            "operation_id": op_id,
+            "operations": [
+                {"kind": "attach_visual_slides", "id": f"g-{b['event_id']}"}
+                for b in bindings_doc["bindings"]
+            ],
         }
+        prior = store.receipt(item, op_id, actor, request)
+        if prior:
+            _, current_context = store.load(item)
+            current_groups = current_context.get("groups") or []
+            return {
+                "review_dir": str(review_dir),
+                "revision": prior["revision"],
+                "visual_assets": len(current_context.get("visual_assets") or {}),
+                "occurrences": len(current_context.get("occurrences") or {}),
+                "visible_groups": sum(1 for g in current_groups if not g["hidden"]),
+                "needs_review_groups": sum(1 for g in current_groups if g["needs_review"] and not g["hidden"]),
+            }
 
-    occurrences: dict[str, Any] = {}
-    groups: list[dict[str, Any]] = []
-    valid_paragraphs = set(context.get("paragraph_bindings", {}))
-    for b in bindings_doc["bindings"]:
-        sid = b["event_id"]
-        aid = b["asset_id"]
-        occurrences[sid] = {
-            "asset_id": aid,
-            "time_ms": b["time_ms"],
-            "capture_ms": b["time_ms"],
-        }
-        para = b.get("aligned_paragraph_id")
-        if para not in valid_paragraphs:
-            para = None
-        repaired = bool(visual_assets.get(aid, {}).get("fidelity_review", {}).get("repaired"))
-        groups.append({
-            "id": f"g-{sid}",
-            "member_ids": [sid],
-            "slide_id": sid,
-            "before_paragraph_id": para,
-            "hidden": not bool(b["important"]) or para is None,
-            "reason": b.get("helps_reader_understand") or b.get("category", ""),
-            "needs_review": repaired,
-        })
+        assets_out = review_dir / "assets"
+        assets_out.mkdir(parents=True, exist_ok=True)
+        imported_assets: dict[str, Any] = {}
+        for asset in evidence["assets"]:
+            aid = asset["asset_id"]
+            target_dir = assets_out / aid
+            target_dir.mkdir(parents=True, exist_ok=True)
+            orig_target = target_dir / "original.png"
+            shutil.copyfile(evidence_dir / asset["original_image"], orig_target)
+            width, height = _image_dimensions(orig_target, asset)
+            svg_rel = None
+            svg_sha = None
+            if asset.get("svg"):
+                shutil.copyfile(evidence_dir / asset["svg"]["path"], target_dir / "reconstruction.svg")
+                svg_rel = f"transcript_review/{item}/assets/{aid}/reconstruction.svg"
+                svg_sha = file_sha(target_dir / "reconstruction.svg")
+            imported_assets[aid] = {
+                "visible_text": asset["visible_text"],
+                "image": f"transcript_review/{item}/assets/{aid}/original.png",
+                "image_sha256": asset["image_sha256"],
+                "width": width,
+                "height": height,
+                "content": asset["content"],
+                "svg_review_status": "repaired_model_candidate" if asset.get("fidelity_review", {}).get("repaired") else "unreviewed_model_candidate",
+                **({"svg_path": svg_rel, "svg_sha256": svg_sha} if svg_rel else {}),
+                **({"fidelity_review": asset["fidelity_review"]} if asset.get("fidelity_review") else {}),
+            }
 
-    context["visual_assets"] = visual_assets
-    context["occurrences"] = occurrences
-    context["groups"] = groups
-    save_json(context_path, context)
+        next_assets = {**(context.get("visual_assets") or {}), **imported_assets}
+        next_occurrences = dict(context.get("occurrences") or {})
+        imported_groups: list[dict[str, Any]] = []
+        valid_paragraphs = set(context.get("paragraph_bindings", {}))
+
+        for b in bindings_doc["bindings"]:
+            sid = b["event_id"]
+            aid = b["asset_id"]
+            ev_occ = evidence_occ_by_id.get(sid) or {}
+            capture_ms = b.get("capture_ms") if b.get("capture_ms") is not None else ev_occ.get("capture_ms", b["time_ms"])
+            next_occurrences[sid] = {
+                "asset_id": aid,
+                "time_ms": b["time_ms"],
+                "capture_ms": capture_ms,
+            }
+            para = b.get("aligned_paragraph_id")
+            if para not in valid_paragraphs:
+                para = None
+            repaired = bool(next_assets.get(aid, {}).get("fidelity_review", {}).get("repaired"))
+            imported_groups.append({
+                "id": f"g-{sid}",
+                "member_ids": [sid],
+                "slide_id": sid,
+                "before_paragraph_id": para,
+                "hidden": not bool(b["important"]) or para is None,
+                "reason": b.get("helps_reader_understand") or b.get("category", ""),
+                "needs_review": repaired,
+            })
+
+        imported_group_ids = {g["id"] for g in imported_groups}
+        preserved_groups = [
+            g for g in (context.get("groups") or [])
+            if g.get("id") not in imported_group_ids
+        ]
+        next_groups = preserved_groups + imported_groups
+
+        next_context = copy.deepcopy(context)
+        next_context["visual_assets"] = next_assets
+        next_context["occurrences"] = next_occurrences
+        next_context["groups"] = next_groups
+
+        receipt = store.commit(
+            item,
+            actor,
+            op_id,
+            request,
+            rows,
+            next_context,
+            "import_slide_bindings",
+        )
+
     return {
         "review_dir": str(review_dir),
-        "visual_assets": len(visual_assets),
-        "occurrences": len(occurrences),
-        "visible_groups": sum(1 for g in groups if not g["hidden"]),
-        "needs_review_groups": sum(1 for g in groups if g["needs_review"] and not g["hidden"]),
+        "revision": receipt["revision"],
+        "visual_assets": len(next_assets),
+        "occurrences": len(next_occurrences),
+        "visible_groups": sum(1 for g in next_groups if not g["hidden"]),
+        "needs_review_groups": sum(1 for g in next_groups if g["needs_review"] and not g["hidden"]),
     }
