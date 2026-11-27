@@ -301,3 +301,11 @@ def test_source_colour_reconstruction_refuses_unrepresented_red_text():
         "text_regions": [{"text": "ab cd ef", "bbox": [0, 0, 1000, 1000]}],
     }
     assert source_ink_svg(im, content, "0" * 64) is None
+
+
+def test_fidelity_accepts_exact_schema_echo_but_never_two_answers():
+    from backend.pipeline.slide_editor_alignment import FIDELITY_SCHEMA
+    answer = {"results": [{"asset_id": "a", "passed": False}]}
+    assert parse_fidelity_result(json.dumps(FIDELITY_SCHEMA) + "\n" + json.dumps(answer), ["a"]) == answer
+    with pytest.raises(ValueError):
+        parse_fidelity_result(json.dumps(answer) + "\n" + json.dumps(answer), ["a"])

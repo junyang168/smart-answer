@@ -288,7 +288,12 @@ def parse_fidelity_result(text, expected_ids):
     """Recover only the outer envelope after every expected row has decoded."""
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
+        if error.msg == "Extra data":
+            # Some completed replies echo our exact schema ahead of the answer.
+            # Two verdicts are ambiguous and must still fail.
+            if json.loads(text[:error.pos]) == FIDELITY_SCHEMA:
+                return json.loads(text[error.pos:])
         prefix = re.match(r'\s*\{\s*"results"\s*:\s*\[', text)
         if not prefix:
             raise
