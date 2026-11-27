@@ -1970,24 +1970,32 @@ function TranscriptProofreader({
                 <p className="mb-2 mt-4 text-sm font-medium">
                   投影片文字（非口述；修改自動儲存）
                 </p>
-                {asset.fidelity_review?.repaired && (
+                {(asset.fidelity_review?.repaired ||
+                  (asset.fidelity_review?.issues?.length ?? 0) > 0) && (
                   <div className="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                     <p className="font-semibold">
-                      AI 已依原圖自動修正錯字，請對照原圖核對：
+                      {asset.fidelity_review?.repaired
+                        ? "AI 已依原圖自動修正錯字，請對照原圖核對："
+                        : "配色／版面待核對（文字未更動）："}
                     </p>
-                    <p className="mt-1">{asset.fidelity_review.summary}</p>
-                    {asset.fidelity_review.issues.length > 0 && (
-                      <ul className="mt-1 list-disc pl-4">
-                        {asset.fidelity_review.issues.map((issue, idx) => (
-                          <li key={idx}>{issue}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {asset.fidelity_review.before_text && (
-                      <p className="mt-1 text-amber-800">
-                        修正前：{asset.fidelity_review.before_text}
-                      </p>
-                    )}
+                    <p className="mt-1">{asset.fidelity_review?.summary}</p>
+                    {asset.fidelity_review?.issues &&
+                      asset.fidelity_review.issues.length > 0 && (
+                        <ul className="mt-1 list-disc pl-4">
+                          {asset.fidelity_review.issues.map((issue, idx) => (
+                            <li key={idx}>{issue}</li>
+                          ))}
+                        </ul>
+                      )}
+                    {asset.fidelity_review?.repaired &&
+                      asset.fidelity_review.before_text && (
+                        <div className="mt-2 rounded bg-white p-1.5">
+                          <ReviewTextDiff
+                            before={asset.fidelity_review.before_text}
+                            after={asset.visible_text}
+                          />
+                        </div>
+                      )}
                   </div>
                 )}
                 <textarea
@@ -2172,11 +2180,15 @@ function TranscriptProofreader({
                         }
                       />{" "}
                       投影片 · 檢視白底 SVG 與原圖
-                      {thumbAsset?.fidelity_review?.repaired && (
+                      {thumbAsset?.fidelity_review?.repaired ? (
                         <span className="ml-auto rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
                           AI 已修字待核對
                         </span>
-                      )}
+                      ) : (thumbAsset?.fidelity_review?.issues?.length ?? 0) > 0 ? (
+                        <span className="ml-auto rounded bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">
+                          配色／版面待核對
+                        </span>
+                      ) : null}
                     </button>
                     );
                   })}

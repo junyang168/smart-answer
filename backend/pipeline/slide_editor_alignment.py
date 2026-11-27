@@ -228,12 +228,13 @@ def _apply_fidelity_repair(
             "literal_facts": list(block.facts),
             "canonical_sha256": block.canonical_sha256,
         })
+    text_changed = new_text != before_text
     asset["fidelity_review"] = {
-        "status": "repaired",
-        "repaired": True,
+        "status": "repaired" if text_changed else "needs_review",
+        "repaired": text_changed,
         "issues": audit_row["issues"],
         "summary": audit_row["summary"],
-        "before_text": before_text,
+        **({"before_text": before_text} if text_changed else {}),
     }
     save_json(evidence_dir / "assets" / asset["asset_id"] / "evidence.json", asset)
 
