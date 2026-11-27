@@ -41,6 +41,8 @@ STEP2_PROMPT = (
     "保留在大单元内，不要把大单元撕成不连续的两截。\n"
     "6. 仅把纯祷告、纯行政通知与 0 字空段放入 non_argument_paragraphs。ranges 格式为 "
     "\"L1-S0010..L1-S0012\" 或单段 \"L1-S0010\"，每个区间不得跨讲（跨讲单元请按讲次列出多个区间）。\n"
+    "7. 粒度控制：单个单元尽量控制在约 2.2 万汉字（72KB UTF-8）以内，若同一大主题包含多个完整且可独立成篇的子议题，可在显式子题切换处切分；"
+    "反之，不要把仅 1–2 句的简短过渡或零碎补充拆成独立小单元，除非是独立的听众问答。unit_id 统一用 U01、U02… 两位编号。\n"
     "输出必须严格符合给定 JSON Schema。"
 )
 
@@ -423,7 +425,7 @@ def validate_segmentation(
     series: ProjectedSeries,
     result: dict[str, Any],
     *,
-    max_unit_utf8_bytes: int = 115000,
+    max_unit_utf8_bytes: int = 72000,
 ) -> dict[str, Any]:
     """Enforce all deterministic Hard Invariants and recompute chars/bytes."""
     units = result.get("units")
@@ -444,10 +446,13 @@ def validate_segmentation(
         non_arg_pks.add(pk)
         seen_pks.add(pk)
 
+    pad_width = 3 if len(units) >= 100 else 2
     unit_ids: set[str] = set()
     validated_units: list[dict[str, Any]] = []
     for u in units:
-        uid = u["unit_id"].strip()
+        raw_uid = u["unit_id"].strip()
+        m_uid = re.fullmatch(r"U0*(\d+)", raw_uid)
+        uid = f"U{int(m_uid.group(1)):0{pad_width}d}" if m_uid else raw_uid
         if not uid or uid in unit_ids:
             raise ValueError(f"Invalid or duplicate unit_id: {uid!r}")
         unit_ids.add(uid)
@@ -499,6 +504,7 @@ def validate_segmentation(
                 f"Unit {uid} exceeds UTF-8 byte budget ({utf8_bytes} > {max_unit_utf8_bytes})"
             )
         vu = dict(u)
+        vu["unit_id"] = uid
         vu["chars"] = chars
         vu["utf8_bytes"] = utf8_bytes
         validated_units.append(vu)
@@ -548,7 +554,7 @@ def segment_series(
     cache_dir: Path,
     *,
     max_retries: int = 2,
-    max_unit_utf8_bytes: int = 115000,
+    max_unit_utf8_bytes: int = 72000,
 ) -> dict[str, Any]:
     """Step 2: single-pass series segmentation with full cache key and bounded invariant retries."""
     cache_dir.mkdir(parents=True, exist_ok=True)

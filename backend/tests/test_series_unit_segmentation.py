@@ -227,3 +227,20 @@ def test_cross_vendor_seam_verify_catches_silent_cut_and_ruling_staleness_is_per
     reloaded = seg.load_series("test-series", [lec.spec for lec in series.lectures])
     statuses = seg.evaluate_ruling_staleness(reloaded, ruling_path)
     assert statuses == {"U01": "valid_ruling", "U02": "stale_ruling"}
+
+
+def test_validate_segmentation_normalizes_unit_ids_and_enforces_72k_default(tmp_path):
+    series = _make_two_lecture_series(tmp_path)
+    raw = {
+        "units": [
+            {"unit_id": "U001", "title": "L1", "passage": "太 5", "cross_lecture": False, "seam_evidence": None, "ranges": ["L1-S0002..L1-S0003"]},
+            {"unit_id": "U002", "title": "L2", "passage": "太 5", "cross_lecture": False, "seam_evidence": None, "ranges": ["L2-S0003..L2-S0004"]},
+        ],
+        "non_argument_paragraphs": [
+            {"pk": "L1-S0001", "reason": "empty"},
+            {"pk": "L2-S0001", "reason": "logistics"},
+            {"pk": "L2-S0002", "reason": "prayer"},
+        ],
+    }
+    validated = seg.validate_segmentation(series, raw)
+    assert [u["unit_id"] for u in validated["units"]] == ["U01", "U02"]

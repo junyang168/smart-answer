@@ -49,8 +49,8 @@ def extract_claims(root, context, group, passages, ports):
         "related_ranges的first/last和conclusion_anchor的segment_index只能选owned_paragraphs的R编号。"
         "仅在结论确有讲出的地方锚定。单纯场务或留待解答的问题可没有Claim。"
         "涉及原文词义、文法或译本辨析时，完整保留教授点名的关键语法特征与所评译本用词，勿泛化省略。"
-        "不得替教授给语法术语加教科书定义，不得带入讲员未亲口说出的神学或历史百科专名与头衔，也不得自行补写未说过的排他或对比性限定。"
-        "讲员用反问表达强烈否定时须改写为明确否定句（勿用易生歧义的「不就是」），全称否定勿擅自加「整个」「全部」缩小范围。"
+        "不得替教授给语法术语加教科书定义，不得带入讲员未亲口说出的神学或历史百科专名与头衔，也不得自行补写未说过的排他、对比、目的或阐释性半句（如「从而……」「以便……」「表示……」「并非……」）。"
+        "讲员用反问表达强烈否定时须改写为明确否定句（勿用「不就是」），全称否定勿擅自加「整个」「全部」缩小范围。"
     )
     content = {"group": group, "owned_paragraphs": paragraphs, "existing_claims": {},
                "sources": {p["key"]: [p["source_id"], p["paragraph"], p["modality"]] for p in passages}}
@@ -128,9 +128,12 @@ GRAPH_PROMPT = (
     "对方看法与来源确实讲出但各组遗漏的主张。给每个新节点唯一编号N1、N2等。"
     "设想读者只见节点陈述与关系说明，看不到原句：保留支撑判断的具体依据、限定和插问自己的答案。"
     "涉及原文词义、文法或译本辨析时，完整保留教授点名的关键语法特征及所评各译本用词，勿泛化改写或省略。"
-    "不得替教授给语法术语加教科书定义，不得带入讲员未亲口说出的神学或历史百科专名与头衔，也不得自行补写未说过的排他或对比性限定（如「并非……」「不能只凭……」）。"
+    "不得替教授给语法术语加教科书定义，不得带入讲员未亲口说出的神学或历史百科专名与头衔，也不得自行补写未说过的排他、对比、目的或阐释性半句（如「从而……」「以便……」「表示……」「并非……」「不能只凭……」）。"
     "讲员用反问表达强烈否定时须写成明确否定句（勿用「不就是」），全称否定勿擅自加「整个」「全部」缩小范围。"
     "若有例证，说清故事说明哪一点；教授亲自把它用到什么对象、处境或行动，或排除了什么推论，就具体保留。"
+    "讲道中顺口的谐音笑话、纯粹幽默插曲或场务过渡不得接入主论点作supports或illustrates；"
+    "宏观总括句（「所以从这里可以看到……」等）应指向它所总括的核心论点或多条前提，勿窄化错接成仅由紧邻上一句单点支撑；"
+    "同一对节点之间不得互指双向supports/illustrates。"
     "顺带提及的生活应用除非与本单元核心论证强关联，否则只需在例证或说明里简提，不单独升格为claim。"
     "故事中人物的行为与教授的教导分开。若支持跨讲，分别指明原来的起点与后来的作答，"
     "不能用后来重述抹掉原来的留题。只引用输入句号的整数位置，at可列多句。"
@@ -164,12 +167,17 @@ def bind_graph(reading, claims, questions, answer):
         if node["kind"] == "claim" and len({sentences[i-1]["source_id"] for i in node["at"]}) != 1:
             raise ValueError(f"Claim {key} spans multiple lecture identities")
     edges = set()
+    support_pairs = set()
     answered = set()
     for link in answer["edges"]:
         a, b, rel = link["from_id"], link["to_id"], link["relation"]
         signature = (a, b, rel, link["reason"].strip(), tuple(sorted(link["at"])))
         if a not in nodes or b not in nodes or a == b or signature in edges or not link["reason"].strip():
             raise ValueError(f"invalid unit edge {a} {rel} {b}")
+        if rel in {"supports", "illustrates"}:
+            if (b, a) in support_pairs:
+                raise ValueError(f"bidirectional conflicting support/illustrate edge between {a} and {b}")
+            support_pairs.add((a, b))
         check_positions(link["at"], len(sentences))
         edges.add(signature)
         if rel == "answers":
