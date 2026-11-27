@@ -301,7 +301,7 @@ def render_svg(content: dict, width: int, height: int, image_sha: str, *,
     for region in content['text_regions']:
         x1, y1, x2, y2 = region['bbox']
         if (not content['has_diagram'] and '\n' not in region['text']
-                and len(region['text'].strip()) >= 4 and (y2 - y1) > 2.2 * (x2 - x1)):
+                and len(region['text'].strip()) >= 2 and (y2 - y1) > 2.2 * (x2 - x1)):
             x1, y1, x2, y2 = y1, x1, y2, x2
         normalized_boxes[region['id']] = (x1, y1, x2, y2)
 
