@@ -1960,7 +1960,7 @@ function TranscriptProofreader({
                     {spokenRows.map((p) => (
                       <option key={p.index} value={p.index}>
                         {stamp(
-                          doc.context.paragraph_bindings[p.index].start_ms,
+                          doc.context.paragraph_bindings[p.index]?.start_ms,
                         )}{" "}
                         · {p.text.slice(0, 30)}
                       </option>

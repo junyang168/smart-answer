@@ -91,7 +91,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   const actor =
     session?.user?.email ??
     (process.env.NODE_ENV === "development"
-      ? process.env.TRANSCRIPT_REVIEW_DEV_ACTOR
+      ? process.env.TRANSCRIPT_REVIEW_DEV_ACTOR ?? "dev@localhost"
       : undefined);
   if (guarded && !actor)
     return NextResponse.json({ detail: "請登入後再操作" }, { status: 401 });
