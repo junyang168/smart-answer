@@ -1,0 +1,158 @@
+{
+ "about": "Story-check calibration (#787, 2026-11-21). Runs are under DATA_BASE_DIR/argument-layer-runs. label story = ruled not his own teaching; his_own = ruled correct. A Claim is named by its run and CLxxxx. Used only to measure the Jev threshold and Claude's agreement; nothing here is read at generation time.",
+ "cases": [
+  {
+   "run": "gpt-20261116-lecture2-v2/creation/candidate.json",
+   "claim": "CL0022",
+   "label": "story",
+   "ruling": "owner 2026-11-16: the story summary 「講清楚能得釋放」 is not a Claim (grade reports lecture2-v2/v4/v6; eval case L2-unstated-lesson)",
+   "note": "v2: the pastor's remark in the engineer story"
+  },
+  {
+   "run": "gpt-20261116-lecture2-v4/creation/candidate.json",
+   "claim": "CL0019",
+   "label": "story",
+   "ruling": "owner 2026-11-16: the story summary 「講清楚能得釋放」 is not a Claim (grade reports lecture2-v2/v4/v6; eval case L2-unstated-lesson)",
+   "note": "v4: same remark, reworded"
+  },
+  {
+   "run": "gpt-20261116-lecture2-v6/creation/candidate.json",
+   "claim": "CL0018",
+   "label": "story",
+   "ruling": "owner 2026-11-16: the story summary 「講清楚能得釋放」 is not a Claim (grade reports lecture2-v2/v4/v6; eval case L2-unstated-lesson)",
+   "note": "v6: same remark, third round"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0001",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0002",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0004",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0005",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0006",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0007",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0008",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0009",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0010",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0011",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0012",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0013",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0014",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0015",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0016",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0017",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0018",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0019",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0020",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0021",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0022",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  },
+  {
+   "run": "gpt-20261117-lecture2-v7/creation/candidate-owner-corrected.json",
+   "claim": "CL0023",
+   "label": "his_own",
+   "ruling": "lecture 2 after the owner's corrections: 33/33 against the key and the owner's rulings (grade-gpt-20261117-lecture2-v7.md)"
+  }
+ ]
+}

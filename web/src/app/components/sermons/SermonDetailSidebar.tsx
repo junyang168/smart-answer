@@ -8,6 +8,7 @@ interface SermonDetailSidebarProps {
   sermon: Sermon;
   authenticated: boolean;
   canReviewRepository?: boolean;
+  showSeries?: boolean;
 }
 
 import Link from 'next/link';
@@ -38,12 +39,15 @@ const MultiValueRow = ({ label, values }: { label: string, values: string[] }) =
   </div>
 );
 
-export const SermonDetailSidebar = ({ sermon, authenticated, canReviewRepository = false }: SermonDetailSidebarProps) => {
+export const SermonDetailSidebar = ({ sermon, authenticated, canReviewRepository = false, showSeries = false }: SermonDetailSidebarProps) => {
   return (
     <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
       <div className="bg-gray-50 p-6 rounded-lg">
         <h3 className="text-xl font-bold font-display mb-4">講道信息</h3>
         <dl>
+{/* 系列的排列只給同工看（負責人 2026-11-06）。 */}
+          {showSeries ? (
+            <>
           <InfoRow
             label="講道系列"
             value={sermon.series_title || sermon.series_id || '未編入系列'}
@@ -52,6 +56,8 @@ export const SermonDetailSidebar = ({ sermon, authenticated, canReviewRepository
               : undefined}
           />
           {sermon.series_order ? <InfoRow label="系列次序" value={`第 ${sermon.series_order} 講`} /> : null}
+            </>
+          ) : null}
 
           {sermon.scripture && sermon.scripture.length > 0 && (
             <div className="flex justify-between items-baseline py-3 border-b border-gray-200">

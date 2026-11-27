@@ -1,5 +1,4 @@
-"""Legacy sermon content API migrated into backend.api.sc_api."""
+"""Sermon content modules. Import the HTTP router explicitly when starting the API.
 
-from .router import router
-
-__all__ = ["router"]
+Importing storage or pipeline helpers must not initialize the legacy application.
+"""

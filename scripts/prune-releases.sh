@@ -55,14 +55,20 @@ ACTIVE="${ACTIVE%/}"
 # repoints active-release without appending a line: after a failed deploy the
 # last line's previous= *is* the active release, and the rollback target is the
 # entry before it.
-read_lines_backwards() {
-  tail -r "$DEPLOYMENTS_LOG" 2>/dev/null || tac "$DEPLOYMENTS_LOG"
-}
-
+#
+# The log is read into memory and walked from the end in bash. It used to be
+# piped through `tail -r || tac`: stopping at the first match closed the pipe,
+# `tail -r` died of SIGPIPE on a log longer than the pipe buffer, and the
+# fallback `tac` does not exist on macOS (deploy of 0de26e71, 2026-11-04).
 rollback_target() {
   [[ -s "$DEPLOYMENTS_LOG" ]] || return 0
-  local line candidate
-  while IFS= read -r line; do
+  local line candidate index
+  local -a lines=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lines+=("$line")
+  done < "$DEPLOYMENTS_LOG"
+  for (( index = ${#lines[@]} - 1; index >= 0; index-- )); do
+    line="${lines[index]}"
     candidate="${line##*previous=}"
     [[ "$candidate" != "$line" ]] || continue          # line carries no previous=
     candidate="${candidate%/}"
@@ -71,7 +77,7 @@ rollback_target() {
     [[ -d "$candidate" ]] || continue
     printf '%s\n' "$candidate"
     return 0
-  done < <(read_lines_backwards)
+  done
 }
 
 ROLLBACK="$(rollback_target)"

@@ -69,11 +69,12 @@ export async function createSundayService(entry: SundayServiceEntry): Promise<Su
 export async function updateSundayService(
   date: string,
   entry: SundayServiceEntry,
+  originalScripture: string[],
 ): Promise<SundayServiceEntry> {
   const response = await fetch(resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(entry),
+    body: JSON.stringify({ ...entry, originalScripture }),
   });
   return parseJson(response);
 }
@@ -182,7 +183,7 @@ export async function generateHymnLyrics(
   return parseJson(response);
 }
 
-export async function generateSundayServicePpt(date: string): Promise<Blob> {
+export async function generateSundayServicePpt(date: string): Promise<{ blob: Blob; missing: string[]; cloudPending: boolean }> {
   const response = await fetch(resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/ppt`), {
     method: "POST",
   });
@@ -198,7 +199,9 @@ export async function generateSundayServicePpt(date: string): Promise<Blob> {
     }
     throw new Error(detail || `Request failed with status ${response.status}`);
   }
-  return response.blob();
+  const missingHeader = response.headers.get("X-Sunday-Ppt-Missing");
+  const missing: string[] = missingHeader ? JSON.parse(decodeURIComponent(missingHeader)) : [];
+  return { blob: await response.blob(), missing, cloudPending: response.headers.get("X-Sunday-Ppt-Cloud-Status") === "pending" };
 }
 
 export async function uploadFinalSundayServicePpt(

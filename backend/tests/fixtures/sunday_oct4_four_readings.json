@@ -1,0 +1,16 @@
+{
+  "sent_at": "2026-09-28T11:09:00-05:00",
+  "text": "10/4 讲题：天行—与神同行\n\n读经，可分成以下四段来读：\n创世纪5:21-24；25-29；7:11-13\n希伯来书11:5-7\n\n回应诗歌：合神心意\nhttps://youtu.be/5IIV-vdSq7c",
+  "date": "2026-10-04",
+  "expected": {
+    "sermonTitle": "天行—与神同行",
+    "scripture": [
+      "gen-5-21-24",
+      "gen-5-25-29",
+      "gen-7-11-13",
+      "heb-11-5-7"
+    ],
+    "responseHymn": "合神心意",
+    "responseHymnYoutubeUrl": "https://youtu.be/5IIV-vdSq7c"
+  }
+}

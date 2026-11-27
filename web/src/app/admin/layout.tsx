@@ -1,20 +1,23 @@
+import { hasEditorAccess } from "@/app/utils/roles";
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { AdminHeader } from "@/app/components/admin/AdminHeader";
 import { authConfig } from "@/app/utils/auth";
 
-export default async function AdminLayout({ children }: { children: ReactNode }) {
-  
+export default async function AdminLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const session = await getServerSession(authConfig);
-
 
   if (process.env.NODE_ENV === "production") {
     if (!session) {
       redirect(`/api/auth/signin?callbackUrl=${encodeURIComponent("/admin")}`);
     }
     const role = session.user?.role;
-    if (role !== "editor" && role !== "admin") {
+    if (!hasEditorAccess(role)) {
       redirect("/");
     }
   }
@@ -23,7 +26,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     <>
       <style>{`#global-site-header { display: none !important; }`}</style>
       <div className="min-h-screen bg-gray-50">
-        <AdminHeader />
+        <AdminHeader transcriptCutover={process.env.TRANSCRIPT_EDITOR_CUTOVER === "1"} />
         <main className="container mx-auto px-2 py-6">{children}</main>
       </div>
     </>

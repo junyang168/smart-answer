@@ -10,7 +10,7 @@ export default async function AIAssistantPage(props: { params: Promise<{ chatId?
 
   const breadcrumbLinks = [
   { name: '首頁', href: '/' },
-  { name: 'AI 輔助查經', href: '/resources' },
+  { name: '聖經學習資源', href: '/resources' },
   { name: 'AI 信仰助教' },
 ];
 

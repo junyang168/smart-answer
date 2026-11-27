@@ -1,0 +1,663 @@
+"""Thin, layered Flash interface with a complete program-exported postimage.
+
+No semantic task is implemented here. Existing stage receipts remain authority;
+this interface supplies order, a source-local output, and an honest pending exit.
+"""
+from copy import deepcopy
+from datetime import datetime
+import fcntl
+import json
+import os
+from pathlib import Path
+import time
+
+from backend.pipeline import evidence_refresh as e, claim_flash_common as f
+from backend.pipeline.claim_flash_completion import save_completion
+from backend.pipeline import claim_flash_grouping as grouping, claim_flash_source as source
+from backend.pipeline import claim_flash_coverage as coverage, claim_flash_source_fill as fill
+from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements
+from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
+from backend.pipeline import claim_flash_missing as missing, claim_flash_source_disposition as disposition
+from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
+from backend.pipeline import claim_flash_citations as citations, claim_flash_citation_tags as citation_marks
+from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError, ID_FIELDS
+
+VERSION='claim_flash_layered_flow_v1'
+
+
+def read(path):return json.loads(Path(path).read_text())
+
+
+def complete(result):
+    return result.get('status') in {'verified','applied','completed'} and not result.get('pending')
+
+
+def with_citation_contract(root,intent):
+    """New roots run the citation check; a root started before it replays its saved intent unchanged."""
+    path=Path(root)/'flow-intent.json'
+    if path.exists() and 'citation_contract' not in read(path):return intent
+    return {**intent,'citation_contract':citations.CONTRACT}
+
+
+def source_handoff_batches(result,root):
+    """Keep group boundaries and previously started singleton request identities."""
+    # Ungrouped diagnostics do not prove a shared boundary.
+    groups=[[p] for p in result.get('pending',[])]+[g.get('pending',[]) for g in result.get('groups',[])]
+    for findings in groups:
+        fresh=[]
+        for item in sorted(findings,key=lambda x:x.get('object_key','')):
+            if item.get('unit'):continue
+            key=item['object_key'];legacy=Path(root)/e.digest(key)
+            if (legacy/'intent.json').exists():yield [item],legacy
+            else:fresh.append(item)
+        for n in range(0,len(fresh),f.GPT_JOBS):
+            batch=fresh[n:n+f.GPT_JOBS]
+            keys=[p['object_key'] for p in batch]
+            token=e.digest(keys[0]) if len(keys)==1 else 'batch-'+e.digest(keys)
+            yield batch,Path(root)/token
+
+
+def claim_tasks(plan):
+    tasks=[]
+    for group in plan['groups']:
+        batches=group.get('sequential_claim_batches', [group['claim_ids']])
+        if ([cid for batch in batches for cid in batch] != group['claim_ids']
+                or any(len(batch)>10 for batch in batches)
+                or len(set(group['claim_ids'])) != len(group['claim_ids'])):
+            raise ValueError('sequential Claim batches must partition their frozen group exactly once')
+        tasks.extend((group,batch,n) for n,batch in enumerate(batches,1))
+    return tasks
+
+
+def snapshot(store,sid):
+    records,sources=f.load_source(store,sid,visual_context=True)
+    f.source_unchanged(sources)
+    return records,sources
+
+
+def external_reference_pins(store,records,*,include_records=False):
+    """Resolve direct export endpoints only; never expand their private graph."""
+    wanted=set()
+    for key,row in records.items():
+        col=key.split('/',1)[0];p=row['payload']
+        for field in ({'evidence_steps':['produced_claim_ids'], 'questions':['answer_claim_ids'],
+                       'claims':['evidence_step_ids','opposed_position_ids']}.get(col,[])):
+            wanted.update(p.get(field) or [])
+        if col=='claims' and p.get('superseded_by'):wanted.add(p['superseded_by'])
+        if col in {'claim_relations','knowledge_relations','claim_relation_constraints'}:
+            wanted.update(p.get(field) for field in ('from_id','to_id','source_id','target_id') if p.get(field))
+    wanted-={key.split('/',1)[1] for key in records}
+    if not wanted:return ({},{}) if include_records else {}
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        cursor.execute('SET LOCAL statement_timeout=5000')
+        cursor.execute('''SELECT collection,object_id,revision,content_sha256,
+            payload->'evidence_step_ids',payload->'produced_claim_ids'
+            FROM wang_knowledge.objects WHERE retired_at IS NULL
+            AND collection=ANY(%s) AND object_id=ANY(%s)''',
+            (['claims','evidence_steps','observations','questions','position_nodes'],sorted(wanted)))
+        pins={};projections={}
+        for col,oid,rev,sha,eids,cids in cursor.fetchall():
+            pins[col+'/'+oid]={'revision':rev,'content_sha256':sha}
+            node={ID_FIELDS[col]:oid}
+            if col=='claims':node['evidence_step_ids']=[eid for eid in eids or [] if 'evidence_steps/'+eid in records]
+            if col=='evidence_steps':node['produced_claim_ids']=[cid for cid in cids or [] if 'claims/'+cid in records]
+            projections.setdefault(col,[]).append(node)
+        return (pins,projections) if include_records else pins
+
+
+def accounting(root, provider_root=None, evidence_provider_root=None):
+    """Count durable dispatches once and report measured usage by layer."""
+    from backend.pipeline.codex_subscription_client import completed_turn_usage
+    from backend.pipeline.subscription_process import digest_file
+
+    def summary():
+        return {'actual_calls': 0, 'missing_usage_receipts': 0, 'provider_seconds': 0.0,
+                'missing_duration_receipts': 0, 'usage': dict.fromkeys(
+                    ('input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_output_tokens'), 0)}
+
+    def count(row, usage, seconds):
+        row['actual_calls'] += 1
+        if seconds is None:
+            row['missing_duration_receipts'] += 1
+        else:
+            row['provider_seconds'] += seconds
+        if not isinstance(usage, dict) or any(type(usage.get(key)) is not int or usage[key] < 0
+                                              for key in ('input_tokens', 'output_tokens')):
+            row['missing_usage_receipts'] += 1
+            return
+        for key, value in {
+            'input_tokens': usage['input_tokens'], 'output_tokens': usage['output_tokens'],
+            'cached_input_tokens': usage.get('cached_input_tokens', (usage.get('input_tokens_details') or {}).get('cached_tokens')),
+            'reasoning_output_tokens': usage.get('reasoning_output_tokens', (usage.get('output_tokens_details') or {}).get('reasoning_tokens')),
+        }.items():
+            if type(value) is int and value >= 0:
+                row['usage'][key] += value
+
+    root = Path(root)
+    result = {role: summary() for role in ('gpt', 'jev')}
+    layers = {layer: summary() for layer in ('source', 'evidence', 'claims', 'unclassified')}
+    seen = set()
+    for role in ('gpt', 'jev'):
+        paths = sorted(root.rglob(role+'/*/started.json'), key=lambda path: path.stat().st_mtime_ns)
+        for started in paths:
+            folder = started.parent
+            stage = started.relative_to(root).parts[0]
+            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings',
+                                           'citations', 'citation-marks', 'citation-fragments'}
+                     else 'evidence' if stage in {'evidence', 'source-handoffs'}
+                     else 'claims' if stage == 'claims' else 'unclassified')
+            seconds = None
+            if role == 'gpt':
+                provider = (evidence_provider_root or provider_root) if layer == 'evidence' else provider_root
+                receipt_folder = Path(provider)/role/folder.name if provider else folder
+                transport = receipt_folder/'transport'
+                invocation, exit_receipt = transport/'invocation.json', transport/'exit.json'
+                receipt = receipt_folder/'provider.json'
+                if receipt_folder in seen or not (invocation.exists() or receipt.exists()):
+                    continue
+                seen.add(receipt_folder)
+                usage = read(receipt).get('usage') if receipt.exists() else None
+                if exit_receipt.exists() and invocation.exists():
+                    saved = read(exit_receipt)
+                    if saved.get('finished_at'):
+                        seconds = max(0, datetime.fromisoformat(saved['finished_at']).timestamp() - invocation.stat().st_mtime)
+                    stdout = transport/'stdout.log'
+                    if usage is None and stdout.exists() and saved.get('files', {}).get('stdout.log') == digest_file(stdout):
+                        usage = completed_turn_usage(stdout.read_text())
+                count(layers[layer], usage, seconds)
+            else:
+                reply = folder/'response.json'
+                usage = read(reply).get('usage') if reply.exists() else None
+                if reply.exists():
+                    seconds = max(0, reply.stat().st_mtime - started.stat().st_mtime)
+            count(result[role], usage, seconds)
+    for row in [*result.values(), *layers.values()]:
+        row['total_tokens'] = (row['usage']['input_tokens'] + row['usage']['output_tokens']
+                               if not row['missing_usage_receipts'] else None)
+        row['provider_seconds'] = round(row['provider_seconds'], 3)
+    result['gpt_by_layer'] = layers
+    result['dollar_cost'] = None
+    return result
+
+
+def export(store,sid,root,before,original,stages,pending,started,mode):
+    """Read actual SQL postimages; never reconstruct a final graph from patches."""
+    records,sources=snapshot(store,sid)
+    result_package=deepcopy(original) if original else {'schema_version':'wang_shared_knowledge_v1.3'}
+    for col in KNOWLEDGE_COLLECTIONS:
+        if col in result_package or any(k.startswith(col+'/') for k in records):
+            result_package[col]=[deepcopy(v['payload']) for k,v in sorted(records.items()) if k.startswith(col+'/')]
+    historical_fragments=[]
+    if mode=='canonical_refresh':
+        live_fragment_ids={fid for key,row in records.items() if key.split('/')[0] in f.LOWER
+                           for fid in e.evidence_fragment_ids(row['payload'])}
+        generations={doc['source_id']:doc.get('source_body_sha256') or doc.get('source_sha256')
+                     for doc in result_package.get('source_documents',[])}
+        live_fragments=[]
+        for fragment in result_package.get('source_fragments',[]):
+            generation=generations.get(fragment['source_id'])
+            if (generation and fragment.get('source_sha256')!=generation
+                    and fragment['fragment_id'] not in live_fragment_ids
+                    and (fragment.get('anchor_state') in source.HISTORICAL or (
+                        fragment.get('anchor_state') == 'unresolved'
+                        and fragment.get('source_binding_status') in {'quotation_pending_update','source_text_missing'}
+                        and not fragment.get('verbatim_excerpt')))):
+                historical_fragments.append(fragment)
+            else:
+                live_fragments.append(fragment)
+        if historical_fragments:
+            result_package['source_fragments']=live_fragments
+    changed={'created':[],'updated':[],'retired':[]};retired=[]
+    for key,row in records.items():
+        if key not in before:changed['created'].append(key)
+        elif row['content_sha256']!=before[key]['content_sha256']:changed['updated'].append(key)
+    for key,row in before.items():
+        if key in records:continue
+        current=store.get_record_state(*key.split('/',1))
+        if not current or not current['retired']:raise ValueError('Flash output lost an input record: '+key)
+        changed['retired'].append(key);retired.append({'key':key,'record':current['payload']})
+    # Retired payloads stay in history, not as live dangling graph nodes.
+    result_package['package_id']='FLASH-'+e.digest([sid,records])[:24]
+    result_package['flash_application']={'version':VERSION,'mode':mode,'legacy_qualification':'not_granted',
+        'initial_package_sha256':e.digest(original) if original else None,
+        'source_file':sources[sid]['file'],'retired_records':retired,
+        'completion':'needs_attention' if pending else 'completed'}
+    if historical_fragments:
+        result_package['flash_application']['historical_source_fragments']=historical_fragments
+    external,external_records=external_reference_pins(store,records,include_records=True)
+    if external:result_package['flash_application']['external_reference_pins']=external
+    validation_errors=[]
+    try:
+        validate_merged_package(result_package,native_relations=True,external_reference_records=external_records)
+    except KnowledgePackageMergeError as exc:
+        # A pending report must preserve the real SQL snapshot even when an
+        # untouched legacy row is invalid. It grants no package admission.
+        if not pending:raise
+        validation_errors.append(str(exc))
+    digest=e.digest(result_package);path=root/'postimages'/(digest+'.json');e.save(path,result_package)
+    result={'version':VERSION,'source_id':sid,'status':'needs_attention' if pending else 'completed',
+        'package':{'path':str(path),'sha256':digest},'changes':changed,'pending':pending,
+        'next_action':pending[0] if pending else None,'stages':stages,
+        'initial_package_sha256':e.digest(original) if original else None,
+        'source_file':sources[sid]['file'],'source_body_sha256':sources[sid]['body_sha256'],'final_pins':{k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()},
+        'mode':mode,'canonical_committed':mode=='canonical_refresh' and any(root.rglob('commit.json')),
+        'production_writes':0 if mode=='candidate_workspace' else None,
+        'legacy_qualification':'not_granted','wall_seconds_this_invocation':round(time.monotonic()-started,3)}
+    if external:result['external_reference_pins']=external
+    if validation_errors:result['package_validation_errors']=validation_errors
+    # Bind exact saved stage outputs; no second model-generated report.
+    result['evidence_refs']=[recovery.result_ref(root,p) for p in sorted(root.rglob('result.json'))
+        if p.parent!=root and 'postimages' not in p.parts]
+    e.save(root/'exports'/(e.digest(result)+'.json'),result)
+    return e.publish(root,result)
+
+
+def citation_steps(store,source_id,root,ports,*,apply=True):
+    """Source layer citation steps, in order: the citation list (Jev, prayers and
+    introduced quotes), GPT check of introduced quotes, marks on existing
+    SourceFragments, then missing citations saved as marked SourceFragments.
+    Without apply the last two only list what they would write."""
+    records,sources=snapshot(store,source_id)
+    listing=citations.build(records,sources,source_id,root/'citations',ports)
+    marked=citation_marks.run(store,source_id,root/'citation-marks',apply=apply,listing=listing)
+    stages={'citation_marks':marked}
+    if not complete(marked):return stages,marked.get('pending',[])
+    # Marks change only scripture_refs, not what a fragment shows.
+    # Every held explicit citation must be visible through a fragment.
+    checked=citations.fragment_check(records,sources,source_id,listing)
+    stages['citations']={'status':'verified','pending':[],'citations':len(listing['citations']),
+        'unresolved':len(listing['unresolved']),'visible':checked['visible'],'new_fragments':len(checked['spans'])}
+    e.save(root/'citations'/'fragment-check.json',checked)
+    if checked['spans']:
+        filled=fill.run_citations(store,source_id,checked['spans'],root/'citation-fragments',apply=apply)
+        stages['citation_fragments']=filled
+        if not complete(filled):return stages,filled['pending']
+    return stages,[]
+
+
+SOURCE_ONLY_VERSION='claim_flash_citation_source_only_v1'
+
+
+def run_source_only(store,source_id,root,ports,*,apply=False):
+    """Only the source layer citation steps, on any sermon: no coverage, fill,
+    Evidence or Claim layer, no export package, no completion receipt."""
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);started=time.monotonic()
+    with (root/'flow.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        records,sources=snapshot(store,source_id)
+        intent={'version':SOURCE_ONLY_VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
+                'models':ports.identity,'citation_contract':citations.CONTRACT}
+        saved=root/'flow-intent.json'
+        if saved.exists() and read(saved)!=intent:
+            raise ValueError('source-only saved input differs; use a new root')
+        e.save(saved,intent)
+        stages,pending=citation_steps(store,source_id,root,ports,apply=apply)
+        status=('needs_attention' if pending else 'applied' if apply else 'verified')
+        result={'version':SOURCE_ONLY_VERSION,'source_id':source_id,'status':status,'applied':apply and not pending,
+                'pending':[{'layer':'source','findings':pending}] if pending else [],'stages':stages,
+                'seconds':round(time.monotonic()-started,1),
+                'accounting':accounting(root,getattr(ports,'root',None))}
+        (root/'source-only').mkdir(exist_ok=True)
+        return e.publish(root/'source-only',result)
+
+
+def bind_evidence_ports(root, ports, evidence_ports):
+    intent_path = Path(root) / 'evidence' / 'intent.json'
+    if evidence_ports is not ports and intent_path.exists():
+        saved = read(intent_path)['models']
+        if saved == ports.identity and saved != evidence_ports.identity:
+            # Preserve earlier requests; only undispatched work uses the configured model.
+            evidence_ports.new_gpt_identity = evidence_ports.identity['gpt']
+            evidence_ports.identity = saved
+    return evidence_ports
+
+
+def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None,published=None,locator_root=None,registration_root=None,backup_manifest=None):
+    """Apply each authorized layer to its store; candidate mode requires private SQL.
+
+    Passing a canonical store authorizes no writes by itself: its caller must
+    already have the refresh authority. Candidate entry creates only private SQL.
+    """
+    if evidence_ports is None:
+        evidence_ports = ports
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);started=time.monotonic()
+    with (root/'flow.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        mode='candidate_workspace' if candidate is not None else 'canonical_refresh'
+        if candidate is not None and not getattr(store,'_flash_candidate_workspace',None):
+            raise ValueError('candidate Flash requires its private isolated workspace')
+        if candidate is None and not (root/'flow-intent.json').exists():
+            from backend.pipeline import transcript_locator_migration as migration
+
+            check = migration.preflight(store, source_id, published=published, locator_root=locator_root,
+                                        registration_root=registration_root, backup_manifest=backup_manifest)
+            if check['status'] not in {'not_needed','migrated'}:
+                return {'version':VERSION,'source_id':source_id,'status':'needs_attention',
+                        'pending':[{'layer':'migration',**check}]}
+            if check['status']=='not_needed':
+                records,sources=check['records'],check['sources']
+            else:
+                records,sources=snapshot(store,source_id)
+        else:
+            records,sources=snapshot(store,source_id)
+        intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
+                'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
+        intent=with_citation_contract(root,intent)
+        e.save(root/'flow-intent.json',intent)
+        data_root=os.getenv('DATA_BASE_DIR')
+        canonical_url=os.getenv('KNOWLEDGE_DATABASE_URL') or os.getenv('DATABASE_URL')
+        def record_completion(result):
+            if (mode == 'canonical_refresh' and complete(result) and data_root and canonical_url
+                    and getattr(store, 'database_url', None) == canonical_url):
+                # A scoped plan can complete without refreshing the whole lecture.
+                before_path = root/'before.json'
+                groups_path = root/'shared-groups.json'
+                if not before_path.is_file() or not groups_path.is_file():
+                    return result
+                original = read(before_path)
+                if grouping.covers_all_claims(original, source_id, read(groups_path)):
+                    save_completion(data_root, records['source_documents/'+source_id]['payload'], result)
+            return result
+        checkpoint=None;resume_claims=False
+        if (root/'result.json').exists():
+            saved=read(root/'result.json')
+            if saved['status']=='completed':
+                pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
+                if pins!=saved['final_pins']:raise ValueError('completed Flash input changed; explicit affected-stage continuation required')
+                if saved.get('external_reference_pins',{})!=external_reference_pins(store,records):
+                    raise ValueError('completed Flash external references changed; explicit continuation required')
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:raise ValueError('Flash output package changed')
+                for ref in saved['evidence_refs']:
+                    if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
+                return record_completion(saved)
+            if (saved.get('pending') and saved['pending'][0].get('layer')=='evidence'
+                    and not (root/'claim-layer-input.json').exists()):
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
+                    raise ValueError('pending Flash output package changed')
+                recovery.verify_pending_refs(root,saved)
+            if (not any((root/name).exists() for name in ('claim-progress.json','claim-layer-input.json','source-layer-input.json')) and saved.get('pending')
+                    and saved['pending'][0].get('layer') in {'evidence','claims'}):
+                pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
+                if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
+                    raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
+                    raise ValueError('pending Flash output package changed')
+                recovery.verify_pending_refs(root,saved)
+                checkpoint=saved['stages']
+                resume_claims=saved['pending'][0]['layer']=='claims'
+        if (root/'claim-progress.json').exists() and not (root/'claim-layer-input.json').exists():
+            raise ValueError('Flash recovery is missing its completed lower-layer checkpoint')
+        if (root/'claim-layer-input.json').exists():
+            checkpoint=recovery.restore(store,root,intent,records,sources)
+            resume_claims=True
+        elif (root/'source-layer-input.json').exists():
+            checkpoint=recovery.restore(store,root,intent,records,sources,source_only=True)
+        if (root/'before.json').exists():before=read(root/'before.json')
+        else:before=records;e.save(root/'before.json',before)
+        def finish(stages,pending):
+            result=export(store,source_id,root,before,candidate,stages,pending,started,mode)
+            result['accounting']=accounting(root,getattr(ports,'root',None),getattr(evidence_ports,'root',None))
+            result=e.publish(root,result)
+            return record_completion(result)
+        replanned = False
+        if plan is None:
+            group_root = root/'grouping'
+            gp = group_root/'retry'/'shared-groups.json'
+            if not gp.exists():
+                gp = group_root/'shared-groups.json'
+            if gp.exists():
+                plan = read(gp)
+                if plan.get('pending') and not checkpoint:
+                    revised = grouping.build(records, sources, source_id, allow_claim_batches=True)
+                    if not revised.get('pending') and revised != plan:
+                        saved_intent = read(group_root/'grouping-intent.json')
+                        if saved_intent['input_sha256'] != e.digest({k:r['payload'] for k,r in records.items()}):
+                            raise ValueError('pending grouping inputs changed')
+                        e.save(group_root/'stopped-plans'/(e.digest(plan)+'.json'),plan)
+                        plan = grouping.save(store,source_id,group_root/'retry',allow_claim_batches=True)
+                        replanned = True
+            else:
+                plan = grouping.save(store,source_id,group_root,allow_claim_batches=True)
+        coverage.validate_groups(plan,source_id,sources[source_id])
+        if replanned:
+            recovery.atomic_save(root/'shared-groups.json',plan)
+        else:
+            e.save(root/'shared-groups.json',plan)
+        if plan.get('pending'):return finish({},[{'layer':'grouping','findings':plan['pending']}])
+        if checkpoint is not None:
+            stages=deepcopy(checkpoint)
+        else:
+            stages={}
+            # A migrated paragraph can be valid while the old quotation
+            # still needs replacement. Reuse the source-only handoff here.
+            source_jobs = root/'initial-source-jobs.json'
+            sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]))
+            if not source_jobs.exists():
+                ready = [{'object_key':row['object_key'],'layer':'source','reason':row['reason']}
+                         for row in sr['records'] if row['status']=='unresolved'
+                         and row.get('reason') and not row.get('detail')
+                         and any(records.get('source_fragments/'+fid,{}).get('payload',{}).get('source_binding_status')
+                                 == 'quotation_pending_update' for fid in row['fragment_ids'])]
+                if ready:
+                    e.save(source_jobs,ready)
+            if source_jobs.exists():
+                jobs = read(source_jobs)
+                by_key = {item['object_key']:item for item in jobs}
+                batches = {'groups':[{'pending':[by_key[k] for k in group['lower_record_keys'] if k in by_key]}
+                                     for group in plan['groups']]}
+                for batch, path in source_handoff_batches(batches,root/'initial-source-handoffs'):
+                    resolved = path/'source-disposition'/'result.json'
+                    if resolved.exists():
+                        repaired = read(resolved)
+                        if (repaired.get('parent_verification_sha256') != e.digest(read(path/'verification.json'))
+                                or not complete(repaired)):
+                            raise ValueError('source disposition receipt differs')
+                        e.readback(store,repaired)
+                    else:
+                        repaired = source.repair_bindings(store,source_id,batch,path,ports,apply=True)
+                    if not complete(repaired):
+                        return finish(stages,[{'layer':'source','findings':repaired['pending']}])
+                records,sources=snapshot(store,source_id)
+                sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]))
+            stages['source']=sr
+            if sr['status']=='calibration_available':
+                work=root/'calibration';work.mkdir(exist_ok=True)
+                prepared={'version':'claim_flash_mechanical_source_v1','source_id':source_id,'status':'verified',
+                    'updates':sr['calibration_candidates']['updates'],'new_fragments':sr['calibration_candidates']['new_fragments'],
+                    'retiring_keys':[],'pending':[],'applied':False,'claim_qualification':'not_granted'}
+                e.save(work/'before.json',{'records':records,'sources':sources});e.save(work/'verification.json',prepared)
+                e.commit_verified(store,work)
+                records,sources=snapshot(store,source_id)
+                sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
+            if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':[r for r in sr['records'] if r['status']=='unresolved']}])
+            cv=coverage.run(store,source_id,root/'coverage',ports,plan=plan);stages['coverage']=cv
+            findings=[v for row in cv['findings'] for v in row['findings']]
+            if any(v['verdict']=='needs_context' for v in findings):
+                return finish(stages,[{'layer':'source','findings':[v for v in findings if v['verdict']=='needs_context']}])
+            if any(v['verdict'] in fill.MISSING for v in findings):
+                fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
+                if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
+            citation_jobs=scripture.coverage_jobs(findings)
+            if citation_jobs:
+                bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
+                stages['scripture_bindings']=bound
+                if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
+            if intent.get('citation_contract'):
+                found,pending=citation_steps(store,source_id,root,ports)
+                stages.update(found)
+                if pending:return finish(stages,[{'layer':'source','findings':pending}])
+            recovery.lower_checkpoint(root,intent,stages,source_only=True)
+        # Finish the original batch after a crash, before EO can change which
+        # records it hands back. Reuse the original saved requests and answers.
+        for path in sorted((root/'source-handoffs').glob('*/intent.json')):
+            if (path.parent/'result.json').exists():
+                receipt=read(path.parent/'result.json')
+                if receipt.get('applied') or not complete(receipt):continue
+            saved=read(path)
+            if 'findings' in saved and 'models' in saved:
+                source.repair_bindings(store,source_id,saved['findings'],path.parent,ports,apply=True)
+        attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
+                   for item in read(p).get('outcomes',[])}
+        if not resume_claims:
+            evidence_ports = bind_evidence_ports(root, ports, evidence_ports)
+        while not resume_claims:
+            er=eo.run(store,source_id,plan,root/'evidence',evidence_ports,root/'coverage',apply=True);stages['evidence']=er
+            handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
+            if complete(er) or not handoffs or any(p.get('layer')!='source' for p in handoffs):break
+            if any(p.get('source_completion_attempted') for p in handoffs):break
+            units=[p for p in handoffs if p.get('unit')]
+            if units:
+                token='units-'+e.digest(units)
+                if token in attempted:break
+                attempted.add(token)
+                repaired=fill.fill_inventory_handoff(store,source_id,units,root/'coverage',root/'source-handoffs'/token,apply=True)
+                stages.setdefault('source_handoffs',{})[token]=repaired
+                if not complete(repaired) or not repaired['new_fragments']:break
+            handoffs=[p for p in handoffs if not p.get('unit')]
+            if any(not p.get('object_key') or p['object_key'] in attempted for p in handoffs):break
+            # One source completion per object in this operation. Previously
+            # accepted lower judgments are consumed by EO's existing cache.
+            for batch,path in source_handoff_batches(er,root/'source-handoffs'):
+                attempted.update(item['object_key'] for item in batch)
+                repaired=source.repair_bindings(store,source_id,batch,path,ports,apply=True)
+                stages.setdefault('source_handoffs',{})[path.name]=repaired
+                if not complete(repaired) or not repaired['updates']:break
+            else:continue
+            break
+        if resume_claims:
+            er=stages['evidence']
+            if not complete(er):raise ValueError('Claim checkpoint lacks completed Evidence layer')
+        if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
+            [p for g in er.get('groups',[]) for p in g.get('pending',[])],
+            'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
+        lower_sha=recovery.lower_checkpoint(root,intent,stages)
+        stages.setdefault('claims',{})
+        tasks=claim_tasks(plan)
+        for group,ids,batch_number in tasks:
+            gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
+            gr=root/'claims'/task_id
+            if not ids:
+                old=stages['claims'].get(gid,{}).get('missing',{})
+                if resume_claims and complete(old):
+                    if e.digest(read(gr/'missing/result.json'))!=e.digest(old):
+                        raise ValueError('completed Claim checkpoint stage differs')
+                    continue
+                recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':'missing'},lower_sha)
+                value=missing.run(store,source_id,None,gr/'missing',ports,apply=True,
+                    max_new_claims=2,empty_group=group,evidence_root=root/'evidence')
+                stages['claims'][gid]={'missing':value}
+                if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':'missing','findings':value.get('pending',[])}])
+                continue
+            outputs=stages['claims'].setdefault(task_id,{})
+            statement_root=gr/'statements'
+            for name,fn in (
+                ('statements',lambda:statements.run(store,source_id,ids,root/'evidence',gr/'statements',ports,apply=True)),
+                ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',
+                    statement_root,gr/'arguments',ports,apply=True,
+                    claim_ids=ids if group.get('sequential_claim_batches') else None)),
+                ('relations',lambda:relations.run(store,source_id,gr/'arguments',gr/'relations',ports,apply=True)),
+                ('missing',lambda:missing.run(store,source_id,gr/'relations',gr/'missing',ports,apply=True))):
+                if resume_claims and complete(outputs.get(name,{})):
+                    if e.digest(read(gr/name/'result.json'))!=e.digest(outputs[name]):
+                        raise ValueError('completed Claim checkpoint stage differs')
+                    if name=='statements':
+                        for child in ('retained','rechecked'):
+                            successor = statement_root/'source-disposition'/child
+                            if (successor/'verification.json').exists():
+                                statement_root = successor
+                                break
+                        if not outputs[name]['claim_ids']:
+                            break
+                    continue
+                recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
+                if name=='statements':
+                    value, statement_root = disposition.continue_statements(
+                        store, source_id, group, statement_root, root/'evidence', ports, fn)
+                    value=statements.handoff_connections(statement_root,value)
+                    if statement_root != gr/name:
+                        e.publish(gr/name,value)
+                else:
+                    value=fn()
+                outputs[name]=value
+                if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
+                if name=='statements' and not value['claim_ids']:
+                    break
+        recovery.start_stage(root,intent,stages,None,lower_sha)
+        return finish(stages,[])
+
+
+def run_candidate(candidate_path,root,ports,*,plan=None,evidence_ports=None):
+    from backend.pipeline.claim_candidate_workspace import open_candidate
+    candidate=read(candidate_path);root=Path(root).resolve()
+    if not candidate.get('extraction'):raise ValueError('Flash candidate requires extraction provenance')
+    sid=candidate['source_documents'][0]['source_id']
+    with open_candidate(candidate,root/'workspace') as store:
+        return run(store,sid,root/'flash',ports,plan=plan,candidate=candidate,evidence_ports=evidence_ports)
+
+
+def subscription_ports(root, capacity, executable=None):
+    """Build the normal Flash model routing with one shared capacity pool."""
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    from backend.pipeline.claim_refresh import Models
+
+    def make(model):
+        client = CodexSubscriptionClient(model=model, reasoning_effort='medium',
+                                         max_output_tokens=6000, executable=executable)
+        return Models(client, root, capacity=capacity)
+
+    evidence = make('gpt-6-sol')
+    evidence.gpt.cache_usage_events = True
+    evidence.evidence_fidelity_limits = (180, 2500)
+    regular = make('gpt-6.1-sol')
+    regular.gpt.capture_usage_events = True
+    return regular, evidence
+
+
+def main():
+    import argparse
+    from dotenv import load_dotenv
+    from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    parser=argparse.ArgumentParser(description='Layered Flash with full result package and exact stage receipts')
+    for name in ('root','capacity-file'):parser.add_argument('--'+name,required=True)
+    selector=parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument('--candidate',help='Complete creation package; only private candidate SQL')
+    selector.add_argument('--source-id',help='Existing canonical source; requires explicit --apply')
+    parser.add_argument('--apply',action='store_true');parser.add_argument('--database-url')
+    parser.add_argument('--source-only',action='store_true',help='Only the source layer citation steps; without --apply they list what they would write')
+    parser.add_argument('--shared-groups');parser.add_argument('--codex-executable')
+    parser.add_argument('--published');parser.add_argument('--locator-root');parser.add_argument('--registration-root');parser.add_argument('--backup-manifest')
+    args=parser.parse_args()
+    if args.candidate and (args.apply or args.database_url):parser.error('candidate mode never accepts canonical write flags or database URLs')
+    if args.source_only and not args.source_id:parser.error('--source-only needs --source-id')
+    if args.source_id and not args.apply and not args.source_only:parser.error('canonical flow requires explicit --apply')
+    load_dotenv('.env');root=Path(args.root).resolve()
+    ports, evidence_ports = subscription_ports(root, ClaimModelCapacity(read(args.capacity_file)), args.codex_executable)
+    plan=read(args.shared_groups) if args.shared_groups else None
+    if args.candidate:result=run_candidate(args.candidate,root,ports,plan=plan,evidence_ports=evidence_ports)
+    else:
+        store = PostgresKnowledgeStore(args.database_url)
+        published = args.published
+        if published is None and os.getenv('DATA_BASE_DIR'):
+            row = store.get_record_state('source_documents', args.source_id)
+            item = row['payload'].get('transcript_id') if row else None
+            if item and Path(item).name == item:
+                path = Path(os.environ['DATA_BASE_DIR'])/'script_published'/(item+'.json')
+                if path.is_file():
+                    published = path
+        if args.source_only:
+            result=run_source_only(store,args.source_id,root,ports,apply=args.apply)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result['status'] in {'verified','applied'} else 2
+        result=run(store,args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports,
+                   published=published,locator_root=args.locator_root,registration_root=args.registration_root,backup_manifest=args.backup_manifest)
+    print(json.dumps(result, ensure_ascii=False))
+    # Keep the full JSON contract on stdout. An incomplete lecture needs an
+    # Agent decision even when the runner exited normally.
+    return 0 if result['status'] == 'completed' and not result['pending'] else 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

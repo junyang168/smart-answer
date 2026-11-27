@@ -142,6 +142,76 @@ def test_relation_added_during_model_call_blocks_commit_without_repeating_review
     assert store.get_record_state('claims','A')==original and ports.calls==['opus']
 
 
+@pytest.mark.parametrize('extra_drift', [None, 'content', 'source', 'scope'])
+def test_reviewed_transaction_only_drift_reuses_exact_answers_or_rejects_content_drift(chain, extra_drift):
+    from backend.pipeline.claim_review_recovery import recover_returned_review, VERSION
+    store, request, output, root = chain
+    bind(request, root, proposal=True)
+    eb = deepcopy(store.get_record_state('evidence_steps', 'EB')['payload'])
+    eb['source_fragment_ids'] = ['FB']
+    store.apply_plan(store.plan_package({'package_id': 'readonly-neighbour-fragment',
+        'evidence_steps': [eb], 'source_fragments': [{'fragment_id': 'FB', 'source_id': 'S',
+            'paragraph_key': 'S0001', 'verbatim_excerpt': '甲是假设'}]}))
+    citation = {'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}
+    def propose(packet):
+        return {'changes': [{'record_key': 'claims/A',
+            'fields_json': json.dumps({'statement': '甲是假设，不是断言。'}),
+            'reason': 'faithful correction', 'citations': [citation]}],
+            'findings': [], 'finding_resolutions': []}
+    def opus(packet):
+        assert 'source_fragments/FB' not in packet['before']
+        changed = deepcopy(store.get_record_state('source_fragments', 'FB')['payload'])
+        changed['verbatim_excerpt'] = '甲是假设，不是断言。'
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-readonly-fragment',
+            'source_fragments': [changed]}))
+        return yes(packet)
+    ports = SyntheticPorts(store, root, proposal=propose, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'paused' and 'transaction current dependency drift:' in result['detail'], result
+    assert result['reason'] == 'engineering_required'  # A source_fragments key is not a source-file edit.
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    rid = next(iter(parent['latest_rounds'].values()))
+    saved = store.get_cvp_group(rid)
+    assert saved['checkpoint'] == 'prepared' and saved['opus_approved']
+    assert 'source_fragments/FB' in saved['materials']['transaction_before']
+    old_files = {name: (Path(parent['execution_root']) / rid / name).read_bytes()
+        for name in ('gpt.raw.json', 'opus.raw.json', 'candidate.json')}
+    if extra_drift == 'content':
+        changed = deepcopy(store.get_record_state('claims', 'A')['payload'])
+        changed['statement'] = 'a concurrent different judgment'
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-model-fact', 'claims': [changed]}))
+    elif extra_drift == 'source':
+        Path(request.source_bindings['S'].path).write_text(json.dumps({'script': [{'text': 'changed source'}]}))
+    elif extra_drift == 'scope':
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-model-scope',
+            'claim_relations': [relation('AC', 'A', 'C')]}))
+    direction = root / 'transaction-context-direction.json'
+    direction.write_text(json.dumps({'schema_version': VERSION, 'round_id': rid,
+        'prior_metadata_sha256': cm.sha256_json({k: v for k, v in saved.items() if k not in {'run_id', 'status', 'error'}}), 'authorized_by': 'owner',
+        'authorization_quote': 'continue this original Update without another model call',
+        'human_content_approval': False, 'refresh_transaction_context': True}))
+    if extra_drift:
+        expected = 'physical file missing or changed' if extra_drift == 'source' else 'content scope drift'
+        with pytest.raises(ValueError, match=expected):
+            recover_returned_review(store, rid, authorization=binding(direction))
+        assert store.get_cvp_group(rid) == saved
+    else:
+        recovered = recover_returned_review(store, rid, authorization=binding(direction))
+        assert recover_returned_review(store, rid, authorization=binding(direction)) == recovered
+        now = store.get_cvp_group(rid)
+        after_parent = store.get_cvp_group(parent['run_id'])
+        assert after_parent['call_reservations'] == parent['call_reservations']
+        assert after_parent['request'] == parent['request'] and after_parent['policy'] == parent['policy']
+        assert cm.model_packet(now['materials']) == cm.model_packet(saved['materials'])
+        assert now['candidate'] == saved['candidate']
+        assert now['engineering_review_recoveries'][-1]['transaction_context_refresh']['changed_transaction_keys'] == ['source_fragments/FB']
+        assert all((Path(recovered) / name).read_bytes() == data for name, data in old_files.items())
+        assert all((Path(parent['execution_root']) / rid / name).read_bytes() == data for name, data in old_files.items())
+        assert execute_claim_management(store, request, root=output, ports=ports)['status'] == 'completed'
+        assert store.claim_management_qualification('A')['ready']
+    assert ports.calls == ['gpt', 'opus']
+
+
 def test_shared_evidence_owner_checks_do_not_walk_owners_other_relations(shared):
     store,request,output,root=shared; bind(request,root,required=['evidence_steps/E'])
     store.apply_plan(store.plan_package({'package_id':'owner-neighbour',
@@ -396,3 +466,268 @@ def test_applied_readback_recovery_never_repeats_models_or_apply(chain, monkeypa
     assert (output/rid/'readback.json').read_bytes() == old_readback
     assert Path(recovered, 'readback.json').is_file()
     assert store.claim_management_qualification('A')['ready']
+
+
+@pytest.mark.parametrize('enabled',[False,True])
+def test_declared_owner_is_resolvable_readonly_context_without_a_claim_frontier(chain,enabled):
+    store,request,_,root=chain
+    from backend.pipeline.claim_review_units import CONTRACT
+    p=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text());p.review_unit_contract=CONTRACT;p.joint_update_max_targets=10
+    pf=root/'owner-context-policy.json';pf.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pf))
+    a=store.get_record_state('evidence_steps','EA')['payload']
+    ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'explicit-readonly-evidence-owner',
+        'evidence_steps':[dict(a,produced_claim_ids=['A','C']),dict(ec,produced_claim_ids=['C','D']),{'evidence_step_id':'ED','statement':'甲是假设。','produced_claim_ids':['D']}],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis','evidence_step_ids':['ED'],
+            'occurrences':[{'source_id':'S','anchors':[]}]}], 'claim_relations':[relation('CD','C','D')]}))
+    request.permissions=[p for p in request.permissions if p.key in {'claims/A','claim_relations/AB'}]
+    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':enabled,'evidence_owner_context_keys':['claims/C']})
+    before={cm.source.key(*k):cm.model_state(v) for k,v in store.read_claim_context([('claims','A')]).items()}
+    selected=direct.scope(request,before)
+    assert ('claims/C' in selected['record_keys'])==enabled
+    assert ('evidence_steps/EC' in selected['record_keys'])==enabled
+    assert selected['content_claim_keys']==['claims/A']
+    assert not {'claims/D','claim_relations/BC','claim_relations/CD'} & set(selected['record_keys'])
+    if enabled:
+        assert 'claims/C' not in selected['writable_record_keys']
+        assert 'evidence_steps/EC' not in selected['writable_record_keys']
+        assert 'claims/C' not in direct.scope(request,before,include_write_context=False)['record_keys']
+        projected={k:before[k] for k in selected['record_keys']}
+        assert direct.scope(request,projected)['record_keys']==selected['record_keys']
+        candidate=cm.existing_candidate(projected)
+        row=dict(before['claim_relations/AB']['payload'],target_id='C')
+        candidate.records=[cm.source.Row(collection='claim_relations',object_id='AB',payload=row)]
+        next(d for d in candidate.dispositions if d.record_key=='claim_relations/AB').action='update'
+        post=direct.scope(request,projected,candidate)
+        assert 'claims/C' in post['neighbour_claim_keys'] and post['content_claim_keys']==['claims/A']
+        assert not {'claims/D','claim_relations/CD'} & set(post['record_keys'])
+
+
+def test_readback_keeps_reviewed_owner_after_evidence_disconnects_it(chain):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store, request, execution, root = chain
+    ea = store.get_record_state('evidence_steps', 'EA')['payload']
+    store.apply_plan(store.plan_package({'package_id': 'owner-detaches-after-review',
+        'source_fragments': [{'fragment_id': 'FA', 'source_id': 'S', 'paragraph_key': 'S0001',
+                              'verbatim_excerpt': '甲是假设，不是断言。'}],
+        'evidence_steps': [dict(ea, produced_claim_ids=['A', 'C'], source_fragment_ids=['FA'],
+                               speaker='professor', stance='asserted', support_eligibility='eligible_candidate')]}))
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent / 'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract = CONTRACT
+    policy.joint_update_max_targets = 10
+    policy.initial_candidate = 'proposal'
+    path = root / 'detach-owner-policy.json'
+    path.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    request.permissions = [cm.source.Permission(collection='evidence_steps', object_id='EA', fields=['produced_claim_ids'])]
+    authorize(request, {'required_maintenance_keys': ['evidence_steps/EA'],
+        'include_evidence_owner_context': True, 'evidence_owner_context_keys': ['claims/C']})
+    original = store.get_record_state('claims', 'C')
+    def propose(packet):
+        return {'changes': [{'record_key': 'evidence_steps/EA',
+            'fields_json': json.dumps({'produced_claim_ids': ['A']}),
+            'reason': 'Remove redundant ownership; C has separate EC evidence.',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}]}],
+            'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': []}
+    ports = SyntheticPorts(store, root, proposal=propose, opus=pass_review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    round_id = next(iter(parent['latest_rounds'].values()))
+    readback = json.loads((execution / round_id / 'readback.json').read_text())
+    keys = set(readback.get('actual_records', readback.get('denominator', [])))
+    assert {'claims/C', 'evidence_steps/EC'} <= keys
+    assert not {'claim_relations/BC', 'claims/D'} & keys
+    assert store.get_record_state('claims', 'C') == original
+    assert store.claim_management_qualification('C') is None
+    assert ports.calls == ['gpt', 'opus']
+
+
+@pytest.mark.parametrize('write_reference',[False,True])
+@pytest.mark.parametrize('private_owner',[False,True])
+def test_provided_owner_can_receive_relation_without_write_or_new_qualification(chain,write_reference,private_owner):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store,request,execution,root=chain
+    ea=store.get_record_state('evidence_steps','EA')['payload'];cl=store.get_record_state('claims','C')['payload']
+    store.apply_plan(store.plan_package({'package_id':'same-source-provided-carrier',
+        'source_fragments':[{'fragment_id':'FA','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'}],
+        'evidence_steps':[dict(ea,produced_claim_ids=['A','C'],source_fragment_ids=['FA'],speaker='professor',
+            stance='asserted',support_eligibility='eligible_candidate')],
+        'claims':[dict(cl,evidence_step_ids=['EA','EC'])]}))
+    if private_owner:
+        ec=store.get_record_state('evidence_steps','EC')['payload']
+        store.apply_plan(store.plan_package({'package_id':'private-readonly-owner-is-not-a-second-frontier',
+            'evidence_steps':[dict(ec,produced_claim_ids=['C','D']),{'evidence_step_id':'ED',
+                'statement':'甲是假设。','source_fragment_ids':['FA'],'produced_claim_ids':['D']}],
+            'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis',
+                'evidence_step_ids':['ED'],'occurrences':[{'source_id':'S','anchors':[]}]}]}))
+    p=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text());p.review_unit_contract=CONTRACT;p.joint_update_max_targets=10;p.initial_candidate='proposal'
+    pf=root/'provided-carrier-policy.json';pf.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pf))
+    request.permissions=[cm.source.Permission(collection='claims',object_id='A',fields=['statement']),
+        cm.source.Permission(collection='claim_relations',object_id='AB',fields=['target_id','reason'])]
+    authorize(request,{'required_maintenance_keys':[],'include_existing_evidence_owners':True,'include_evidence_owner_context':True,'evidence_owner_context_keys':['claims/C']})
+    initial=store.get_record_state('claims','C');ec=store.get_record_state('evidence_steps','EC')
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def propose(packet):
+        assert 'claims/C' in packet['before'] and 'evidence_steps/EC' in packet['before']
+        assert 'claims/C' not in packet['claim_scope']['content_claim_keys']
+        changes=[{'record_key':'claim_relations/AB','fields_json':json.dumps({'target_id':'C','reason':'synthetic support to the active carrier'}),
+            'reason':'use the explicit provided carrier','citations':[cite]}]
+        if write_reference:changes.append({'record_key':'claims/C','fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),
+            'reason':'not authorised by reference presence','citations':[cite]})
+        return {'changes':changes,'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    def review(packet):
+        assert set(packet['own_evidence_bindings'])=={'claims/A'}
+        assert 'claims/C' in packet['claim_scope']['neighbour_claim_keys']
+        assert 'claim_relations/BC' not in packet['before']
+        return pass_review(packet)
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    if write_reference:
+        assert result['status']=='paused' and any(text in result['detail'] for text in ['read-only','hidden Claim']),result
+        assert ports.calls==['gpt']
+    else:
+        assert result['status']=='completed',result
+        assert ports.calls==['gpt','opus']
+        assert store.get_record_state('claim_relations','AB')['payload']['target_id']=='C'
+        assert store.claim_management_qualification('A')['ready']
+    assert store.get_record_state('claims','C')==initial and store.get_record_state('evidence_steps','EC')==ec
+    assert store.claim_management_qualification('C') is None
+
+
+@pytest.mark.parametrize('late_relation',[False,True])
+def test_postimage_check_does_not_reopen_private_reference_owners_but_detects_new_root_edges(chain,late_relation):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.pipeline.cvp_sql_commit import pins
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,_,root=chain
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract=CONTRACT;policy.joint_update_max_targets=10
+    pp=root/'postimage-policy.json';pp.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp))
+    ea=store.get_record_state('evidence_steps','EA')['payload'];ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'postimage-readonly-private-owner',
+        'evidence_steps':[dict(ea,produced_claim_ids=['A','C']),dict(ec,produced_claim_ids=['C','D'])],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis',
+            'occurrences':[{'source_id':'S','anchors':[]}]}],
+        'claim_relations':[dict(store.get_record_state('claim_relations','AB')['payload'],target_id='C')]}))
+    request.permissions=[p for p in request.permissions if p.key in {'claims/A','claim_relations/AB'}]
+    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':True})
+    records=store.read_claim_context([('claims','A')])
+    states={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    # The approved frame includes C's private EC as reference material but
+    # never assigns a further review to its other owner D.
+    own=set(direct.scope(request,states,include_write_context=False)['record_keys']) | {'claims/C','evidence_steps/EC'}
+    protected={k:v for k,v in records.items() if cm.source.key(*k) in own}
+    assert ('claims','D') not in protected
+    if late_relation:
+        store.apply_plan(store.plan_package({'package_id':'unreviewed-root-edge',
+            'claim_relations':[relation('LATE','A','D')]}))
+    with store.connect() as conn,conn.cursor() as cursor:
+        if late_relation:
+            with pytest.raises(ChangeSetConflict,match='omitted a current neighbour'):
+                store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
+        else:
+            store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
+
+
+def test_question_only_update_never_invents_write_impacts_at_reference_private_evidence(chain):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store,request,execution,root=chain
+    ea=store.get_record_state('evidence_steps','EA')['payload'];ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'question-only-private-reference',
+        'source_fragments':[{'fragment_id':'FA','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'}],
+        'evidence_steps':[dict(ea,source_fragment_ids=['FA'],produced_claim_ids=['A','C'],
+            speaker='professor',stance='asserted',support_eligibility='eligible_candidate'),
+            dict(ec,source_fragment_ids=['FA'],produced_claim_ids=['C','D'])],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis','occurrences':[{'source_id':'S','anchors':[]}]}],
+        'questions':[{'question_id':'Q','text':'甲是否是斷言？','source_fragment_ids':['FA'],
+            'answer_state':'unanswered','answer_claim_ids':[]}]}))
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract=CONTRACT;policy.joint_update_max_targets=10;policy.initial_candidate='proposal'
+    pp=root/'question-private-policy.json';pp.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp))
+    request.permissions=[cm.source.Permission(collection='questions',object_id='Q',fields=['answer_state','answer_claim_ids'])]
+    authorize(request,{'required_maintenance_keys':['questions/Q'],'include_evidence_owner_context':True,
+        'evidence_owner_context_keys':['claims/C']})
+    before={k:store.get_record_state(*cm.source.split_key(k)) for k in ['claims/A','claims/C','claims/D','evidence_steps/EA','evidence_steps/EC']}
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def proposal(packet):
+        assert 'evidence_steps/EC' in packet['before'] and 'claims/D' not in packet['before']
+        assert packet['claim_scope']['content_claim_keys']==['claims/A']
+        return {'changes':[{'record_key':'questions/Q','fields_json':json.dumps({'answer_state':'answered','answer_claim_ids':['A']}),
+            'reason':'link the existing direct answer','citations':[cite]}],'creations':[],'retirements':[],
+            'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=proposal,opus=pass_review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.claim_management_qualification('A')['ready']
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['A']
+    assert all(store.get_record_state(*cm.source.split_key(k))==v for k,v in before.items())
+
+
+@pytest.mark.parametrize('input_drift',[False,True])
+def test_accepted_review_before_package_plan_recovers_without_repeating_calls(chain,monkeypatch,input_drift):
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,execution,root=chain
+    bind(request,root,proposal=True)
+    def proposal(packet):
+        return {'changes':[{'record_key':'claims/A','fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),
+            'reason':'synthetic source correction','citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}],
+            'findings':[],'finding_resolutions':[]}
+    real_plan=store.plan_package
+    def stop_before_plan(package,**kwargs):
+        if kwargs.get('source_kind')==cm.VERSION:raise ValueError('synthetic package validator defect after accepted Opus')
+        return real_plan(package,**kwargs)
+    monkeypatch.setattr(store,'plan_package',stop_before_plan)
+    ports=SyntheticPorts(store,root,proposal=proposal,opus=yes)
+    first=execute_claim_management(store,request,root=execution,ports=ports)
+    assert first['status']=='paused',first
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
+    saved=store.get_cvp_group(rid);assert saved['checkpoint']=='prepared' and saved['opus_approved']
+    assert set(saved['stage_results'])=={'candidate','opus'} and not saved.get('change_set_ids')
+    slots=deepcopy(parent['call_reservations']);raw=(execution/rid/'opus.raw.json').read_bytes()
+    monkeypatch.setattr(store,'plan_package',real_plan)
+    if input_drift:
+        row=deepcopy(store.get_record_state('claims','A')['payload']);row['statement']='external semantic change'
+        store.apply_plan(store.plan_package({'package_id':'changed-before-accepted-review-recovery','claims':[row]}))
+    direction=root/'accepted-preplan-recovery.json';direction.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'repair exact package-validator checkpoint with original accepted answers',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}})}))
+    if input_drift:
+        with pytest.raises((ValueError,ChangeSetConflict)):recover_returned_review(store,rid,authorization=binding(direction))
+        assert store.get_cvp_group(rid)==saved
+        return
+    recover_returned_review(store,rid,authorization=binding(direction))
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus'] and (execution/rid/'opus.raw.json').read_bytes()==raw
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert store.claim_management_qualification('A')['ready']
+
+
+def test_package_authority_keeps_transaction_snapshot_while_model_stays_one_hop(chain, monkeypatch):
+    # A pruned runtime frame is not a second, smaller authority snapshot.
+    # Historical/unused grants can be validated from the full pinned snapshot
+    # without sending neighbours' private evidence back to the model.
+    from backend.pipeline import claim_joint_update as joint
+    store, request, output, root = chain
+    admissions = []
+    original = joint.admission_error
+    def observe(request, policy, before, goal):
+        admissions.append(deepcopy(before))
+        return original(request, policy, before, goal)
+    monkeypatch.setattr(joint, 'admission_error', observe)
+    def opus(packet):
+        assert 'evidence_steps/EB' not in packet['before']
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert len(admissions) >= 2
+    assert 'evidence_steps/EB' in admissions[0]
+    assert all(frame == admissions[0] for frame in admissions)
+    assert ports.calls == ['opus']

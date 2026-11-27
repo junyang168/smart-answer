@@ -3797,6 +3797,7 @@ def validate_route_reconsideration(
     route_proposal_sha256: str,
     route_review_sha256: str,
     whole_cvp: bool = False,
+    allow_unchanged_escalation: bool = False,
 ) -> dict[str, Any]:
     """Confine the one Route correction to reviewer-flagged objects."""
 
@@ -3838,7 +3839,7 @@ def validate_route_reconsideration(
             for item in reconsideration.finding_dispositions
             if item.disposition != "accepted"
         )
-        if before == after:
+        if before == after and not (allow_unchanged_escalation and escalations):
             findings.append("whole-CVP correction made no substantive change")
         if findings:
             raise BatchResolutionError(findings)

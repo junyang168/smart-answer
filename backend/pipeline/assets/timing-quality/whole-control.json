@@ -1,0 +1,20 @@
+{
+  "reference": "所以從神的國度來看，是什麼呢？就是亞當夏娃拒絕神做他們的王，所以魔鬼來篡位，魔鬼來管理我們這個世界，來管理我們人類。",
+  "candidates": [
+    {
+      "id": "c0",
+      "file": "whole-control-0.wav",
+      "start_ms": 197730,
+      "end_ms": 215440,
+      "audio_sha256": "3571a079103ea45de5818e8b041b68d00d9eb712ecb54fc9d800724445f8af05"
+    },
+    {
+      "id": "c1",
+      "file": "whole-control-1.wav",
+      "start_ms": 200560,
+      "end_ms": 215440,
+      "audio_sha256": "dc1d911b87a5bd0f747b1f5752cdfc1fb8f1c4b6bdb06f3fd0a423bab73abd04"
+    }
+  ],
+  "source_sha256": "6b8fac4745bc7e0eccef48d2ea8882ab32f349e9ae11a07d855822c92bdf066b"
+}

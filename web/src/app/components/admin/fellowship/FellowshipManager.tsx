@@ -125,7 +125,7 @@ const toDisplayDate = (value: string) => {
     .padStart(2, "0")}/${year.toString().padStart(4, "0")}`;
 };
 
-const isFridayIsoDate = (value: string) => {
+const isThursdayIsoDate = (value: string) => {
   if (!value) {
     return false;
   }
@@ -137,7 +137,7 @@ const isFridayIsoDate = (value: string) => {
     return false;
   }
   const selectedDate = new Date(year, month - 1, day);
-  return !Number.isNaN(selectedDate.getTime()) && selectedDate.getDay() === 5;
+  return !Number.isNaN(selectedDate.getTime()) && selectedDate.getDay() === 4;
 };
 
 function looksLikeHtmlDocument(value: string): boolean {
@@ -377,8 +377,8 @@ export function FellowshipManager() {
     const value = event.target.value;
     let warning = "";
 
-    if (value && !isFridayIsoDate(value)) {
-      warning = "聚會日期須為週五";
+    if (value && value !== toIsoDate(editingDate ?? "") && !isThursdayIsoDate(value)) {
+      warning = "新聚會日期須為週四";
     }
 
     event.target.setCustomValidity(warning);
@@ -632,8 +632,8 @@ export function FellowshipManager() {
       return;
     }
     const trimmedDate = form.date.trim();
-    if (!isFridayIsoDate(trimmedDate)) {
-      setError("請選擇有效的週五日期");
+    if (trimmedDate !== toIsoDate(editingDate ?? "") && !isThursdayIsoDate(trimmedDate)) {
+      setError("請選擇有效的週四日期");
       setSaving(false);
       return;
     }
@@ -1022,7 +1022,7 @@ export function FellowshipManager() {
         <header>
           <h1 className="text-2xl font-semibold text-gray-900">團契資料管理</h1>
           <p className="mt-1 text-sm text-gray-600">
-            維護雙週團契日期、主題、主領與系列資訊，並為既有團契準備通知 email。
+            維護雙週週四晚 8:00（美國中部時間）線上查經的日期、主題、主領與系列資訊，並為既有團契準備通知 email。
           </p>
         </header>
 

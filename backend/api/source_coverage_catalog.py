@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from backend.api.sermon_search.bible_refs import ALIAS_TO_BOOK, normalize_ref
+from backend.pipeline.claim_flash_completion import completion_status, sermon_completion_status
 
 
 def _catalog_rows() -> list[dict[str, Any]]:
@@ -78,6 +79,8 @@ def build(sources: list[dict[str, Any]], data_base_path: Path) -> dict[str, Any]
         if source.get("transcript_id") and source.get("source_type") != "notes_manuscript"
     }
 
+    from backend.api.wang_operations import _notes_rows
+
     entries: list[dict[str, Any]] = []
     for row in _catalog_rows():
         passage = row.get("catalog_primary_passage") or {}
@@ -99,19 +102,25 @@ def build(sources: list[dict[str, Any]], data_base_path: Path) -> dict[str, Any]
                 "organization_mode_label": row.get("organization_mode_label"),
                 "deliver_date": row.get("deliver_date"),
                 "source_id": extracted_by_transcript.get(item),
+                "argument_update_status": sermon_completion_status(data_base_path, item),
             }
         )
 
-    for source in sources:
-        if source.get("source_type") != "notes_manuscript":
-            continue
-        placement = _notes_placement(source, data_base_path)
+    extracted_notes = {
+        source.get("project_id") or source["source_id"]: source for source in sources
+        if source.get("source_type") == "notes_manuscript"
+    }
+    # Preserve extracted manuscripts and add catalogued projects awaiting extraction.
+    notes = {row["source_id"]: row for row in _notes_rows(data_base_path)}
+    for project_id in dict.fromkeys([*notes, *extracted_notes]):
+        source = extracted_notes.get(project_id, {})
+        placement = _notes_placement({"project_id": project_id}, data_base_path)
         entries.append(
             {
                 "kind": "notes_manuscript",
                 "item": None,
-                "file": source.get("project_id"),
-                "title": source.get("title") or source["source_id"],
+                "file": project_id,
+                "title": source.get("title") or notes.get(project_id, {}).get("title") or project_id,
                 "book": placement["book"],
                 "chapter": placement["chapter"],
                 "verse_start": None,
@@ -120,7 +129,11 @@ def build(sources: list[dict[str, Any]], data_base_path: Path) -> dict[str, Any]
                 "organization_mode": None,
                 "organization_mode_label": None,
                 "deliver_date": None,
-                "source_id": source["source_id"],
+                "source_id": source.get("source_id"),
+                "argument_update_status": completion_status(
+                    data_base_path, "notes_manuscript", project_id,
+                    lambda: data_base_path / "notes_to_surmon" / project_id / "final.md",
+                ),
             }
         )
 

@@ -1,0 +1,929 @@
+"use client";
+
+import Link from "next/link";
+import { mediaTime, sourceTime } from "./listeningClock";
+import { readBookmark, resumeClip } from "./listeningProgress";
+import { parentPassage, listeningTitle } from "./listeningUnits";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+
+import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
+import ScriptureSlide from "./ScriptureSlide";
+import {
+  citedAt,
+  clock,
+  judgementAt,
+  mediaSrc,
+  originalLanguageAt,
+  verseAt,
+  visible,
+  type Section,
+  type Sermon,
+  type Stretch,
+} from "./OriginalAudio";
+
+/**
+ * 聆聽模式：一個畫面裡看投影片、聽錄音、跟著逐字稿。
+ *
+ * 負責人 2026-11-04：總覽頁適合第一次來的人看這一章講了哪些經文、哪些題目；
+ * 認真聽的人要的是投影片、播放控制（從頭、暫停、前後跳、變速）和逐字稿在同一
+ * 個畫面，能跳上一段、下一段，也能直接挑一段來聽。
+ *
+ * 整章是一條播放清單：各段按經節次序，段內各堂課，每堂課裡要播的幾段錄音。換
+ * 堂課就換錄音檔，聽的人不必知道。
+ */
+
+type Clip = {
+  /** 第幾段經文（`sections` 的位置）。 */
+  section: number;
+  sermon: Sermon;
+  stretch: Stretch;
+  start: number;
+  end: number;
+  /** 這段錄音在整章播放清單裡從第幾秒開始。 */
+  offset: number;
+};
+
+/** 整章的播放清單。灰色片段只在打開開關時進清單。 */
+function playlist(sections: Section[], showLeftOut: boolean): Clip[] {
+  const out: Clip[] = [];
+  let offset = 0;
+  sections.forEach((section, index) => {
+    for (const sermon of section.sermons) {
+      if (!sermon.media_url) continue;
+      for (const stretch of visible(sermon, showLeftOut)) {
+        out.push({ section: index, sermon, stretch, start: stretch.start, end: stretch.end, offset });
+        offset += stretch.end - stretch.start;
+      }
+    }
+  });
+  return out;
+}
+
+/** 「馬太福音 5:13-16」→「5:13-16」：按鈕上書名是多餘的。 */
+const shortLabel = (label: string) => /^\d+\.\d+ /.test(label)
+  ? listeningTitle(label)
+  : label.split(" ").pop() || label;
+
+const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+/** ⏮ 在一段開頭幾秒內再按，就回到整章開頭。 */
+const RESTART_GRACE = 3;
+/** 讀者自己捲逐字稿之後，這麼久不自動捲回目前那一句。 */
+const HANDS_OFF_MS = 6000;
+const SEEK_TOLERANCE = 0.35;
+const SEEK_TIMEOUT_MS = 10000;
+
+type SeekRequest = {
+  src: string;
+  time: number;
+  stretch: Stretch;
+  play: boolean;
+  attempts: number;
+  warming: boolean;
+  deadline: number;
+};
+
+export default function ChapterListener({
+  passage,
+  title,
+  source,
+  backHref,
+  initialSection,
+  initialRecording,
+  initialTime,
+  unitPreview = false,
+}: {
+  passage: string;
+  title: string;
+  source: string;
+  backHref: string;
+  initialSection?: string;
+  initialRecording?: string;
+  initialTime?: number;
+  unitPreview?: boolean;
+}) {
+  const [sections, setSections] = useState<Section[] | null>(null);
+  const [unitNavigation, setUnitNavigation] = useState(unitPreview);
+  const [error, setError] = useState("");
+  const [showLeftOut, setShowLeftOut] = useState(false);
+  // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
+  const [aiVoice, setAiVoice] = useState(false);
+  const [position, setPosition] = useState({ clip: 0, time: 0 });
+  const [playing, setPlaying] = useState(false);
+  const [rate, setRate] = useState(1);
+  const media = useRef<HTMLAudioElement | null>(null);
+  const [seekError, setSeekError] = useState("");
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const scrub = useRef<{ pointer: number; start: number; length: number } | null>(null);
+  const pending = useRef<SeekRequest | null>(null);
+  const seekTimer = useRef<number | undefined>(undefined);
+  const bookmarkVersion = useRef("");
+  const lastBookmarkSecond = useRef(-1);
+  const bookmarkKey = `wang-listening:${passage}:${source}:${unitPreview ? "units" : "chapter"}`;
+
+  useEffect(() => () => window.clearTimeout(seekTimer.current), []);
+
+  const clips = useMemo(() => (sections ? playlist(sections, showLeftOut) : []), [sections, showLeftOut]);
+  const clip: Clip | undefined = clips[position.clip];
+
+  useEffect(() => {
+    // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
+    // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
+    let alive = true;
+    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}${unitPreview ? "&units=true" : ""}`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then(async (data) => {
+        if (!alive) return;
+        const explicitPoint = initialTime !== undefined && Boolean(initialRecording);
+        const prepare = (payload: typeof data) => {
+          const loaded: Section[] = payload.sections ?? [];
+          const list = playlist(loaded, false);
+          const requestedSection = payload.section_aliases?.[initialSection ?? ""] ?? initialSection;
+          const requestedSource = payload.source_aliases?.[initialRecording ?? ""] ?? initialRecording;
+          const wanted = Math.max(0, loaded.findIndex(s => s.passage === requestedSection || parentPassage(s) === requestedSection));
+          const first = Math.max(0, list.findIndex(item => item.section === wanted));
+          const mode = Boolean(unitPreview || payload.unit_navigation || payload.selection_preview);
+          let saved = null;
+          try { saved = mode ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
+          const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
+            parent: parentPassage(loaded[item.section]), source: item.sermon.source_id,
+            start: item.start, end: item.end, excluded: item.sermon.excluded_audio, audioRevision: item.sermon.audio_revision})), saved, payload.resume_version ?? "",
+            {section: requestedSection, source: requestedSource, time: initialTime});
+          return {loaded, list, first, mode, resumed};
+        };
+        let ready = prepare(data);
+        // Historic source links outside the rebuilt scope retain their exact old recording.
+        if (!unitPreview && data.unit_navigation && explicitPoint && !ready.resumed) {
+          const response = await fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}&legacy=true`, {cache:"no-store"});
+          if (!response.ok) throw new Error("無法定位這段原聲。");
+          data = await response.json();
+          ready = prepare(data);
+        }
+        if (!alive) return;
+        if (explicitPoint && !ready.resumed) throw new Error("無法定位這段原聲。");
+        bookmarkVersion.current = data.resume_version ?? "";
+        setAiVoice(Boolean(data.ai_voice));
+        setUnitNavigation(ready.mode);
+        const index = ready.resumed?.index ?? ready.first;
+        setSections(ready.loaded);
+        if (ready.list[index]) requestSeek(ready.list[index], index,
+          ready.resumed?.time ?? ready.list[index].start, false);
+      })
+      .catch(() => alive && setError("讀不到這一章的錄音。"));
+    return () => {
+      alive = false;
+    };
+    // 只在進來時讀一次；換段由頁面自己處理，不重新讀。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [passage, unitPreview]);
+
+  // ---- 跳轉 ----------------------------------------------------------------
+
+  function requestSeek(target: Clip, index: number, time: number, play?: boolean) {
+    const url = target.sermon.media_url;
+    if (!url) return;
+    const element = media.current;
+    window.clearTimeout(seekTimer.current);
+    const wanted: SeekRequest = {
+      src: new URL(mediaSrc(url), document.baseURI).href,
+      time: mediaTime(target.stretch, time),
+      stretch: target.stretch,
+      play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
+      attempts: 0,
+      warming: false,
+      deadline: 0,
+    };
+    pending.current = wanted;
+    setSeekError("");
+    setPosition({ clip: index, time });
+    setPlaying(wanted.play);
+    if (element) {
+      element.pause();
+      element.muted = false;
+    }
+    applySeek();
+  }
+
+  function playMedia(element: HTMLAudioElement) {
+    void element.play().catch((error) => {
+      if (error.name === "NotAllowedError" && !pending.current) {
+        setPlaying(false);
+        setSeekError("請按播放繼續聆聽。");
+      }
+    });
+  }
+
+  function applySeek() {
+    const wanted = pending.current;
+    if (!wanted) return;
+    const element = media.current;
+    // iOS may enter a stalled seek if currentTime is assigned while only metadata is loaded.
+    const ready = element && element.currentSrc === wanted.src && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    const tolerance = wanted.stretch.media_start === undefined ? SEEK_TOLERANCE : 0.05;
+    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= tolerance) {
+      pending.current = null;
+      window.clearTimeout(seekTimer.current);
+      setPosition((position) => ({ ...position, time: Math.min(wanted.stretch.end, Math.max(wanted.stretch.start, sourceTime(wanted.stretch, element.currentTime))) }));
+      setSeekError("");
+      if (!wanted.play) element.pause();
+      element.muted = false;
+      if (wanted.play && element.paused) playMedia(element);
+      return;
+    }
+    if (wanted.deadline === 0) {
+      if (!ready && !wanted.play) return;
+      wanted.deadline = Date.now() + SEEK_TIMEOUT_MS;
+    }
+    if (Date.now() >= wanted.deadline) {
+      // Keep the target available for retry and leave playback paused at an unconfirmed position.
+      wanted.play = false;
+      if (element) {
+        element.pause();
+        element.muted = false;
+      }
+      window.clearTimeout(seekTimer.current);
+      setPlaying(false);
+      setSeekError("錄音未能跳到指定位置，請再試一次。");
+      return;
+    }
+    // Some mobile browsers require play() before they will load or honor a seek.
+    if (element?.src === wanted.src && wanted.play && !wanted.warming) {
+      wanted.warming = true;
+      element.muted = true;
+      playMedia(element);
+    }
+    const ranges = ready ? element.seekable : null;
+    const canSeek = ranges && Array.from({ length: ranges.length }, (_, i) => i)
+      .some((i) => ranges.start(i) <= wanted.time && wanted.time <= ranges.end(i));
+    if (ready && canSeek && !element.seeking && wanted.attempts < 2) {
+      wanted.attempts += 1;
+      try {
+        element.currentTime = wanted.time;
+      } catch {
+        // The retry timer can run after the range loads.
+      }
+    }
+    window.clearTimeout(seekTimer.current);
+    seekTimer.current = window.setTimeout(applySeek, 800);
+  }
+
+  function seekTo(index: number, time: number, play?: boolean) {
+    const target = clips[index];
+    if (target) requestSeek(target, index, time, play);
+  }
+
+  /** 跳到整章播放清單的第幾秒。 */
+  function seekChapter(seconds: number, play?: boolean) {
+    if (clips.length === 0) return;
+    const total = clips[clips.length - 1].offset + clips[clips.length - 1].end - clips[clips.length - 1].start;
+    const x = Math.min(Math.max(0, seconds), Math.max(0, total - 0.5));
+    let index = clips.findIndex((item) => x < item.offset + item.end - item.start);
+    if (index < 0) index = clips.length - 1;
+    seekTo(index, clips[index].start + (x - clips[index].offset), play);
+  }
+
+  function firstClipOf(section: number) {
+    return clips.findIndex((item) => item.section === section);
+  }
+
+  function goSection(section: number) {
+    const index = firstClipOf(section);
+    if (index >= 0) seekTo(index, clips[index].start, true);
+  }
+
+  // ---- 播放器事件 ----------------------------------------------------------
+
+  function onLoaded() {
+    const element = media.current;
+    if (!element) return;
+    element.defaultPlaybackRate = rate;
+    element.playbackRate = rate;
+    applySeek();
+  }
+
+  function advance() {
+    const element = media.current;
+    const next = clips[position.clip + 1];
+    if (!element || !clip || pending.current || element.currentSrc !== element.src) return;
+    if (!next) {
+      element.pause();
+      return;
+    }
+    // 同一個檔、緊接著的下一段，不必跳——設一次 currentTime 就會頓一下。
+    const nextStart = mediaTime(next.stretch, next.start);
+    const inNext = next.stretch.media_start === undefined
+      ? Math.abs(nextStart - element.currentTime) <= 1
+      : nextStart <= element.currentTime && element.currentTime <= nextStart + 1 && element.currentTime < mediaTime(next.stretch, next.end);
+    if (next.sermon.media_url === clip.sermon.media_url && inNext) {
+      setPosition({ clip: position.clip + 1, time: sourceTime(next.stretch, element.currentTime) });
+    } else {
+      seekTo(position.clip + 1, next.start, true);
+    }
+  }
+
+  function onTimeUpdate() {
+    const element = media.current;
+    if (!element || !clip) return;
+    // Queued events from the previous position must not advance the playlist.
+    if (pending.current || element.seeking) return;
+    if (element.currentSrc !== element.src) return;
+    const time = sourceTime(clip.stretch, element.currentTime);
+    if (time >= clip.end) {
+      advance();
+      return;
+    }
+    if (time < clip.start && clip.stretch.media_start !== undefined) {
+      seekTo(position.clip, clip.start);
+      return;
+    }
+    setPosition((current) => ({ ...current, time }));
+    if (unitNavigation && bookmarkVersion.current && Math.floor(time) !== lastBookmarkSecond.current) {
+      lastBookmarkSecond.current = Math.floor(time);
+      try { window.localStorage.setItem(bookmarkKey, JSON.stringify({version: bookmarkVersion.current,
+        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time, audioRevision: clip.sermon.audio_revision})); }
+      catch { /* Playback remains usable when storage is unavailable. */ }
+    }
+  }
+
+  function toggle() {
+    const element = media.current;
+    if (!element) return;
+    const wanted = pending.current;
+    if (wanted) {
+      if (wanted.deadline > 0 && Date.now() >= wanted.deadline && clip) {
+        requestSeek(clip, position.clip, sourceTime(wanted.stretch, wanted.time), true);
+      } else {
+        wanted.play = !wanted.play;
+        setPlaying(wanted.play);
+        if (!wanted.play) {
+          element.pause();
+          wanted.warming = false;
+        }
+        applySeek();
+      }
+      return;
+    }
+    if (element.paused) {
+      setSeekError("");
+      playMedia(element);
+    } else element.pause();
+  }
+
+  function changeRate(value: number) {
+    setRate(value);
+    if (media.current) {
+      media.current.defaultPlaybackRate = value;
+      media.current.playbackRate = value;
+    }
+  }
+
+  /** 開關灰色片段：清單變了，按此刻的位置重新對上。 */
+  function switchLeftOut(show: boolean) {
+    if (!sections || !clip) {
+      setShowLeftOut(show);
+      return;
+    }
+    const list = playlist(sections, show);
+    const time = position.time;
+    let index = list.findIndex(
+      (item) => item.sermon === clip.sermon && item.start <= time && time < item.end,
+    );
+    if (index < 0) {
+      // 收起時正落在灰色片段裡：跳到同一行後面第一段保留的，沒有就往後找。
+      index = list.findIndex((item) => item.sermon === clip.sermon && item.start > time);
+      if (index < 0) index = list.findIndex((item) => item.offset >= clip.offset);
+      if (index < 0) index = list.length - 1;
+    }
+    setShowLeftOut(show);
+    const target = list[index];
+    if (!target) return;
+    const inside = target.start <= time && time < target.end;
+    requestSeek(target, index, inside ? time : target.start);
+  }
+
+  // ---- 此刻在哪 ------------------------------------------------------------
+
+  const section = clip?.section ?? 0;
+  const sectionClips = clips.filter((item) => item.section === section);
+  const sectionStart = sectionClips[0]?.offset ?? 0;
+  const sectionLength = sectionClips.reduce((sum, item) => sum + item.end - item.start, 0);
+  const chapterTime = clip ? clip.offset + (position.time - clip.start) : 0;
+  const sectionTime = Math.max(0, chapterTime - sectionStart);
+  const displayedTime = scrubTime ?? chapterTime;
+  const displayedSectionTime = Math.min(sectionLength, Math.max(0, displayedTime - sectionStart));
+  const sectionsWithAudio = (sections ?? [])
+    .map((item, index) => ({ item, index }))
+    .filter(({ index }) => clips.some((c) => c.section === index));
+  const previousSection = [...sectionsWithAudio].reverse().find(({ index }) => index < section);
+  const nextSection = sectionsWithAudio.find(({ index }) => index > section);
+
+  function pointerTime(event: PointerEvent<HTMLDivElement>, range: { start: number; length: number }) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    return range.start + fraction * range.length;
+  }
+
+  function finishScrub(event: PointerEvent<HTMLDivElement>, seek: boolean) {
+    const range = scrub.current;
+    if (!range || range.pointer !== event.pointerId) return;
+    scrub.current = null;
+    setScrubTime(null);
+    if (seek) {
+      seekChapter(Math.min(pointerTime(event, range), range.start + Math.max(0, range.length - 0.05)));
+    }
+  }
+
+  function restart() {
+    if (sectionTime > RESTART_GRACE) seekChapter(sectionStart, true);
+    else seekChapter(0, true);
+  }
+
+  // ---- 鍵盤 ----------------------------------------------------------------
+
+  const keys = useRef<(event: KeyboardEvent) => void>(() => {});
+  keys.current = (event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      toggle();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      seekChapter(chapterTime - 15);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      seekChapter(chapterTime + 15);
+    } else if (event.key === "[" && previousSection) {
+      goSection(previousSection.index);
+    } else if (event.key === "]" && nextSection) {
+      goSection(nextSection.index);
+    }
+  };
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keys.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  // 網址跟著段走：複製下來的連結打開就是這一段。
+  const sectionPassage = sections?.[section]?.passage;
+  useEffect(() => {
+    if (!sectionPassage) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("section") === sectionPassage) return;
+    url.searchParams.set("section", sectionPassage);
+    url.searchParams.delete("recording");
+    url.searchParams.delete("at");
+    window.history.replaceState(window.history.state, "", url);
+  }, [sectionPassage]);
+
+  // ---- 逐字稿跟著走 --------------------------------------------------------
+
+  const box = useRef<HTMLDivElement | null>(null);
+  const currentLine = useRef<HTMLButtonElement | null>(null);
+  const handsOff = useRef(0);
+  const [following, setFollowing] = useState(true);
+
+  const lines = sectionClips.flatMap((item) => {
+    const index = clips.indexOf(item);
+    return (item.sermon.transcript ?? [])
+      .filter((line) => line.at >= item.start && line.at < item.end)
+      .map((line) => ({ ...line, clip: index }));
+  });
+  let lineIndex = -1;
+  if (clip) {
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].clip === position.clip && lines[i].at <= position.time + 0.25) lineIndex = i;
+      else if (lineIndex >= 0) break;
+    }
+  }
+  const lineKey = lineIndex >= 0 ? `${lines[lineIndex].clip}-${lines[lineIndex].at}` : "";
+
+  function scrollToCurrent(smooth: boolean) {
+    const container = box.current;
+    const line = currentLine.current;
+    if (!container || !line) return;
+    const target = line.offsetTop - (container.clientHeight - line.offsetHeight) / 2;
+    const lineHeight = parseFloat(getComputedStyle(line).lineHeight);
+    // Align desktop follow-scrolling with text rows so neither edge exposes an extra partial row.
+    const top = window.matchMedia("(min-width: 1024px)").matches
+      ? Math.round(target / lineHeight) * lineHeight
+      : target;
+    container.scrollTo({
+      top,
+      behavior: smooth ? "smooth" : "auto",
+    });
+  }
+
+  useEffect(() => {
+    if (Date.now() - handsOff.current < HANDS_OFF_MS) return;
+    setFollowing(true);
+    scrollToCurrent(true);
+  }, [lineKey]);
+
+  function userScrolled() {
+    handsOff.current = Date.now();
+    setFollowing(false);
+  }
+
+  const unitList = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const list = unitList.current;
+    const current = list?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!list?.clientHeight || !current) return;
+    const listBounds = list.getBoundingClientRect();
+    const bounds = current.getBoundingClientRect();
+    if (bounds.top < listBounds.top || bounds.bottom > listBounds.bottom) {
+      list.scrollTo({ top: list.scrollTop + bounds.top - listBounds.top - 12 });
+    }
+  }, [section, sections]);
+
+  // ---- 畫面 ----------------------------------------------------------------
+
+  const frame = "fixed inset-0 z-[60] flex flex-col bg-stone-100 text-stone-900 lg:grid lg:grid-cols-[19rem_minmax(0,1fr)] lg:grid-rows-[auto_minmax(0,1fr)_auto]";
+  if (error || !sections) {
+    return (
+      <div className={frame}>
+        <p className={`m-auto ${error ? "text-rose-800" : "text-stone-600"}`} role="status">
+          {error || "正在讀取…"}
+        </p>
+      </div>
+    );
+  }
+
+  const time = position.time;
+  const leftOutPart = clip?.stretch.left_out
+    ? clip.stretch.parts?.find((part) => part.start <= time && time < part.end)?.reason ?? clip.stretch.reasons?.[0]
+    : null;
+  const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
+  const slides = clip?.sermon.slides ?? [];
+  const clipEnd = clip?.end ?? time;
+  const localSlides = clip?.stretch.media_start === undefined ? slides : slides.filter(
+    (item) => clip.start <= item.at && item.at < clipEnd,
+  );
+  const slide = [...localSlides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? localSlides[0];
+  const diagramVisible = Boolean(!table && !leftOutPart && slide?.diagram &&
+    (clip?.start ?? time) <= slide.diagram.at && slide.diagram.at < clipEnd && slide.diagram.at <= time);
+  const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
+  const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
+  const sectionSeconds = (index: number) =>
+    clips.filter((item) => item.section === index).reduce((sum, item) => sum + item.end - item.start, 0);
+  const subUnitParts = sections[section]?.sub_unit_id ? sectionsWithAudio.filter(({item}) => item.unit_id === sections[section]?.unit_id && item.sub_unit_id === sections[section]?.sub_unit_id) : [];
+
+  const button =
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3 lg:px-1";
+
+  return (
+    <div className={frame}>
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-stone-200 bg-white px-4 py-2 sm:px-6 lg:col-span-2 lg:min-h-16">
+        <Link href={backHref} className="text-sm font-semibold text-amber-800 hover:text-amber-900">
+          <span aria-hidden="true">←</span> 本章總覽
+        </Link>
+        <h1 className="font-serif text-lg font-bold">
+          {title}
+          <span className={`ml-2 font-sans text-sm font-normal text-stone-500 ${unitNavigation ? "[@media(max-width:389px)_and_(max-height:599px)]:hidden" : ""}`}>{source}</span>
+          {aiVoice && (
+            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
+              AI 朗讀
+            </span>
+          )}
+        </h1>
+        {unitNavigation && <p className="w-full text-sm font-semibold text-stone-700 lg:hidden">
+          {listeningTitle(sections[section]?.unit_label)}
+          {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">本小節{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
+        </p>}
+        {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
+        {!(unitNavigation && subUnitParts.length > 1) && <span className="hidden max-w-full truncate text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:block">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
+        <label className="flex items-center gap-2 text-sm lg:hidden [@media(max-width:389px)_and_(max-height:599px)]:hidden">
+          <span className="text-stone-600">{unitNavigation ? "單元" : "段落"}</span>
+          <select
+            value={section}
+            onChange={(event) => goSection(Number(event.target.value))}
+            className="min-h-11 max-w-[75vw] rounded-lg border border-stone-300 bg-white px-3 font-semibold sm:max-w-[40rem]"
+          >
+            {unitNavigation ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
+              <optgroup key={unit} label={listeningTitle(sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label)}>
+                {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
+                  <option key={item.passage} value={index}>{unitNavigation ? listeningTitle(item.label) : item.label} · {minutes(sectionSeconds(index))}</option>
+                ))}
+              </optgroup>
+            )) : sectionsWithAudio.map(({ item, index }) => (
+              <option key={item.passage} value={index}>
+                {unitNavigation ? listeningTitle(item.label) : item.label} · {minutes(sectionSeconds(index))}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasLeftOut && (
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto [@media(max-width:389px)_and_(max-height:599px)]:hidden">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={showLeftOut}
+              onChange={(event) => switchLeftOut(event.target.checked)}
+              className="h-4 w-4 accent-stone-500"
+            />
+            {aiVoice ? "顯示生活應用與附錄（灰色）" : "顯示其餘部分（灰色）"}
+          </label>
+        )}
+      </header>
+
+      <nav ref={unitList} aria-label="播放單元" className="hidden min-h-0 overflow-y-auto border-r border-stone-200 bg-stone-50 px-4 py-5 lg:col-start-1 lg:row-start-2 lg:block">
+        {unitNavigation ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => {
+          const parts = sectionsWithAudio.filter(({ item }) => item.unit_id === unit);
+          const active = parts.some(({ index }) => index === section);
+          return (
+            <details key={unit} open={active} className="mb-5">
+              <summary className="cursor-pointer rounded px-2 py-2 text-base font-semibold leading-6 text-stone-800">
+                {listeningTitle(parts[0].item.unit_label)}
+              </summary>
+              <ol className="ml-2 space-y-1 border-l border-stone-200 pl-2">
+                {parts.map(({ item, index }) => (
+                  <li key={item.passage}>
+                    <button type="button" onClick={() => goSection(index)} aria-current={index === section ? "true" : undefined}
+                      className={`w-full rounded-lg px-3 py-3 text-left text-base leading-6 ${index === section ? "bg-amber-100/70 font-semibold text-amber-950" : "text-stone-600 hover:bg-stone-200/60"}`}>
+                      {listeningTitle(item.label)}
+                      <span className="mt-1 block text-xs font-normal text-stone-500">{minutes(sectionSeconds(index))}{item.continued ? " · 續" : ""}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          );
+        }) : (
+          <ol className="space-y-1">
+            {sectionsWithAudio.map(({ item, index }) => (
+              <li key={item.passage}>
+                <button type="button" onClick={() => goSection(index)} aria-current={index === section ? "true" : undefined}
+                  className={`w-full rounded-lg px-3 py-3 text-left text-base leading-6 ${index === section ? "bg-amber-100/70 font-semibold text-amber-950" : "text-stone-600 hover:bg-stone-200/60"}`}>
+                  {item.label}<span className="mt-1 block text-xs font-normal text-stone-500">{minutes(sectionSeconds(index))}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </nav>
+
+      <div data-listening-content className="grid min-h-0 min-w-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3 lg:col-start-2 lg:row-start-2 lg:row-span-2 lg:gap-4 lg:p-5">
+        <div
+          data-slide-scroll
+          onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
+          onTouchMove={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
+          className={["min-h-0 overflow-auto rounded-xl", !table && slide?.diagram ? "[container-type:size]" : ""].join(" ")}
+        >
+          {table ? (
+            <section className="min-h-full overflow-auto rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
+              {slide && <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>}
+              <table className="mt-4 w-full border-collapse text-left text-[0.95rem] leading-relaxed">
+                <thead>
+                  <tr>
+                    {table.rows[0].map((cell, index) => (
+                      <th key={index} className="border-b border-slate-600 px-3 py-2 font-semibold text-amber-200">
+                        {cell}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.slice(1).map((row, index) => (
+                    <tr key={index} className="border-b border-slate-800">
+                      {row.map((cell, column) => (
+                        <td key={column} className="px-3 py-2 align-top">
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : leftOutPart ? (
+            <div className="flex h-full flex-col justify-center rounded-xl border border-dashed border-stone-300 bg-stone-200/60 px-6 py-6 text-stone-600">
+              <p className="text-xs font-bold">{aiVoice ? "預設收起的部分" : "不屬本章釋經 · 編輯整理"}</p>
+              <p className="mt-2 leading-7">{leftOutPart}</p>
+            </div>
+          ) : slide ? (
+            <ChapterSlide
+              slide={slide}
+              seconds={time}
+              clipStart={clip?.start ?? time}
+              clipEnd={clipEnd}
+              className="min-h-full"
+              sentence={lineIndex >= 0 ? lines[lineIndex].text : undefined}
+            />
+          ) : clip ? (
+            <ScriptureSlide
+              slug={verseAt(clip.sermon, time, sections[section].passage)}
+              title={judgementAt(clip.sermon, time)?.judgement ?? ""}
+              points={judgementAt(clip.sermon, time)?.points ?? []}
+              application={judgementAt(clip.sermon, time)?.application ?? false}
+              originalLanguage={originalLanguageAt(clip.sermon, time)}
+              cited={citedAt(clip.sermon, time, sections[section].passage)}
+            />
+          ) : null}
+        </div>
+
+        {/* 講稿保持可捲動，筆電高度依四行文字計算，手機維持三行高度。 */}
+        <div className={`relative h-[8.25rem] lg:h-[calc(4lh+2px)] lg:text-lg lg:leading-7 ${diagramVisible
+          ? "[@media(max-width:389px)]:h-12" : ""}`}>
+          <div
+            ref={box}
+            aria-label="講稿"
+            role="region"
+            tabIndex={0}
+            onWheel={userScrolled}
+            onTouchMove={userScrolled}
+            className="relative h-full overflow-auto rounded-xl border border-stone-200 bg-white px-4 py-3 sm:px-5 lg:py-0"
+          >
+            {lines.length === 0 && <p className="text-sm text-stone-500">這一段沒有逐字稿。</p>}
+            {lines.map((line, index) => {
+              const startsClip = index === 0 || lines[index - 1].clip !== line.clip;
+              const here = index === lineIndex;
+              const owner = clips[line.clip];
+              return (
+                <div key={`${line.clip}-${line.at}`}>
+                  {/* 換一段錄音（他岔開去講了別的、或換一堂課）只畫一條細線：聽的人
+                      關心的是經節，不是第幾堂課（負責人 2026-11-04）。 */}
+                  {startsClip && index > 0 && <hr className="my-3 border-dashed border-stone-200" />}
+                  {startsClip && owner.stretch.left_out && (
+                    <p className="mb-1 text-[0.7rem] text-stone-400">{aiVoice ? "預設收起的部分" : "不屬本章釋經"}</p>
+                  )}
+                  <button
+                    ref={here ? currentLine : undefined}
+                    type="button"
+                    onClick={() => seekTo(line.clip, line.at, true)}
+                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:py-0 lg:text-lg lg:leading-7 ${
+                      here
+                        ? "bg-amber-100 text-stone-950"
+                        : line.left_out
+                          ? "text-stone-400 hover:bg-stone-50"
+                          : "text-stone-500 hover:bg-stone-50"
+                    }`}
+                  >
+                    {line.text}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {!following && lineIndex >= 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                handsOff.current = 0;
+                setFollowing(true);
+                scrollToCurrent(true);
+              }}
+              className="absolute bottom-3 right-3 rounded-full bg-stone-900 px-4 py-2 text-sm text-white shadow-lg"
+            >
+              回到目前這一句
+            </button>
+          )}
+        </div>
+      </div>
+
+      <footer aria-label="播放器" className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6 lg:col-start-1 lg:row-start-3 lg:border-r lg:px-3 lg:py-4">
+        {seekError && <p role="status" className="text-center text-xs text-rose-800">{seekError}</p>}
+        <div className="flex items-center gap-3 font-mono text-xs text-stone-500">
+          <span className="w-12 text-right">{clock(displayedSectionTime)}</span>
+          <div
+            role="slider"
+            aria-label="本段進度"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(sectionLength)}
+            aria-valuenow={Math.round(displayedSectionTime)}
+            aria-valuetext={`${clock(displayedSectionTime)} / ${clock(sectionLength)}`}
+            aria-disabled={!sectionLength || undefined}
+            tabIndex={sectionLength ? 0 : -1}
+            onPointerDown={(event) => {
+              if (!event.isPrimary || event.button !== 0 || !sectionLength) return;
+              const range = { pointer: event.pointerId, start: sectionStart, length: sectionLength };
+              scrub.current = range;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setScrubTime(pointerTime(event, range));
+            }}
+            onPointerMove={(event) => {
+              const range = scrub.current;
+              if (range?.pointer === event.pointerId) setScrubTime(pointerTime(event, range));
+            }}
+            onPointerUp={(event) => finishScrub(event, true)}
+            onPointerCancel={(event) => finishScrub(event, false)}
+            onLostPointerCapture={(event) => finishScrub(event, false)}
+            onKeyDown={(event) => {
+              const end = Math.max(0, sectionLength - 0.05);
+              const target = {
+                ArrowLeft: sectionTime - 15, ArrowDown: sectionTime - 15,
+                ArrowRight: sectionTime + 15, ArrowUp: sectionTime + 15,
+                Home: 0, End: end,
+              }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              seekChapter(sectionStart + Math.max(0, Math.min(end, target)));
+            }}
+            className="relative flex h-11 flex-1 touch-none cursor-pointer select-none items-center gap-[3px]"
+          >
+            {/* 一段錄音一截：換堂課、或中間跳過他岔開去講的地方，看得見斷口。 */}
+            {sectionClips.map((item) => {
+              const length = item.end - item.start;
+              const done = Math.min(1, Math.max(0, (displayedTime - item.offset) / length));
+              return (
+                <div
+                  key={`${item.offset}`}
+                  className={`relative h-2 overflow-hidden rounded-full ${item.stretch.left_out ? "bg-stone-200" : "bg-slate-200"}`}
+                  style={{ flexGrow: Math.max(1, length), flexBasis: 0 }}
+                >
+                  <div
+                    className={`absolute inset-y-0 left-0 ${item.stretch.left_out ? "bg-stone-400" : "bg-amber-600"}`}
+                    style={{ width: `${done * 100}%` }}
+                  />
+                </div>
+              );
+            })}
+            {sectionLength > 0 && (
+              <span aria-hidden="true" className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-600 ring-2 ring-white"
+                style={{ left: `${displayedSectionTime / sectionLength * 100}%` }} />
+            )}
+          </div>
+          <span className="w-12">{clock(sectionLength)}</span>
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1 sm:gap-2 lg:gap-x-0 lg:gap-y-1">
+          <button
+            type="button"
+            onClick={() => previousSection && goSection(previousSection.index)}
+            disabled={!previousSection}
+            title="上一段（[）"
+            className={`${button} text-sm lg:order-first lg:basis-1/2`}
+          >
+            ‹ <span className="ml-1 hidden sm:inline lg:hidden">{previousSection && !unitNavigation ? shortLabel(previousSection.item.label) : "上一段"}</span><span className="ml-1 hidden lg:inline">上一段</span>
+          </button>
+          <button
+            type="button"
+            onClick={restart}
+            title="回到這一段開頭；開頭再按一次，回到整章開頭"
+            aria-label="從頭"
+            className={`${button} hidden sm:inline-flex`}
+          >
+            ⏮
+          </button>
+          <button type="button" onClick={() => seekChapter(chapterTime - 15)} title="倒退 15 秒（←）" className={`${button} text-sm`}>
+            ↺ 15
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            title="播放／暫停（空白鍵）"
+            aria-label={playing ? "暫停" : "播放"}
+            className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xl text-white hover:bg-stone-700"
+          >
+            {playing ? "❚❚" : "▶"}
+          </button>
+          <button type="button" onClick={() => seekChapter(chapterTime + 15)} title="快進 15 秒（→）" className={`${button} text-sm`}>
+            15 ↻
+          </button>
+          <select
+            value={rate}
+            onChange={(event) => changeRate(Number(event.target.value))}
+            aria-label="速度"
+            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm lg:px-1 [@media(max-width:389px)_and_(max-height:599px)]:hidden"
+          >
+            {SPEEDS.map((speed) => (
+              <option key={speed} value={speed}>
+                {speed}×
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => nextSection && goSection(nextSection.index)}
+            disabled={!nextSection}
+            title="下一段（]）"
+            className={`${button} text-sm lg:order-first lg:basis-1/2`}
+          >
+            <span className="mr-1 hidden sm:inline lg:hidden">{nextSection && !unitNavigation ? shortLabel(nextSection.item.label) : "下一段"}</span><span className="mr-1 hidden lg:inline">下一段</span> ›
+          </button>
+        </div>
+      </footer>
+
+      {clip?.sermon.media_url && (
+        <audio
+          ref={media}
+          src={mediaSrc(clip.sermon.media_url)}
+          preload="auto"
+          onLoadStart={applySeek}
+          onLoadedMetadata={onLoaded}
+          onCanPlay={applySeek}
+          onSeeked={applySeek}
+          onTimeUpdate={onTimeUpdate}
+          onEnded={advance}
+          onPlay={(event) => {
+            if (!pending.current) setPlaying(true);
+            else if (!event.currentTarget.muted) event.currentTarget.pause();
+          }}
+          onPause={() => setPlaying(Boolean(pending.current?.play))}
+        />
+      )}
+    </div>
+  );
+}

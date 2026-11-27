@@ -92,6 +92,12 @@ def normalize_sermon_source(
         organization = "紐約靈命進深會"
         provider = None
         url = raw
+    elif "gtl.org" in lowered:
+        # 负责人 2026-11-04：gtl.org 是主愛中華錄音事奉。
+        category = "other"
+        organization = "主愛中華錄音事奉"
+        provider = None
+        url = raw
     elif raw.casefold() == "ruxin zhang".casefold():
         category = "external_church"
         organization = "其他教會（名稱未記錄）"

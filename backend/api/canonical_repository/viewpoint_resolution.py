@@ -2379,6 +2379,15 @@ class StructuredJsonReviewerAdapter:
             ).encode("utf-8")
         )
 
+    def request_measurements(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any] | None]:
+        """Authenticate the current wire once for both its proof and byte count.
+
+        Nothing is cached across calls: changed payloads/configuration are
+        encoded again, and unencoded adapters retain their original byte path.
+        """
+        proof = self.request_encoding_proof(payload)
+        return (proof['wire_request_bytes'], proof) if proof is not None else (self.request_bytes(payload), None)
+
     def request_encoding_proof(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
         if not self._shared_text_payload:
             return None

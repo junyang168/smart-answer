@@ -246,27 +246,53 @@ def bound_bytes(binding: FileBinding | dict, snapshots: dict | None = None) -> b
     return raw
 
 
-def source_snapshot(binding: FileBinding | dict, snapshots: dict | None = None, *, source: dict | None = None) -> dict:
+def source_snapshot(binding: FileBinding | dict, snapshots: dict | None = None, *, source: dict | None = None,
+                    visual_context: bool = False) -> dict:
     import json
     raw = bound_bytes(binding, snapshots)
     if source and source.get("source_type") == "notes_manuscript":
         from backend.pipeline.knowledge_source import markdown_blocks
         from backend.pipeline.source_projection import script_from_markdown_blocks
-        if source.get("visual_source_assets"):
+        if source.get("visual_source_assets") and not visual_context:
             raise ValueError("Claim issue visual source requires a separately scoped adapter")
-        projection = project_script(script_from_markdown_blocks(markdown_blocks(raw.decode("utf-8"))))
+        if source.get("visual_source_assets"):
+            from backend.pipeline.knowledge_source import markdown_source_document
+            document, loaded_raw, _ = markdown_source_document(source)
+            if loaded_raw != raw:
+                raise ValueError("visual source changed while reading")
+            projection = project_script(document['script'])
+        else:
+            projection = project_script(script_from_markdown_blocks(markdown_blocks(raw.decode("utf-8"))))
     else:
         document = json.loads(raw)
         projection = project_script(document.get("script") if isinstance(document, dict) else document)
-    if projection.visual_blocks:
+    if projection.visual_blocks and not visual_context:
         raise ValueError("visual source changes require a separately scoped visual adapter")
-    return {
+    result = {
         "file": FileBinding.model_validate(binding).model_dump() if isinstance(binding, dict) else binding.model_dump(),
         "body_sha256": projection.body_sha256,
         "spoken_text_sha256": projection.spoken_text_sha256,
         "editorial_structure_sha256": projection.editorial_structure_sha256,
         "paragraphs": {f"S{i:04d}": row for i, row in enumerate(projection.spoken_rows, 1)},
     }
+    if projection.visual_blocks:
+        # Ordinary Claim content review reads existing, attested SVGs. This
+        # does not authorize the source-change pipeline to mutate pictures.
+        from backend.pipeline.source_projection import validate_visual_source_attestations
+        validate_visual_source_attestations(projection, (source or {}).get('visual_source_attestations'))
+        if (source or {}).get('source_visual_sha256') != projection.visual_content_sha256:
+            raise ValueError('registered visual source hash drift')
+        if (source or {}).get('source_body_sha256') != projection.body_sha256:
+            raise ValueError('registered visual source body drift')
+        descriptors = [b.descriptor() for b in projection.visual_blocks]
+        # Existing inline descriptors predate binding_kind; the canonical
+        # resolver also treats that absent field as inline_svg.
+        registered = [dict(d, binding_kind=d.get('binding_kind', 'inline_svg'))
+                      for d in (source or {}).get('visual_sources', [])]
+        if registered != descriptors:
+            raise ValueError('registered visual source descriptors drift')
+        result.update(visual_sources=descriptors, visual_content_sha256=projection.visual_content_sha256)
+    return result
 
 
 def strings(value: Any):

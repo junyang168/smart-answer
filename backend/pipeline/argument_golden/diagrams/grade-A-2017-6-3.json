@@ -1,0 +1,15 @@
+{
+ "schema": "diagram-gold-key-grade.v1", "key": "A", "lecture": "2017 NYSC 專題：馬太福音釋經（六）3",
+ "graded_from": "saved claims and argument-steps replies of G006 and G007 (the run stopped at G007's step check; records were not built)",
+ "expectation": "blind-expectation-key-A.json (written before any output existed)",
+ "parts": {
+  "1 施恩→要求": {"held": true, "claims": ["CL0018", "CL0021"], "reasons": "G006 ST01/ST04 not a bargain, ST06 宗主國先恩待, ST09 出20:1, ST11 耶31 立約公式; G007 ST01 both covenants"},
+  "3 維持／破裂": {"held": true, "claims": ["CL0018"], "reasons": "G006 ST07, ST08, ST10 被擄滅國"},
+  "4 舊約=摩西律法": {"held": true, "claims": ["CL0019", "CL0021"], "reasons": "G006 ST09 十條誡是宗主國的要求; G007 ST01"},
+  "5 新約=基督的律法": {"held": true, "claims": ["CL0021"], "reasons": "G007 ST01 拯救脫離罪, ST06 ennomos Christou, ST09 加6:2"},
+  "A3 條文／字句 vs 原則／聖靈": {"held": true, "claims": ["CL0022", "CL0023"], "reasons": "G007 ST02, ST03 幼稚園／大學, ST04 gramma／聖靈, ST05 參孫"}
+ },
+ "structure": {"verdict": "fail", "finding": "the covenant argument is cut in two: G006 ends at S0013 and G007 starts at S0014, though S0014 opens 「你說這裡他們是立約，立約的公式」 and continues it. Parts 1+3 are CL0018, parts 4+5 are CL0021, with no relation between them. The split is not at a heading (the heading 新舊約的恩典與要求 is before S0013)."},
+ "content": {"verdict": "pass", "finding": "every must-have part and every reason expected from his words is present; nothing he did not say"},
+ "run_stop": {"claim": "CL0027 讀聖經要融會貫通", "finding": "a student's words, supported only by the student's question step; the program refused it correctly"}
+}

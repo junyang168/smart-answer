@@ -1,0 +1,95 @@
+{
+  "schema_version": "unedited-full-video-pilot-summary.v1",
+  "date": "2026-10-28",
+  "code_commit": "919f1a24",
+  "lecture_id": "2019-09-01 成圣(II)",
+  "source_video_sha256": "160d6288bc20b518d64fbdde789d2eb2a6b2db400cde47b90b22a1123f5251c1",
+  "selection": {
+    "authority": "/Volumes/Jun SSD/data/config/sermon.json",
+    "authority_sha256": "ac832a517309b40721da478f18e6d4d1e1127c1e1931c72ee85416f0c2bb5854",
+    "record": {
+      "item": "2019-09-01 成圣(II)",
+      "title": "成圣(II)",
+      "status": "ready",
+      "author": null,
+      "last_updated": null,
+      "assigned_to": null,
+      "published_date": null
+    },
+    "edited_file_presence": {
+      "script_patched": false,
+      "script_review": false,
+      "script_published": false
+    },
+    "source_video_sha256": "160d6288bc20b518d64fbdde789d2eb2a6b2db400cde47b90b22a1123f5251c1",
+    "inputs": "fresh source audio and video only; no existing transcript or prior pilot",
+    "conclusion": "No recorded manual edit in catalog or local edited-stage files; not proof of never having been edited."
+  },
+  "artifacts": {
+    "full_transcript.json": "214f56e78d7d887ce35a6b38d3bba886fa3e4817904cecae6fe776315083ec28",
+    "full_transcript.md": "1613d23de8e31d8fdc454c9604dfceae184db80e18eeafe699b4d48c535e24c5",
+    "timing_audit.json": "5179be9059cd747ec4081188c8664010914bc20151d0d527cafc4c536d733631",
+    "argument_source_packet.json": "5a2407f5d7317e98890e2754ee6d10ff364717671ae41b89ddb5749c9f76d0e4",
+    "source_selection.json": "b39181011eccd55cdbebc6b4f0e614e6e633afdb90fa9e15393b93bf0603b2d6",
+    "handoff/extraction_handoff.json": "2cee783d7155a457311d5f537c7817fb1f7f30c0f53041bca8c8128855b509ad",
+    "editorial-full/reading_view.json": "1af39e39cdc5b00a02f54439ec08824d20b3aa494ab97e857e95798b0c0efdcc"
+  },
+  "handoff_source_sha256": "4f5c663522f62e8885efa4988222db58b3f2f063a27af1dda889361e871966e2",
+  "duration_ms": 4173689,
+  "source_audio_samples": 66779028,
+  "covered_audio_samples": 66779024,
+  "discarded_tail_samples": 4,
+  "paragraphs": 213,
+  "original_paragraphs": 213,
+  "slide_occurrences": 67,
+  "visual_assets": 67,
+  "text_regions": 363,
+  "uncertain_text_regions": 4,
+  "actual_diagrams": 0,
+  "correction_status_counts": {
+    "machine_supported": 193,
+    "pending": 2
+  },
+  "withheld_overlap_proposals": 3,
+  "exclusions": 2,
+  "withheld_deletions": 1,
+  "timing_issues": [],
+  "mechanical_timing_errors": 0,
+  "native_frame_pts": {
+    "sample_count": 8340,
+    "native_frame_count": 125086,
+    "time_base": "1/11988",
+    "max_sample_rounding_delta_ms": 0.4994994995649904,
+    "errors": []
+  },
+  "initial_unresolved_recovered": 1,
+  "acoustic_timing_refinements": 1,
+  "paid_call_states": {
+    "complete": 129
+  },
+  "paid_call_stages": {
+    "whole_video_non_sermon_exclusions": 1,
+    "full_video_slide_classification": 11,
+    "non_sermon_exclusions": 9,
+    "audio_correction_proposals": 26,
+    "proposal_structure_repair_once": 9,
+    "asr": 24,
+    "punctuation_layout_repair": 3,
+    "punctuation_layout": 5,
+    "projected_screen_proposals": 1,
+    "slide_visual_extraction": 34,
+    "slide_visual_structure_repair_once": 6
+  },
+  "estimated_usd_upper": 1.48248543,
+  "cost_note": "Token rates inherited from dated model adapters; ASR at .0045 USD/min. Includes all failed-format responses, local-window cleanup trials and superseded recovery; not an invoice.",
+  "human_transcript_accuracy_measured": false,
+  "human_slide_recall_measured": false,
+  "repeat_asr_verification_calls": 0,
+  "knowledge_store_writes": 0,
+  "preview_url": "http://127.0.0.1:4495/",
+  "browser_late_seek_seconds": 3610.655814,
+  "browser_video_duration_seconds": 4173.70704,
+  "browser_error": null,
+  "tests": 126,
+  "typescript_check": "passed"
+}

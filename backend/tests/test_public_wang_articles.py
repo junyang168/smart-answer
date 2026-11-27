@@ -131,6 +131,9 @@ def test_public_article_requires_approval_and_projects_reader_safe_content(tmp_p
     assert "閱讀提示" in article["markdown"]
     assert article["audio_sections"][0]["clips"][0]["delivered_on"] == "2022-02-07"
     assert "decision_id" not in json.dumps(article)
+    # The page header names the passage from these: an exposition its one passage.
+    assert article["product_kind"] is None
+    assert [ref["display"] for ref in article["core_scripture"]] == ["太16:13–20"]
 
 
 def test_unapproved_article_is_not_publicly_discoverable(tmp_path: Path, monkeypatch) -> None:
@@ -162,7 +165,19 @@ def test_public_article_index_contains_article_navigation_metadata(tmp_path: Pat
                     "verse_end": 20,
                     "display": "太16:13–20",
                 },
-                "topics": ["認信", "教會"],
+                "product_kind": None,
+                "core_scripture": [
+                    {
+                        "book": "Matt",
+                        "book_label": "馬太福音",
+                        "chapter": 16,
+                        "verse_start": 13,
+                        "end_chapter": 16,
+                        "verse_end": 20,
+                        "display": "太16:13–20",
+                    }
+                ],
+                "reader_intro": None,
                 "href": "/resources/wang-repository/articles/matthew-16-13-20",
             }
         ]
@@ -382,3 +397,20 @@ def test_legacy_decisions_without_timestamp_keep_first_valid_publication(
     assert public_wang_articles.public_article_data("matthew-16-13-20")["title"] == (
         "馬太福音 16:13–20：認信與教會"
     )
+
+
+def test_a_topic_essay_is_filed_under_every_core_passage() -> None:
+    item = {
+        "passage": "太20:28",
+        "product_kind": "theological_topic_essay",
+        "core_passages": ["太20:28", "太26:28", "提前2:4-6", "约20:23"],
+    }
+
+    references = public_wang_articles._core_scripture(item)
+
+    assert [(ref["book"], ref["chapter"], ref["verse_start"], ref["verse_end"]) for ref in references] == [
+        ("Matt", 20, 28, 28),
+        ("Matt", 26, 28, 28),
+        ("1Tim", 2, 4, 6),
+        ("John", 20, 23, 23),
+    ]

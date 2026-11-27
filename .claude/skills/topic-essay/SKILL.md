@@ -63,7 +63,6 @@ backend/.venv/bin/python -m backend.pipeline.draft_first_essay --run-dir "$RUN"
 
 **CVP 缺口（`cvp_gap`）**：纳入的 Claim 不属于任何观点，要先走 CVP 2.0（另一条线，交接给它）。CVP 完成后：`--redo coverage`。负责人也可以改成「相邻」。
 
-**校准（`calibration`）**：审稿 prompt 或模型变了，程序已自动跑过校准；停在这里说明结果与负责人的判定表不合。把不合的项讲给负责人，由负责人定改规则还是改判定表，不要自己调。
 
 **审稿没通过（`review`）**：把打印出的未解决问题逐条讲清楚（引稿子原句）。负责人可以：
 

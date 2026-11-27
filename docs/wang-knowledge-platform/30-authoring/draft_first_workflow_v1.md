@@ -230,8 +230,9 @@ backend/.venv/bin/python scripts/register-draft-first-review.py \
   --review-id <id> --passage "<经文>" --review-dir <run>/review-v1 \
   --bindings <run>/review-v1/source-bindings.json --packet <同上>
 
-# 校准：审稿 prompt 或模型变化后，对负责人 K1–K10 重跑（一次审稿调用）
-backend/.venv/bin/python scripts/draft-first-calibrate.py --output-dir <run>/calibration
+# 校准：改了审稿 prompt、双向规则或审稿模型的分支，scripts/wrap-up.sh 开 PR 前自动对负责人 K1–K10 跑一次
+# （一次审稿调用；不一致不开 PR）。写文章流程不跑校准（#494）。手动跑：
+backend/.venv/bin/python scripts/draft-first-calibrate.py --if-needed
 ```
 
 模型分工：写稿与修订 `claude-opus-5`；双向审稿、盲读比对与选材覆盖 `gpt-6.1-sol`（codex CLI；审稿与选材覆盖以 agent 方式在各自文件夹内运行）；盲读 `claude-haiku-4-5`。写作规则在 `backend/pipeline/prompts/draft_first_topic_author.md`，双向规则在 `draft_first_two_way_rules.md`，审稿判准在 `draft_first_two_way_review.md`。校准答案在 `backend/config/draft_first_calibration/`。质量维度表沿用 `WQ-theological-topic-essay-v1`。每次检查调用的 prompt、输入、输出三重内容指纹记录于 `review-run.json`。

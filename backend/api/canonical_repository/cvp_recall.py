@@ -25,8 +25,15 @@ def verify(document: Mapping[str, Any], version: str) -> None:
         raise ValueError('CVP recall artifact version or content changed')
 
 
-def work_groups(grouping: Mapping[str, Any], claim_ids: Sequence[str]) -> list[dict]:
+def work_groups(grouping: Mapping[str, Any], claim_ids: Sequence[str], *, update=False) -> list[dict]:
     """Consume existing grouping, preserving its accepted order and membership."""
+    if update:
+        groups = grouping.get('groups', [])
+        if (len(groups) != 1 or not isinstance(groups[0].get('group_key'), str)
+                or not groups[0]['group_key'] or groups[0].get('claim_ids') != list(claim_ids)
+                or len(set(claim_ids)) != len(claim_ids)):
+            raise ValueError('CVP update requires one complete current member unit')
+        return [{'group_key':groups[0]['group_key'], 'claim_ids':list(claim_ids)}]
     if not claim_ids or len(set(claim_ids)) != len(claim_ids):
         raise ValueError('grouping requires an exact nonempty Claim cohort')
     parsed = ClaimGroupingResponse.model_validate(grouping)
@@ -266,3 +273,20 @@ def combine_recall_candidates(plan, model_candidates, *, existing_links=()):
     return seal({'schema_version':RECALL_VERSION, 'plan_sha256':plan['artifact_sha256'],
                  'claim_candidates':[{'claim_id':cid,'viewpoint_ids':sorted(candidates[cid])} for cid in claims],
                  'identity_decided':False})
+
+
+def update_recall_plan(index, claims, viewpoint_ids, *, max_request_bytes):
+    """Bind known update scope without a whole-library model recall.
+
+    Claims are already the complete CVP unit, including unlinked replacements;
+    no top-K, 20-Claim clipping or candidate detail screening is permissible.
+    """
+    verify(index, INDEX_VERSION)
+    available = {h['viewpoint_id'] for h in index['cards']}
+    if not set(viewpoint_ids) <= available:
+        raise ValueError('update context contains a noncurrent CVP')
+    return seal({'schema_version':RECALL_VERSION, 'index_sha256':index['artifact_sha256'],
+        'claims_sha256':sha256_json(list(claims)),
+        'claim_refs':{f'c{i}':c['claim_id'] for i,c in enumerate(claims,1)},
+        'viewpoint_refs':{f'v{i}':vid for i,vid in enumerate(sorted(set(viewpoint_ids)),1)},
+        'max_request_bytes':max_request_bytes, 'shards':[]})

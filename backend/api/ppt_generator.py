@@ -7,9 +7,13 @@ from typing import Iterable, Mapping, Optional, Sequence
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
+from pptx.util import Pt
 from pptx.oxml.xmlchemy import OxmlElement
+
+from backend.ppt_text_layout import prepare_frame, format_paragraph, format_run
+from backend.sunday_report_layout import report_blocks, flow_report_blocks
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{([^{}]+)\}")
 
@@ -27,6 +31,8 @@ def generate_presentation_from_template(
     """Populate placeholders in a PPTX template and save to output_path."""
     normalized = {key: str(value) for key, value in replacements.items()}
     presentation = Presentation(template_path)
+    _update_fellowship_labels(presentation)
+    _balance_static_slides(presentation)
     _expand_section_slides(presentation, section_configs or {})
     _populate_scripture_summary(presentation, scripture_summary or [])
     if holy_communion:
@@ -35,9 +41,60 @@ def generate_presentation_from_template(
         _remove_slides_by_note_keyword(presentation, "守聖餐")
     _hide_slides_by_number(presentation, hidden_slide_numbers or [])
 
+    reports = list(report_blocks(presentation))
     _apply_replacements(presentation, normalized)
+    flow_report_blocks(reports)
     presentation.save(output_path)
     return output_path
+
+
+def _update_fellowship_labels(presentation) -> None:
+    # Keep template run formatting while updating the recurring announcement.
+    labels = {'週五团契': '週四線上查經', '週五團契': '週四線上查經',
+              '未來兩週團契安排': '未來兩週線上查經安排'}
+    for slide in presentation.slides:
+        for frame in _iter_text_frames(slide.shapes):
+            text = frame.text.strip()
+            if text in labels:
+                # Labels can be split over runs by PowerPoint.
+                runs = [run for p in frame.paragraphs for run in p.runs]
+                if runs:
+                    runs[0].text = labels[text]
+                    for run in runs[1:]:
+                        run.text = ''
+
+
+def _balance_static_slides(presentation) -> None:
+    """Balance the fixed prayer and sermon cover without rewriting their words."""
+    width, height = presentation.slide_width, presentation.slide_height
+    for slide in presentation.slides:
+        for shape in list(slide.shapes):
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            frame = shape.text_frame
+            if '{sermonTitle}' in frame.text and '{sermonSpeaker}' in frame.text:
+                frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+                frame.auto_size = MSO_AUTO_SIZE.NONE
+            if not frame.text.startswith('主禱文') or '我們在天上的父' not in frame.text:
+                continue
+            paragraphs = list(frame.paragraphs)
+            start = next(i for i,p in enumerate(paragraphs) if '我們在天上的父' in p.text)
+            heading = slide.shapes.add_textbox(int(width*.049), int(height*.044), int(width*.902), int(height*.105))
+            heading.text_frame._txBody.remove(heading.text_frame.paragraphs[0]._p)
+            heading.text_frame._txBody.append(deepcopy(paragraphs[0]._p))
+            heading.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            heading.text_frame.auto_size = MSO_AUTO_SIZE.NONE
+            for paragraph in paragraphs[:start]:
+                frame._txBody.remove(paragraph._p)
+            shape.left, shape.top = int(width*.101), int(height*.207)
+            shape.width, shape.height = int(width*.798), int(height*.68)
+            frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            frame.auto_size = MSO_AUTO_SIZE.NONE
+            frame.word_wrap = True
+            for paragraph in frame.paragraphs:
+                paragraph.line_spacing = Pt(42)
+                paragraph.space_before = Pt(0)
+                paragraph.space_after = Pt(0)
 
 
 def _apply_replacements(presentation, replacements: Mapping[str, str]) -> None:
@@ -88,8 +145,6 @@ def _replace_in_text_frame(text_frame, replacements: Mapping[str, str]) -> None:
 
         for run in paragraph.runs:
             original = run.text
-            if original == "{hymn}":
-                pass
             updated = _replace(original, replacements)
             if updated != original:
                 run.text = updated
@@ -234,6 +289,13 @@ def _populate_scripture_summary(presentation: Presentation, summary_rows: list[d
             new_row = table.rows[insert_index]
             _fill_summary_row(new_row, entry)
         _fill_summary_row(template_row, summary_rows[0])
+        from backend.sunday_text import traditional
+        # The overview is displayed in traditional Chinese; preserve the
+        # template's per-run fonts and colours, including its static guidance.
+        for frame in _iter_text_frames(slide.shapes):
+            for paragraph in frame.paragraphs:
+                for run in paragraph.runs:
+                    run.text = traditional(run.text)
         return
 
 
@@ -257,7 +319,8 @@ def _insert_row_from_template(table, template_xml, insert_index: int):
 
 def _fill_summary_row(row, entry: dict[str, str]) -> None:
     label = entry.get("label", "")
-    reader = entry.get("reader", "")
+    from backend.sunday_text import traditional
+    reader = traditional(entry.get("reader", ""))
     replacements = {
         "scriptureLabel": label,
         "scriptureReader": reader,
@@ -364,17 +427,6 @@ def _get_section_reader(sections: list[dict[str, object]], index: int) -> str:
     return ""
 
 
-def _get_section_reader(sections: list[dict[str, object]], index: int) -> str:
-    if index >= len(sections):
-        return ""
-    candidate = sections[index]
-    if isinstance(candidate, dict):
-        reader = candidate.get("reader")
-        if reader:
-            return str(reader)
-    return ""
-
-
 def _move_slide(presentation: Presentation, old_index: int, new_index: int) -> None:
     slide_id_list = presentation.slides._sldIdLst
     slide_ids = list(slide_id_list)
@@ -435,6 +487,9 @@ def _render_section(
             lines = []
     reader = section.get("reader") if isinstance(section, dict) else None
     label = section.get("label") if isinstance(section, dict) else None
+    if style == "scripture":
+        from backend.sunday_text import traditional
+        reader, next_reader = traditional(reader), traditional(next_reader)
 
     for text_frame in _iter_text_frames(slide.shapes):
         content = _text_frame_content(text_frame)
@@ -445,6 +500,14 @@ def _render_section(
                 _populate_scripture_text_frame(text_frame, lines)
             else:
                 _populate_scripture_text_frame(text_frame, lines)
+            if section.get("video_url"):
+                from backend.sunday_video import youtube_url
+                link = youtube_url(section["video_url"])
+                # Link the whole text box so Office does not replace the
+                # template's white text with its dark hyperlink theme color.
+                text_frame._parent.click_action.hyperlink.address = link
+                # Keep the full URL available to presenters without projecting it.
+                slide.notes_slide.notes_text_frame.text += "\nYouTube: " + link
             content = _text_frame_content(text_frame)
         if "{page}" in content:
             _replace_in_text_frame(text_frame, {"page": page_text})
@@ -484,14 +547,6 @@ def _render_section(
                         _replace_in_text_frame(text_frame, {index_token: index_value})
                         content = _text_frame_content(text_frame)
                 content = _text_frame_content(text_frame)
-        elif style == "lyrics":
-            if isinstance(section, dict):
-                index_value = section.get("index")
-                index_token = section.get("index_token")
-                if index_value and index_token:
-                    token_str = "{" + index_token + "}"
-                    if token_str in content:
-                        _replace_in_text_frame(text_frame, {index_token: index_value})
 
 
 def _text_frame_content(text_frame) -> str:
@@ -512,51 +567,38 @@ def _iter_text_frames(shapes) -> Iterable:
 
 
 def _populate_lyrics_text_frame(text_frame, lines: list[str]) -> None:
-    text_frame.clear()
+    family, size = prepare_frame(text_frame, lines)
     for index, line in enumerate(lines):
         paragraph = text_frame.add_paragraph() if index else text_frame.paragraphs[0]
-        paragraph.text = ""
         paragraph.alignment = PP_ALIGN.CENTER
         _disable_paragraph_bullets(paragraph)
+        format_paragraph(paragraph, family, size)
         run = paragraph.add_run()
         run.text = line
-        run.font.color.rgb = RGBColor(255, 255, 0) if (index + 1) % 2 == 0 else RGBColor(255, 255, 255)
-        run.font.name = "DengXian"
-        run.font.bold = True
+        color = RGBColor(255, 255, 0) if (index + 1) % 2 == 0 else RGBColor(255, 255, 255)
+        format_run(run, family, size, color)
 
 
 def _populate_scripture_text_frame(text_frame, lines: list[str]) -> None:
-    text_frame.clear()
+    family, size = prepare_frame(text_frame, lines, scripture=True)
     for index, line in enumerate(lines):
         paragraph = text_frame.add_paragraph() if index else text_frame.paragraphs[0]
-        paragraph.text = ""
         paragraph.alignment = PP_ALIGN.LEFT
         _disable_paragraph_bullets(paragraph)
+        format_paragraph(paragraph, family, size, scripture=True)
         color = RGBColor(255, 255, 255) if (index + 1) % 2 != 0 else RGBColor(255, 255, 0)
         match = re.match(r"^(?P<chapter>\d+):(?P<verse>\d+)\s+(?P<body>.*)$", line)
         if match:
-#            chapter_run = paragraph.add_run()
-#            chapter_run.text = f"{match.group('chapter')}:"
-#            chapter_run.font.color.rgb = color
-
             verse_run = paragraph.add_run()
             verse_run.text = match.group('verse')
-            verse_run.font.superscript = True
-            verse_run.font.color.rgb = color
-            verse_run.font.name = "DengXian"
-            verse_run.font.bold = True
-
+            format_run(verse_run, family, size, color, verse=True)
             body_run = paragraph.add_run()
             body_run.text = f" {match.group('body')}"
-            body_run.font.color.rgb = color
-            body_run.font.name = "DengXian"
-            body_run.font.bold = True
+            format_run(body_run, family, size, color)
         else:
             run = paragraph.add_run()
             run.text = line
-            run.font.color.rgb = color
-            run.font.name = "DengXian"
-            run.font.bold = True
+            format_run(run, family, size, color)
 
 
 def _apply_slide_template(slide, base_shapes: list, base_notes: str | None) -> None:

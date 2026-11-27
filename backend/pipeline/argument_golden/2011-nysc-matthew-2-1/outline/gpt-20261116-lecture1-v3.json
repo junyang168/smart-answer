@@ -1,0 +1,76 @@
+{
+ "run": "/opt/homebrew/var/www/church/web/argument-layer-runs/gpt-20261116-lecture1-v3",
+ "judged_by": "Claude, 2026-11-16",
+ "criteria": "match              states the judgement of one owner Claim\n  sub                a point he argued that the owner key does not list (allowed; the key may grow)\n  question           a question or tension he raised, written as a Claim (he asserts nothing there)\n  evidence_as_claim  a definition, reading or comparison he uses as Evidence, written as a Claim\n  aside              taken from a 題外話\n  added              says something he did not\nPer owner Claim: covered by exactly one ``match`` (``missed`` if none, ``split`` if several).",
+ "groups": {
+  "G01": {
+   "folder": "g01",
+   "claims": {
+    "CL0001": {
+     "kind": "match",
+     "owner": "CL1",
+     "why": "先講彌賽亞身份、再講門徒使命",
+     "statement": "登山寶訓先揭示彌賽亞的身份，再講門徒的使命，說明門徒認識彌賽亞之後應當如何回應祂。"
+    },
+    "CL0002": {
+     "kind": "match",
+     "owner": "CL2",
+     "why": "五3–12 的祝福揭示彌賽亞的身份",
+     "statement": "馬太福音五章三至十二節藉著彌賽亞要帶來的祝福，揭示在登山寶訓中講話的彌賽亞的身份。"
+    },
+    "CL0003": {
+     "kind": "match",
+     "owner": "CL3",
+     "why": "認識之後必有回應",
+     "statement": "按照聖經的觀念，人認識神或認識一個人之後，就會對所認識的對象產生行為上或生命上的反應。"
+    },
+    "CL0004": {
+     "kind": "sub",
+     "why": "第二大段的範圍及概括／細節之分",
+     "statement": "馬太福音五章十三節至七章二十九節講門徒的使命，其中五章十三至十六節概括門徒的反應，五章十七節至七章二十九節闡明其具體內容。"
+    }
+   }
+  },
+  "G03": {
+   "folder": "g03",
+   "claims": {
+    "CL0001": {
+     "kind": "match",
+     "owner": "CL1",
+     "why": "八福講的都是天國的祝福（蓋子）",
+     "statement": "八福整段講的是天國的祝福：首尾呼應界定其範圍，應許的時態顯出現在與將來的分別；這與神的國已經存在、將來才完全臨到相應。"
+    },
+    "CL0002": {
+     "kind": "match",
+     "owner": "CL2",
+     "why": "首尾都說「天國是他們的」，構成一整段",
+     "statement": "馬太福音五章三至十節以首尾相同的「天國是他們的」構成首尾呼應，表明八福是一個完整段落。"
+    },
+    "CL0003": {
+     "kind": "match",
+     "owner": "CL3",
+     "why": "哀慟與得安慰與天國有關，不是一般人受苦得安慰",
+     "statement": "八福中間各福雖未提到天國，其應許仍全是天國的祝福；其中哀慟與得安慰都與天國有關，不能解作一般人遭遇痛苦就有福、將來有人安慰他。"
+    },
+    "CL0004": {
+     "kind": "match",
+     "owner": "CL4",
+     "why": "首尾現在式、其餘將來式",
+     "statement": "八福第一福與最後一福的「是」用現在式，表示天國現在就是他們的，今天便能體會；中間六福的應許用將來式，指向神的國完全臨到時的福份。中文譯文不容易顯出這個時態分別。"
+    },
+    "CL0005": {
+     "kind": "match",
+     "owner": "CL5",
+     "why": "天國就是神的國",
+     "statement": "「天國」與「神的國」是同一件事，都是神作王。馬太福音主要寫給猶太人，採用以「天」代表神的說法；馬太以外的作者用「神的國」表達同一觀念。"
+    },
+    "CL0006": {
+     "kind": "match",
+     "owner": "CL6",
+     "why": "天國現在已經開始，將來才完全來到",
+     "statement": "神的國在耶穌降生、在地上的時候已經開始，現在已經存在，但完全來到仍在將來。"
+    }
+   }
+  }
+ }
+}

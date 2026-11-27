@@ -1,8 +1,5 @@
-// components/resources/ResourceCard.tsx
 import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
-import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
-import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
 
 interface ResourceCardProps {
   icon: LucideIcon;
@@ -12,26 +9,20 @@ interface ResourceCardProps {
   linkLabel: string;
 }
 
-const ResourceCard = ({ icon: Icon, title, description, link, linkLabel }: ResourceCardProps) => {
+export default function ResourceCard({ icon: Icon, title, description, link, linkLabel }: ResourceCardProps) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 text-center shadow-sm hover:shadow-lg transition-shadow duration-300 flex flex-col">
-      <div className="mx-auto bg-gray-100 p-4 rounded-full mb-4">
-        <Icon className="w-10 h-10 text-[#8B4513]" />
+    <div className="rounded-[10px] border border-stone-200 bg-white p-3 sm:p-4">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 sm:gap-2">
+        <Icon aria-hidden="true" strokeWidth={1.7} className="h-5 w-5 text-amber-900" />
+        <h3 className="font-display text-base font-bold leading-snug text-gray-800 min-[346px]:text-lg">{title}</h3>
+        <Link
+          href={link}
+          className="inline-flex min-h-11 items-center whitespace-nowrap rounded-lg border border-amber-900/25 bg-orange-50/60 px-2 text-sm font-semibold text-amber-900 hover:bg-orange-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900 sm:px-3"
+        >
+          {linkLabel}
+        </Link>
       </div>
-      <h3 className="text-xl font-bold font-display text-gray-800 mb-2">{title}</h3>
-      <div className="text-gray-600 flex-grow mb-4">
-        <div className="prose prose-slate max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
-        </div>
-      </div>
-      <Link href={link} className="mt-auto bg-[#8B4513] text-white font-bold py-2 px-6 rounded-full hover:bg-opacity-90 transition-all self-center">
-        {linkLabel}
-      </Link>
+      <p className="mt-1 text-[15px] leading-relaxed text-gray-600">{description}</p>
     </div>
-
-
-
   );
-};
-
-export default ResourceCard;
+}

@@ -356,7 +356,12 @@ def validate_sentence_audit(
             covered = bool(spans.get(sentence.segment_index))
         else:
             text = segments.get(sentence.segment_index, "")
-            start = text.find(sentence.text)
+            # A sentence spoken twice in one paragraph is located by its own
+            # position; searching would land every copy on the first one.
+            start = sentence.char_start if (
+                sentence.char_start is not None
+                and text[sentence.char_start:sentence.char_start + len(sentence.text)] == sentence.text
+            ) else text.find(sentence.text)
             covered = False
             if start >= 0:
                 end = start + len(sentence.text)
@@ -511,6 +516,8 @@ def validate_response(
     visible_locators: set[str] | None = None,
     visible_visual_locators: set[str] | None = None,
     require_load_bearing_relations: bool = True,
+    additional_relations: Sequence[dict[str, Any]] = (),
+    answer_only_claims: Sequence[str] = (),
 ) -> None:
     """Check one response against the source it claims to come from.
 
@@ -667,6 +674,7 @@ def validate_response(
                     if allow_reviewed_notes_blockquote
                     else None
                 ),
+                spoken_scripture_quotes=source_type != "notes_manuscript",
             ):
                 anchor_errors.append(
                     f"{owner}: excerpt lands in provenance-ambiguous inline markup "
@@ -751,6 +759,23 @@ def validate_response(
                 row["support_eligibility"] != "eligible_candidate",
                 f"{row['evidence_step_id']}: non-professor/asserted evidence cannot be eligible",
             )
+    # Only Claims the caller names as short answers (his words, no argument) and that a
+    # Question records as its answer may stand without Evidence (owner 2026-11-17).
+    answered = set(answer_only_claims) & {cid for q in response.get("questions", []) for cid in q.get("answer_claim_ids", [])}
+    additional_support = {r.get("to_id") for r in additional_relations
+        if r.get("from_id") in ids["observation"] | ids["evidence"]
+        and r.get("to_id") in ids["claim"] and r.get("relation_type") == "supports"}
+    native_nodes = set().union(*(ids[k] for k in ("question", "position", "observation", "evidence", "claim")))
+    native_signatures = set()
+    for row in additional_relations:
+        signature = (row.get("from_id"), row.get("to_id"), row.get("relation_type"))
+        collect(row.get("from_id") in native_nodes and row.get("to_id") in native_nodes,
+                "additional relation has unknown endpoint")
+        collect(row.get("from_id") != row.get("to_id"), "additional relation cannot point to itself")
+        collect(row.get("relation_type") in RELATION_TYPES and bool(str(row.get("reason", "")).strip()),
+                "additional relation has invalid type or reason")
+        collect(signature not in native_signatures, "duplicate additional relation")
+        native_signatures.add(signature)
     for row in response.get("claims", []):
         collect(row["review_status"] == "candidate", f"{row['claim_id']}: extraction cannot approve")
         collect(
@@ -770,7 +795,9 @@ def validate_response(
             set(row["opposed_position_ids"]) <= ids["position"],
             f"{row['claim_id']}: unknown opposed position",
         )
-        collect(bool(row["evidence_step_ids"]), f"{row['claim_id']}: claim has no evidence")
+        # A short answer to a Question may stand without Evidence: he gave none (owner 2026-11-17).
+        collect(bool(row["evidence_step_ids"]) or row["claim_id"] in additional_support or row["claim_id"] in answered,
+                f"{row['claim_id']}: claim has no evidence")
 
     # A Claim's evidence_step_ids and an EvidenceStep's produced_claim_ids are
     # the two projections of the same many-to-many connection.  Neither side
@@ -795,7 +822,8 @@ def validate_response(
     # An observation may be the source of a relation into the argument: that
     # edge is how "the professor reasoned from this" is recorded at all.  The
     # target stays an evidence step -- observations do not support each other.
-    supported_by_observation: set[str] = set()
+    supported_by_observation: set[str] = {r["from_id"] for r in additional_relations
+        if r.get("from_id") in ids["observation"] and r.get("to_id") in ids["evidence"] | ids["claim"]}
     evidence_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("evidence_relations", []):
         from_id = row["from_id"]
@@ -817,6 +845,22 @@ def validate_response(
         evidence_relation_signatures.add(signature)
         if from_id in ids["observation"] and to_id in ids["evidence"]:
             supported_by_observation.add(from_id)
+
+    if additional_relations:
+        # Native Observation chains may reach a Claim through another Observation.
+        # Prove the finite saved route, never recursively fetch more corpus data.
+        graph = {}
+        for edge in list(response.get("evidence_relations", [])) + list(additional_relations):
+            graph.setdefault(edge["from_id"], set()).add(edge["to_id"])
+        for observation in ids["observation"]:
+            todo = list(graph.get(observation, ())); visited = {observation}
+            while todo:
+                node = todo.pop()
+                if node in visited: continue
+                visited.add(node)
+                if node in ids["claim"] | ids["evidence"]:
+                    supported_by_observation.add(observation); break
+                if node in ids["observation"]: todo.extend(graph.get(node, ()))
 
     # The rule this whole schema change exists for.  An observation the
     # professor reasoned from must also record the step that reasoning took.

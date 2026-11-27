@@ -82,6 +82,53 @@ def passing(candidate):
             'prior_findings': [], 'findings': [], 'novelty_approved': True}
 
 
+@pytest.mark.parametrize('inherited', [False, True])
+def test_unassigned_new_link_reports_exact_ref_and_requires_explicit_discard(inherited):
+    req=request(creation_slots={'canonical_viewpoints':1,'viewpoint_revisions':1,'viewpoint_claim_links':2})
+    bundle=materials()
+    first=cvp.compile_candidate(req,bundle,proposal()) if inherited else None
+    raw={'changes':[change('nl2',viewpoint_id='nv1',claim_id='c1',link_type='equivalent_full')],
+         'component_dispositions':[{'component_ref':'k1','disposition':'connected',
+             'target_ref':'nv1','link_ref':'nl2','reason':'改用此连接。'}]}
+    if not inherited:
+        raw['changes']=proposal()['changes']+raw['changes']
+        raw['summaries']=proposal()['summaries']
+    with pytest.raises(cvp.CandidateValidationError) as caught:
+        cvp.compile_candidate(req,bundle,raw,previous=first)
+    assert str(caught.value)=='new active link needs an explicit component disposition'
+    assert caught.value.details['link_ref']=='nl1'
+    assert caught.value.details['claim_ref']=='c1'
+    assert caught.value.details['target_ref']=='nv1'
+    assert caught.value.details['inherited'] is inherited
+    if inherited:
+        fixed=cvp.compile_candidate(req,bundle,{**raw,'discard_refs':['nl1']},previous=first)
+        assert 'nl1' not in {w['ref'] for w in fixed['writes']}
+        assert fixed['component_dispositions'][0]['link_ref']=='nl2'
+        from backend.pipeline.cvp_management_runner import _refresh_program_diagnostics
+        feedback_bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
+            'program_validation_feedback':{'raw_response':{'candidate':raw},
+                'findings':[str(caught.value)],'content_approval':False},
+            'program_validation_response_shas':['saved-original-response']})
+        previous=cvp.rebind_candidate(req,bundle,feedback_bundle,first)
+        before=deepcopy(feedback_bundle)
+        refreshed=_refresh_program_diagnostics(req,feedback_bundle,previous,[])
+        assert feedback_bundle==before
+        assert refreshed['records']==bundle['records']
+        assert refreshed['program_validation_response_shas']==['saved-original-response']
+        assert refreshed['program_validation_feedback']['raw_response']=={'candidate':raw}
+        assert refreshed['program_validation_feedback']['diagnostics']['link_ref']=='nl1'
+        assert _refresh_program_diagnostics(req,refreshed,previous,[])==refreshed
+        current=cvp.rebind_candidate(req,feedback_bundle,refreshed,previous)
+        accepted=cvp.compile_candidate(req,refreshed,{**raw,'discard_refs':['nl1']},previous=current)
+        clean=_refresh_program_diagnostics(req,refreshed,accepted,[])
+        assert 'program_validation_feedback' not in clean
+        assert clean['program_validation_response_shas']==['saved-original-response']
+        assert refreshed['program_validation_feedback']['diagnostics']['link_ref']=='nl1'
+        with pytest.raises(cvp.CandidateValidationError) as repeated:
+            cvp.compile_candidate(req,refreshed,{'discard_refs':['nl1']},previous=accepted)
+        assert repeated.value.details['unknown_refs']==['nl1']
+
+
 def provenance():
     return {'proposal_model': 'gpt-6.1-sol', 'review_model': 'claude-opus-5-5',
             'proposal_artifact_sha256': 'a' * 64, 'review_artifact_sha256': 'b' * 64,

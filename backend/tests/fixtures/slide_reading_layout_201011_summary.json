@@ -1,0 +1,42 @@
+{
+  "schema_version": "slide-reading-layout-trial-summary.v1",
+  "lecture_id": "S 201011 林前2 屬靈人看透",
+  "source_video_sha256": "212ee21a7974fe9b0062d2d9a8f0ee988d4d37ec8b0ff0a212f7e03203bb8bba",
+  "source_record_file_sha256": "038d530734e74d9d63265695869d5054ec8affd99211bfc1061d2097f45c134a",
+  "layout_file_sha256": "ef98e39fbfea451df20fae65c237b265f341b5c07f40aea0087919d2bea36316",
+  "html_sha256": "d9024b6130ecc9cc9f48fc8d1ba4540454d507baa7c5d21f58a30dd48ac7ef6e",
+  "source_states": 61,
+  "groups": 37,
+  "representatives": 37,
+  "collapsed_intermediate_states": 24,
+  "uncertain_representatives": 3,
+  "spoken_paragraphs_unchanged": 188,
+  "all_occurrences_and_visibility_preserved": true,
+  "image_hashes_verified": 61,
+  "moved_from_first_temporal_anchor": [
+    {
+      "group_id": "g029",
+      "slide_id": "c-0054",
+      "before": "w03-p0037",
+      "after": "w03-p0038"
+    },
+    {
+      "group_id": "g036",
+      "slide_id": "c-0069",
+      "before": "w04-p0025",
+      "after": "w04-p0024"
+    }
+  ],
+  "model_call": {
+    "request_sha256": "8cc98488490cee88bfa84f0501f140d0216b00467bd1e51bd542f97d9e9ffbe9",
+    "response_sha256": "7f5c3479b9c12b2be087f554b2d68f3ea3a9a5909d311757f15b5e1244ba31d1",
+    "model": "gemini-3.8-flash",
+    "usage": {
+      "input_tokens": 91858,
+      "output_including_reasoning_tokens": 4051,
+      "estimated_usd_upper": 0.08408475
+    }
+  },
+  "mechanical_checks_passed": true,
+  "limitation": "Single-video editorial layout candidate; source preservation is mechanically checked, semantic placement and completeness are not human-approved. Three uncertain images remain collapsed; original progressive reasoning is available in history."
+}

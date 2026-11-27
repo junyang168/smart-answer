@@ -5,10 +5,12 @@ import html
 import os
 import re
 
-from zoneinfo import ZoneInfo
+try:
+    from .fellowship_timing import TIMEZONE, TIME_LABEL
+except ImportError:  # Standalone reminder script.
+    from fellowship_timing import TIMEZONE, TIME_LABEL
 
 
-TIMEZONE = ZoneInfo("America/Chicago")
 
 
 def _html_to_text(value: str) -> str:
@@ -37,7 +39,7 @@ def build_fellowship_email_content(
     formatted_date = datetime.combine(event_date, time.min, tzinfo=TIMEZONE).strftime("%m/%d")
     subject = (custom_subject or "").strip() or os.getenv(
         "REMINDER_SUBJECT",
-        f"達拉斯圣道教会团契 时间: {formatted_date} 周五晚 7:30 - 9:00 CST ",
+        f"達拉斯圣道教会团契 时间: {formatted_date} {TIME_LABEL} ",
     )
     rendered_custom_html = (custom_html or "").strip()
     if rendered_custom_html:
@@ -61,7 +63,7 @@ def build_fellowship_email_content(
 
     default_body = (
         "Hi everyone,\n\n"
-        "This is a friendly reminder that our next fellowship meets on {date}.\n"
+        "This is a friendly reminder that our next fellowship meets on {date}, Thursday at 8:00 PM Central Time.\n"
         "{details}"
         "Please reach out if you have any questions.\n\n"
         "Grace and peace,\nYour ministry team"
@@ -69,6 +71,7 @@ def build_fellowship_email_content(
     body_template = os.getenv("REMINDER_BODY_TEMPLATE", default_body)
     text_body = body_template.format(
         date=formatted_date,
+        time_label=TIME_LABEL,
         details=details_text,
         host=host or "",
         title=title or "",
@@ -100,7 +103,7 @@ def build_fellowship_email_content(
         '<div style="font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;color:#202124;">'
         '  <p style="margin:0 0 16px 0;">弟兄姊妹们平安，</p>'
         '  <p style="margin:0 0 16px 0;">'
-        "    圣道教会每两周一次的团契自本週 <strong> {date} </strong>起將改為線上進行。时间改為周五晚 7:30 - 9:00 CST。欢迎大家参加。<br/>"
+        "    聖道教會每兩週一次的線上查經於 <strong>{date}</strong> 舉行，時間為{time_label}。歡迎大家參加。<br/>"
         "  </p>"
         "  {details_html}"
         "</div>"
@@ -114,6 +117,7 @@ def build_fellowship_email_content(
     html_body_template = os.getenv("REMINDER_BODY_TEMPLATE_HTML", default_html)
     html_body = html_body_template.format(
         date=formatted_date,
+        time_label=TIME_LABEL,
         details_html=details_html,
         host=host or "",
         title=title or "",

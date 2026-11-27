@@ -20,6 +20,8 @@ export type TopicEssayReviewSummary = {
   publication_decision?: { decision?: string; public_slug?: string } | null;
   stage_checks: ReviewStageCheck[];
   href: string;
+  reader_intro?: string;
+  reader_summary?: string;
 };
 
 export type TopicEssayReview = TopicEssayReviewSummary & {

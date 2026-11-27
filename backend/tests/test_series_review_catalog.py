@@ -1,0 +1,180 @@
+"""Series status and navigation follow intact Editor drafts without moving data."""
+import copy
+
+import pytest
+
+from backend.api.sc_api.series_review_catalog import SeriesReviewCatalog
+from backend.api.sc_api.transcript_review import atomic, file_hash
+
+ITEM = 'INGEST-first'
+
+
+def catalog(root, **changes):
+    meta = dict(item=ITEM, status='processing', media_ingest_source_sha256='source')
+    meta.update(changes)
+    atomic(root/'config/sermon.json', [meta])
+    return meta
+
+
+def draft(root, **changes):
+    meta = catalog(root, **changes)
+    atomic(root/'script_review'/f'{ITEM}.json', [dict(index=1, text='原文')])
+    context = dict(schema_version='transcript-review-context.v1', source_video_sha256='source',
+                   script_sha256=file_hash(root/'script_review'/f'{ITEM}.json'))
+    atomic(root/'transcript_review'/ITEM/'context.json', context)
+    return meta, context
+
+
+def test_private_beta_projects_owner_and_editor_without_mutating_catalog(tmp_path):
+    prod, beta = tmp_path/'prod', tmp_path/'beta'
+    original = catalog(prod)
+    draft(beta, status='assigned', assigned_to='editor@example.com', assigned_to_name='同工')
+    before = file_hash(prod/'config/sermon.json')
+    result = SeriesReviewCatalog(prod, beta).for_item(ITEM)
+    assert result['status'] == 'assigned'
+    assert result['assigned_to'] == 'editor@example.com'
+    assert result['editor_href'] == f'/admin/transcript-beta/{ITEM}'
+    assert set(result) == {'status', 'assigned_to', 'assigned_to_name', 'assigned_to_date', 'published_date', 'published_by', 'published_by_name', 'editor_href'}
+    assert original['status'] == 'processing'
+    assert before == file_hash(prod/'config/sermon.json')
+    # A later request sees an unclaim without waiting for the production watcher.
+    catalog(beta, status='ready')
+    assert SeriesReviewCatalog(prod, beta).for_item(ITEM)['status'] == 'ready'
+
+
+@pytest.mark.parametrize('broken', ['missing', 'script', 'source', 'malformed'])
+def test_incomplete_or_wrong_source_is_not_advertised_as_editor_ready(tmp_path, broken):
+    prod, beta = tmp_path/'prod', tmp_path/'beta'
+    catalog(prod)
+    _, context = draft(beta, assigned_to='editor@example.com')
+    path = beta/'transcript_review'/ITEM/'context.json'
+    if broken == 'missing':
+        path.unlink()
+    elif broken == 'script':
+        atomic(beta/'script_review'/f'{ITEM}.json', [])
+    elif broken == 'source':
+        context['source_video_sha256'] = 'another recording'
+        atomic(path, context)
+    else:
+        atomic(path, [])
+    assert SeriesReviewCatalog(prod, beta).for_item(ITEM) == {}
+
+
+def test_production_draft_and_publication_take_precedence(tmp_path):
+    prod, beta = tmp_path/'prod', tmp_path/'beta'
+    draft(prod, status='published', assigned_to='production@example.com')
+    draft(beta, status='assigned', assigned_to='beta@example.com')
+    # The published flag alone does not prove a publication exists.
+    assert SeriesReviewCatalog(prod, beta).for_item(ITEM)['status'] == 'assigned'
+    atomic(prod/'script_published'/f'{ITEM}.json', [])
+    result = SeriesReviewCatalog(prod, beta).for_item(ITEM)
+    assert result['status'] == 'published'
+    assert result['assigned_to'] == 'production@example.com'
+    assert result['editor_href'] == f'/admin/surmons/{ITEM}'
+
+
+def test_promotion_keeps_beta_url_and_reads_production_owner(tmp_path):
+    prod, beta = tmp_path/'prod', tmp_path/'beta'
+    draft(prod, assigned_to='new@example.com')
+    draft(beta, assigned_to='old@example.com')
+    receipt = prod/'transcript_review'/ITEM/'beta-promotion.json'
+    atomic(receipt, dict(item=ITEM))
+    marker = dict(schema_version='transcript-production-link.v1', item=ITEM,
+                  production_root=str(prod.resolve()), receipt_sha256=file_hash(receipt))
+    atomic(beta/'transcript_review'/ITEM/'production-link.json', marker)
+    result = SeriesReviewCatalog(prod, beta).for_item(ITEM)
+    assert result['assigned_to'] == 'new@example.com'
+    assert result['editor_href'] == f'/admin/transcript-beta/{ITEM}'
+    atomic(receipt, dict(item='wrong'))
+    assert SeriesReviewCatalog(prod, beta).for_item(ITEM) == {}
+
+
+def test_invalid_item_and_absent_drafts_leave_existing_metadata_alone(tmp_path):
+    prod = tmp_path/'prod'
+    meta = catalog(prod)
+    saved = copy.deepcopy(meta)
+    for item in [ITEM, '../secret', 'a/b']:
+        assert SeriesReviewCatalog(prod).for_item(item) == {}
+    assert meta == saved
+
+
+@pytest.mark.parametrize('has_draft',[False,True])
+def test_unclaim_preserves_latest_publication_and_clears_owner(tmp_path,has_draft):
+    prod=tmp_path/'prod'
+    create=draft if has_draft else catalog
+    create(prod,status='ready',assigned_to=None,assigned_to_name=None,published_date='2026-11-09 12:49')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'},'script':[{'text':'已發布內容'}]})
+    before=file_hash(prod/'config/sermon.json')
+    result=SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['status']=='published' and result['published_date']=='2026-11-09 12:49'
+    assert result['assigned_to'] is None and result['assigned_to_name'] is None
+    assert before==file_hash(prod/'config/sermon.json')
+
+
+def test_series_reads_normalized_catalog_date_without_reinterpreting_history(tmp_path):
+    prod=tmp_path/'prod';draft(prod,status='ready',published_date='2025-01-01')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','review_revision':8,'review_operation_id':'release-8'}})
+    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json',
+           {'kind':'publish','revision':8,'operation_id':'release-8','time':'2026-11-09T18:49:00+00:00'})
+    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2025-01-01'
+
+
+@pytest.mark.parametrize('kind,operation',[('unclaim','release-8'),('publish','another-operation')])
+def test_edit_or_unrelated_history_does_not_replace_publication_date(tmp_path,kind,operation):
+    prod=tmp_path/'prod';draft(prod,status='ready',published_date='2025-01-01')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','review_revision':8,'review_operation_id':'release-8'}})
+    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json',
+           {'kind':kind,'revision':8,'operation_id':operation,'time':'2026-11-09T18:49:00+00:00'})
+    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2025-01-01'
+
+
+def test_beta_draft_owner_does_not_hide_existing_public_release(tmp_path):
+    prod,beta=tmp_path/'prod',tmp_path/'beta';catalog(prod,status='ready',published_date='2026-11-09')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'}})
+    draft(beta,status='assigned',assigned_to='editor',assigned_to_name='校對者')
+    result=SeriesReviewCatalog(prod,beta).for_item(ITEM)
+    assert result['status']=='published' and result['published_date']=='2026-11-09'
+    assert result['assigned_to']=='editor' and result['editor_href']==f'/admin/transcript-beta/{ITEM}'
+
+
+def test_missing_publication_date_stays_unknown_not_edit_time(tmp_path):
+    prod=tmp_path/'prod';catalog(prod,status='ready',last_updated='2026-11-09')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','last_updated':'2026-11-09'}})
+    result=SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['status']=='published' and result['published_date'] is None
+
+
+def test_beta_only_release_is_not_a_publication_in_production(tmp_path):
+    prod,beta=tmp_path/'prod',tmp_path/'beta';catalog(prod)
+    draft(beta,status='published',published_date='2026-11-09')
+    atomic(beta/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'}})
+    result=SeriesReviewCatalog(prod,beta).for_item(ITEM)
+    assert result['status']=='ready' and result['published_date'] is None
+
+
+def test_publication_actor_is_independent_of_current_draft_owner(tmp_path):
+    prod, beta = tmp_path/'prod', tmp_path/'beta'
+    catalog(prod, status='ready', published_by='publisher', published_by_name='發佈同工')
+    draft(beta, assigned_to='new-editor', assigned_to_name='新認領人')
+    atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {'status': 'published'}})
+    result = SeriesReviewCatalog(prod, beta).for_item(ITEM)
+    assert result['published_by'] == 'publisher'
+    assert result['published_by_name'] == '發佈同工'
+    assert result['assigned_to'] == 'new-editor'
+
+
+@pytest.mark.parametrize('has_draft', [False, True])
+def test_series_never_infers_publisher_from_snapshot_or_owner(tmp_path, has_draft):
+    prod = tmp_path/'prod'
+    create = draft if has_draft else catalog
+    create(prod, status='published', assigned_to='owner', assigned_to_name='認領人')
+    atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {
+        'status': 'published', 'author': 'author', 'published_by': 'snapshot-actor',
+        'reviewed_by': 'reviewer', 'review_revision': 8, 'review_operation_id': 'release-8',
+    }})
+    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json', {
+        'kind': 'publish', 'revision': 8, 'operation_id': 'release-8', 'actor': 'history-actor',
+    })
+    result = SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['published_by'] is None
+    assert result['published_by_name'] is None

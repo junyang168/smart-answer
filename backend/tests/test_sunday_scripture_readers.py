@@ -22,35 +22,39 @@ def _readers_by_slide(sections, readers):
     return [(d["label"], d["reader"]) for d in data], [s["reader"] for s in summary], assigned
 
 
-def test_three_readers_for_four_slides_share_a_passage():
-    slides, summary, assigned = _readers_by_slide(OCT_4, ["王冬丽", "楊軍", "余克宇"])
-    assert slides == [
-        ("創世記 5:21-25", "王冬丽"),
-        ("創世記 5:26-29", "王冬丽"),
-        ("創世記 7:11-13", "楊軍"),
-        ("希伯來書 11:5-7", "余克宇"),
-    ]
-    assert summary == ["王冬丽", "王冬丽", "楊軍", "余克宇"]
-    assert assigned == ["王冬丽", "楊軍", "余克宇"]
+def test_nine_verse_passage_requires_two_readers_even_if_text_is_short():
+    with pytest.raises(ValueError,match='至少需要 4 位'):
+        _readers_by_slide(OCT_4,['甲','乙','丙'])
+    slides,summary,assigned=_readers_by_slide(OCT_4,['甲','乙','丙','丁'])
+    assert slides==[('創世記 5:21-25','甲'),('創世記 5:26-29','乙'),('創世記 7:11-13','丙'),('希伯來書 11:5-7','丁')]
+    assert summary==assigned==['甲','乙','丙','丁']
 
 
-def test_enough_readers_still_get_one_slide_each():
-    slides, _, assigned = _readers_by_slide(OCT_4, ["A", "B", "C", "D", "E"])
-    assert [reader for _, reader in slides] == ["A", "B", "C", "D"]
-    assert assigned == ["A", "B", "C", "D"]
+def test_more_than_four_readers_is_rejected():
+    with pytest.raises(ValueError,match='最多 4 位'):
+        _readers_by_slide(OCT_4,['A','B','C','D','E'])
 
 
-def test_spare_readers_go_to_the_longest_passage():
-    long_one = [_section("詩篇", 119, 1, 24), _section("約翰福音", 3, 16, 19)]  # 24 verses -> several slides
-    slides, _, _ = _readers_by_slide(long_one, ["A", "B", "C"])
-    readers = [reader for label, reader in slides if label.startswith("詩篇")]
-    assert set(readers) == {"A", "B"} and readers == sorted(readers)  # contiguous chunks
-    assert [reader for label, reader in slides if label.startswith("約翰")] == ["C"]
+def test_twenty_four_plus_four_verses_need_exactly_four_readers():
+    sections=[_section('詩篇',119,1,24),_section('約翰福音',3,16,19)]
+    slides,_,assigned=_readers_by_slide(sections,['A','B','C','D'])
+    assert assigned==['A','B','C','D']
+    assert [reader for label,reader in slides if label.startswith('約翰')]==['D']
+    assert all(sum(len(page['lines']) for page in service._prepare_scripture_sections(sections,['A','B','C','D'])[0] if page['reader']==name)<=8 for name in assigned)
 
 
-def test_every_passage_needs_a_reader():
-    with pytest.raises(ValueError, match="3 段經文至少需要 3 位讀經同工"):
-        service._prepare_scripture_sections(OCT_4, ["A", "B"])
+def test_long_text_spans_pages_without_adding_readers():
+    section=_section('列王紀上',19,1,18)
+    for verse in section['verses']:verse['text']='這是需要舒適行距與分頁的完整經文。'*3
+    pages,summary,assigned=service._prepare_scripture_sections([section],['甲','乙','丙'])
+    assert len(pages)>3 and assigned==['甲','乙','丙']
+    assert summary==[{'label':'列王紀上 19:1-6','reader':'甲'}, {'label':'列王紀上 19:7-12','reader':'乙'}, {'label':'列王紀上 19:13-18','reader':'丙'}]
+    assert all(sum(len(page['lines']) for page in pages if page['reader']==name)==6 for name in assigned)
+
+
+def test_over_thirty_two_verses_requires_explicit_arrangement():
+    with pytest.raises(ValueError,match='最多 4 位同工，每人最多 8 節'):
+        _readers_by_slide([_section('詩篇',119,1,33)],['A','B','C','D'])
 
 
 def test_duplicate_readers_are_still_refused():

@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 from markdownify import markdownify as md_convert
 
 def fetch_lyrics_text(
@@ -98,21 +98,83 @@ def _element_to_markdown(element: Tag | BeautifulSoup) -> str:
 
 
 def _flatten_tables(root: Tag | BeautifulSoup) -> None:
-    for table in list(root.find_all("table")):
-        rows: list[str] = []
-        for tr in table.find_all("tr"):
-            cells = [
-                cell.get_text(" ", strip=True)
-                for cell in tr.find_all(["th", "td"])
-            ]
-            row_text = " ".join(filter(None, cells)).strip()
-            if row_text:
-                rows.append(row_text)
-        replacement_text = "\n".join(rows).strip()
-        if replacement_text:
-            table.replace_with(replacement_text)
-        else:
-            table.decompose()
+    # These are layout tables: a verse number and its multi-line lyric cell.
+    # Keep the DOM until markdown conversion: get_text(" ") destroys <br>/<p>
+    # boundaries and inserts invented spaces between inline Word-export spans.
+    # Inner tables go first, so no nested row is emitted twice.
+    for table in reversed(list(root.find_all("table"))):
+        replacement = Tag(name="div")
+        for tr in list(table.find_all("tr")):
+            row = Tag(name="div")
+            cells = tr.find_all(["th", "td"], recursive=False)
+            # A number cell labels the following verse; it is not a slide.
+            if len(cells) == 2 and re.fullmatch(r"\d{1,2}", cells[0].get_text(strip=True)) and cells[1].get_text(strip=True):
+                number = cells[0].get_text(strip=True)
+                first = cells[1].find(["p", "div"])
+                (first or cells[1]).insert(0, number + " ")
+                cells = cells[1:]
+            for index, cell in enumerate(cells):
+                if index:
+                    row.append(" ")
+                _normalize_word_lyric_paragraphs(cell)
+                for child in list(cell.contents):
+                    row.append(child.extract())
+            if row.get_text(strip=True):
+                replacement.append(row)
+        table.replace_with(replacement)
+
+
+def _normalize_word_lyric_paragraphs(cell: Tag) -> None:
+    """Word sometimes uses paragraphs for lines, and double BRs for stanzas.
+
+    Only use that convention when the cell actually contains Word paragraphs
+    and explicit blank lines. Ordinary HTML paragraphs still delimit stanzas.
+    HTML source indentation inside inline spans is not a sung line break.
+    """
+    paragraphs = cell.find_all("p", recursive=False)
+    if len(paragraphs) < 2 or any(
+        not any(name.startswith("Mso") for name in p.get("class", []))
+        for p in paragraphs if p.get_text(strip=True)
+    ):
+        return
+    if any(
+        (isinstance(child, Tag) and child.name != 'p')
+        or (isinstance(child, NavigableString) and child.strip())
+        for child in cell.contents
+    ):
+        return  # Do not discard mixed/non-paragraph cell content.
+    rendered = []
+    for paragraph in paragraphs:
+        pieces = []
+        for node in paragraph.descendants:
+            if isinstance(node, Tag) and node.name == "br":
+                pieces.append("\n")
+            elif isinstance(node, NavigableString):
+                # Preserve real inline spaces (including English word spaces),
+                # but not Word's source-code newlines/indentation between spans.
+                value = re.sub(r"^[ \t]*[\r\n]+[ \t]*|[ \t]*[\r\n]+[ \t]*$", "", str(node))
+                pieces.append(re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", value))
+        rendered.append("\n".join(line.strip() for line in "".join(pieces).split("\n")))
+    if not any("\n\n" in text for text in rendered):
+        return
+    # A BR before a paragraph boundary is already that line break. Do not let
+    # implicit paragraph separation manufacture another stanza boundary.
+    text = ""
+    for part in rendered:
+        if not part:
+            if text:
+                text = text.rstrip("\n") + "\n\n"
+            continue
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += part
+    replacement = Tag(name="div")
+    for index, line in enumerate(text.strip().split("\n")):
+        if index:
+            replacement.append(Tag(name="br"))
+        replacement.append(line)
+    cell.clear()
+    cell.append(replacement)
 
 
 def _ensure_response_encoding(response: requests.Response) -> None:

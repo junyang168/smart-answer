@@ -157,3 +157,23 @@ def test_keeps_a_single_release_when_no_rollback_target_is_recorded(deploy_root:
     assert result.returncode == 0, result.stderr
     assert active.is_dir()
     assert "Nothing to prune" in result.stdout
+
+
+def test_a_long_deploy_log_finds_the_rollback_target_without_tac(deploy_root: Path) -> None:
+    # 2026-11-04：rollback 的查找读到目标就停，`tail -r` 写不完被 SIGPIPE 杀掉，
+    # 退回 macOS 上没有的 `tac`。日志超过管道缓冲区时每次都会发生。
+    oldest = make_release(deploy_root, SHA_A)
+    previous = make_release(deploy_root, SHA_B)
+    active = make_release(deploy_root, SHA_C)
+    for _ in range(5000):
+        write_deployment(deploy_root, SHA_D, "none")
+    write_deployment(deploy_root, SHA_B, str(oldest))
+    write_deployment(deploy_root, SHA_C, str(previous))
+    (deploy_root / "active-release").write_text(f"{active}\n")
+
+    result = run_prune(deploy_root)
+
+    assert result.returncode == 0, result.stderr
+    assert "tac" not in result.stderr
+    assert previous.is_dir()
+    assert not oldest.exists()

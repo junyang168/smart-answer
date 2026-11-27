@@ -84,12 +84,14 @@ class ScriptDelta:
         return f'{h:02}:{m:02}:{s:02}'
 
     def add_timeline(self, paragraphs):
-        paragraphs = [ p for p in paragraphs if p.get('type') != 'comment']
+        # Headings have no timeline entry and cannot anchor the following row.
+        # Filter them before selecting neighbours, as we already do comments.
+        paragraphs = [p for p in paragraphs
+                      if p.get('type') not in ('comment', 'subtitle')
+                      and not (isinstance(p.get('index'), str)
+                               and p['index'].startswith('subtitle-'))]
         for i in range(0, len(paragraphs)):
             para = paragraphs[i]
-            if isinstance(para.get('index'), str) and para['index'].startswith('subtitle-'):
-                continue
-
             if para.get('end_index'):
                 start_item = self.timelineDictionary[  para['index'] ] 
                 if start_item:
@@ -234,6 +236,10 @@ class ScriptDelta:
             ent = { 'text':p.text }
             if p.type:
                 ent['type'] = p.type
+            # Body paragraphs often have no type. Preserve their existing
+            # attribution independently; the current login is not proof that
+            # it authored every submitted row, so never fill missing authors.
+            if p.user_id:
                 ent['user_id'] = p.user_id
             if p.index:
                 ent['index'] = p.index
@@ -332,7 +338,17 @@ class ScriptDelta:
         )
 
     @staticmethod
-    def save_json_payload(
+    def save_json_payload(base_folder, item_name, folder, payload, *, expected_current_sha256=None):
+        from .transcript_review import ReviewStore
+        store=ReviewStore(Path(base_folder))
+        with store.lock(item_name):
+            if store.enabled(item_name):
+                raise ScriptConflictError('Use the transcript review workflow for this sermon')
+            return ScriptDelta._save_json_payload_legacy(base_folder,item_name,folder,payload,
+                expected_current_sha256=expected_current_sha256)
+
+    @staticmethod
+    def _save_json_payload_legacy(
         base_folder: str,
         item_name: str,
         folder: str,
@@ -349,6 +365,8 @@ class ScriptDelta:
         historical list-only method above.
         """
 
+        if (Path(base_folder)/'transcript_review'/item_name/'context.json').is_file():
+            raise ScriptConflictError('Use the transcript review workflow for this sermon')
         if folder not in ('slide', 'script_review', 'script_published'):
             raise ValueError(f"unsupported script folder: {folder}")
         if folder in ('script_review', 'script_published') and not expected_current_sha256:
@@ -451,11 +469,20 @@ class ScriptDelta:
         return { 'metadata': metadata, 'script': sermon_detail}
 
 
-    def publish(
+    def publish(self,author,*,expected_review_sha256=None,publication=None):
+        from .transcript_review import ReviewStore
+        store=ReviewStore(Path(self.base_folder))
+        with store.lock(self.item_name):
+            if store.enabled(self.item_name):
+                raise ScriptConflictError('Use the transcript review workflow for this sermon')
+            return self._publish_legacy(author,expected_review_sha256=expected_review_sha256,publication=publication)
+
+    def _publish_legacy(
         self,
         author: str,
         *,
         expected_review_sha256: str | None = None,
+        publication: dict | None = None,
     ) -> str:
         """Atomically publish one exact review snapshot.
 
@@ -466,6 +493,8 @@ class ScriptDelta:
         publishes whichever complete snapshot it locks.
         """
 
+        if (Path(self.base_folder)/'transcript_review'/self.item_name/'context.json').is_file():
+            raise ScriptConflictError('Use the transcript review workflow for this sermon')
         review_target = os.path.join(
             self.base_folder, "script_review", self.item_name + ".json"
         )
@@ -508,6 +537,8 @@ class ScriptDelta:
                 },
                 "script": published_script,
             }
+            from .sermon_publication import publication_fields
+            published["metadata"].update(publication or publication_fields(None, None, datetime.datetime.now(datetime.timezone.utc)))
             encoded = json.dumps(
                 published, ensure_ascii=False, indent=4
             ).encode("UTF-8")

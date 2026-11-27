@@ -1,5 +1,7 @@
 "use client";
 
+import { useSession } from "next-auth/react";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -11,11 +13,34 @@ const navItems = [
   { href: "/", label: "網站首頁", exact: true },
 ];
 
-export const AdminHeader = () => {
+export const AdminHeader = ({ transcriptCutover = false }: { transcriptCutover?: boolean }) => {
   const pathname = usePathname();
+  const isTranscriptEditor = /^\/admin\/(?:transcripts|transcript-beta)\/[^/]+\/?$/.test(pathname);
+  const { data: session } = useSession();
+  const items = (transcriptCutover ? hasEditorAccess(session?.user?.role) : hasTranscriptBetaAccess(
+    session?.user?.email,
+    session?.user?.role,
+  ))
+    ? [
+        ...navItems.slice(0, 1),
+        { href: transcriptCutover ? "/admin/transcripts" : "/admin/transcript-beta", label: transcriptCutover ? "逐字稿" : "逐字稿 Beta", exact: false },
+        ...navItems.slice(1),
+      ]
+    : navItems;
+
+  const visibleItems =
+    hasEditorAccess(session?.user?.role)
+      ? [
+          ...items.slice(0, 1),
+          { href: "/admin/media-batches", label: "批次轉錄", exact: false },
+          ...items.slice(1),
+        ]
+      : items;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
+    <header
+      className={`${isTranscriptEditor ? "relative lg:sticky" : "sticky"} top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm`}
+    >
       <div className="container mx-auto flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6">
         <Link href="/admin" className="flex items-center gap-3">
           <Image
@@ -27,10 +52,19 @@ export const AdminHeader = () => {
           />
           <span className="text-sm font-semibold text-gray-700">Admin</span>
         </Link>
-        <nav aria-label="後台主導覽" className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold">
-          {navItems.map((item) => {
-            const isWangLegacy = item.href === "/admin/wang" && pathname.startsWith("/admin/canonical-repository");
-            const isActive = isWangLegacy || (item.exact ? pathname === item.href : pathname.startsWith(item.href));
+        <nav
+          aria-label="後台主導覽"
+          className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold"
+        >
+          {visibleItems.map((item) => {
+            const isWangLegacy =
+              item.href === "/admin/wang" &&
+              pathname.startsWith("/admin/canonical-repository");
+            const isActive =
+              isWangLegacy ||
+              (item.exact
+                ? pathname === item.href
+                : pathname.startsWith(item.href));
             return (
               <Link
                 key={item.href}

@@ -86,7 +86,7 @@ def test_get_fellowship_email_content_uses_reminder_template(monkeypatch):
 
     content = service.get_fellowship_email_content("2026-06-05")
 
-    assert content.subject == "達拉斯圣道教会团契 时间: 06/05 周五晚 7:30 - 9:00 CST "
+    assert content.subject == "達拉斯圣道教会团契 时间: 06/05 週四晚 8:00（美國中部時間） "
     assert "弟兄姊妹们平安" in content.html
     assert "主持人:</td>" in content.html
     assert "Series 系列 的第 3 講" in content.html
@@ -116,9 +116,9 @@ def test_get_fellowship_email_content_honors_reminder_template_override(monkeypa
     assert content.html == "<p>06/05|Host|Title|Series|3</p>"
 
 
-def test_admin_email_send_records_production_reminder_status(monkeypatch):
+def test_admin_email_send_records_production_reminder_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_BASE_DIR", str(tmp_path))
     sent = {}
-    recorded = {}
     monkeypatch.setattr(
         service,
         "get_fellowship_email_content",
@@ -132,16 +132,10 @@ def test_admin_email_send_records_production_reminder_status(monkeypatch):
         "send_email",
         lambda **kwargs: sent.update(kwargs),
     )
-    monkeypatch.setattr(
-        service,
-        "record_fellowship_email_sent",
-        lambda event_date: recorded.update(event_date=event_date),
-    )
-
     result = service.email_fellowship("2026-06-05")
 
     assert sent["recipients"] == ["person@example.com"]
-    assert recorded["event_date"].isoformat() == "2026-06-05"
+    assert load_last_sent_fellowship_date(tmp_path / "notification/last_sent.json") == "2026-06-05"
     assert result.dry_run is False
 
 

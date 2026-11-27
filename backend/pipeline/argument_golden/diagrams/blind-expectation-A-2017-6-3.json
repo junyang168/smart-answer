@@ -1,0 +1,23 @@
+{
+ "schema": "diagram-gold-key-blind-expectation.v1",
+ "written": "2026-11-17, before any Claim, step or candidate file of this run existed (Claude read only his transcript)",
+ "key": "A",
+ "lecture": "2017 NYSC 專題：馬太福音釋經（六）3",
+ "parts": [
+  {"part": "1 神先施恩，再提出要求", "must_have": true, "taught": true,
+   "his_reasons": ["宗主國／附庸國的約（S0010, S0013）：宗主國先恩待，再提出要求；不是對等的討價還價",
+                   "出 20:1：先從埃及為奴之家領出來，再頒十條誡（S0013）",
+                   "耶 31:31–33 新約與立約公式「我要作他們的神，他們要作我的民」（S0013）"]},
+  {"part": "2 要求是為子民的好處", "must_have": false, "taught": "unclear: 「宗主國先給附庸國一些好處」 is the grace, not the demands being for their good"},
+  {"part": "3 遵行只能維持好關係，不能建立；不遵行則約破裂", "must_have": true, "taught": true,
+   "his_reasons": ["宗主國／附庸國：附庸國全部接受或全部不接受；遵守只能維持既有的好關係（S0013）",
+                   "猶太人沒有守要求 → 審判、被擄巴比倫、滅國（S0013）"]},
+  {"part": "4 舊約的要求是摩西律法", "must_have": true, "taught": true,
+   "his_reasons": ["十條誡就是宗主國神向附庸國以色列所提的要求（S0013）", "舊約施恩=出埃及，要求=十條誡、摩西律法（S0014）"]},
+  {"part": "5 新約的要求是基督的律法", "must_have": true, "taught": true,
+   "his_reasons": ["新約施恩=拯救信祂的人脫離罪和魔鬼的綑綁（S0014）", "林前 9:21 ennomos Christou：「我乃在基督律法之下」（S0014）", "加 6:2（S0014）"]},
+  {"part": "A3 摩西律法是細節條文、字句；基督的律法是一般原則、聖靈", "must_have": true, "taught": true,
+   "his_reasons": ["幼稚園孩子要逐條吩咐、上大學只講一般原則（S0014）", "舊約是字句 gramma；新約中文譯「精意」其實是「聖靈」，聖靈幫助我們遵守基督的律法（S0014）"]}
+ ],
+ "note": "Paragraph keys are S + 1-based paragraph number; to be checked against the run's locators before grading."
+}

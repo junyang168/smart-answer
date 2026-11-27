@@ -89,25 +89,41 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
     return adapter
 
 
-def claim_management_model_adapter(role, policy, *, live=False):
+def claim_management_model_adapter(role, policy, *, live=False, saved_prompts=None):
     """The new content contract shares the existing subscription transport."""
     from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, JointJsonCandidate, JointReview, MODELS
     if role not in {"gpt", "opus"}:
         raise ValueError("independent Gemini audit uses audit-library's own transport")
-    model, _ = MODELS[role]
-    client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
-        model=model, backend=MODELS[role][1], reasoning_effort="high",
+    if live and saved_prompts is not None:
+        raise ValueError('saved role prompts are for authenticating history, never new calls')
+    def prompt_text(name):
+        return saved_prompts[name] if saved_prompts is not None else (PROMPTS / name).read_text()
+    model = policy.models[role]['model_id']
+    backend = policy.models[role]['backend']
+    if live and backend == 'anthropic_api':
+        from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
+        client = ClaimAnthropicAPI(model=model, reasoning_effort='high',
+            max_output_tokens=policy.budget.max_output_tokens,
+            spend_root=policy.api_spend['root'],
+            cache_enabled=policy.request_encoding_contract is not None)
+    else:
+        client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
+        model=model, backend=backend, reasoning_effort="high",
         max_output_tokens=policy.budget.max_output_tokens)
     client.max_output_tokens = policy.budget.max_output_tokens
-    prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
-                                          else "claim_management_review_v2.md")).read_text())
+    if policy.request_encoding_contract and role == 'gpt':
+        client.cache_usage_events = True
+        if policy.api_spend:
+            client.cache_working_directory = str(Path(policy.api_spend['root']).parent / 'codex-cache-context')
+    prompt = semantic_prompt(prompt_text("claim_management_proposal_v2.md" if role == "gpt"
+                                          else "claim_management_review_v2.md"))
     if role == 'gpt':
         prompt += '\n输出采用无损 JSON 协议：records 每条 payload_json 为完整后像的 JSON 字符串；replacements_json 为完整 replacements 字典的 JSON 字符串（无替换时为 {}）。程序解析后仍执行完整 Candidate 权限、来源与处置验证，不删字段。'
     if role == 'gpt' and policy.all_findings_to_gpt:
         prompt += '\n所有审计异议必须逐项判定：finding_resolutions 对 unresolved 的每个 finding_id 恰好一次，带完整原文逐字引文。resolved 表示通过实际修正或有据否决解决，未改内容须在 reason 中明确反驳依据；persistent 表示认可问题仍未解决，不把 Opus 的验收条件当修改命令。不能跳过无关上下文异议。只写 request 授权字段；缺权限仍须给出判定及所需修正，不能擅自写。Review 操作只作判断，operation 保持 Review、所有 dispositions 保留 retain。'
     joint = policy.joint_update_contract is not None
     if joint:
-        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_management_joint_update_v1.md').read_text())
+        prompt += '\n' + semantic_prompt(prompt_text('claim_management_joint_update_v1.md'))
     response_model = (AdjudicatingJsonCandidate if policy.all_findings_to_gpt else JsonCandidate) if role == 'gpt' else Review
     schema_name = 'claim_management_candidate_v2' if role == 'gpt' else 'claim_management_review_v2'
     if joint:
@@ -120,18 +136,22 @@ def claim_management_model_adapter(role, policy, *, live=False):
         response_model = (ManagedChanges if managed else CreatingChanges if creating else Changes) if role == 'gpt' else FindingsReview
         schema_name = ('claim_changes_v4' if managed else 'claim_changes_v3' if creating else 'claim_changes_v1') if role == 'gpt' else 'claim_findings_review_v1'
         version = {'claim_changes_v2': 'v2', CREATING_CONTRACT: 'v3', MANAGED_CONTRACT: 'v4'}.get(policy.model_output_contract, 'v1')
-        prompt = semantic_prompt((PROMPTS / ('claim_management_compact_' + version + '.md')).read_text()) + ('\n你是提议者，输出 Changes。' if role == 'gpt' else '\n你是独立 Opus 审阅者，输出 FindingsReview。')
+        prompt = semantic_prompt(prompt_text('claim_management_compact_' + version + '.md')) + ('\n你是提议者，输出 Changes。' if role == 'gpt' else '\n你是独立 Opus 审阅者，输出 FindingsReview。')
     if policy.evidence_review_contract:
         from backend.pipeline.claim_evidence_review import BindingFindingsReview
-        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_own_evidence_v1.md').read_text())
+        prompt += '\n' + semantic_prompt(prompt_text('claim_own_evidence_v1.md'))
         if role == 'opus':
             response_model = BindingFindingsReview
             schema_name = 'claim_own_evidence_review_v1'
+    if policy.review_unit_contract:
+        prompt += '\n' + semantic_prompt(prompt_text('claim_bounded_review_unit_v1.md'))
+    if policy.retry_context_contract:
+        prompt += '\n' + semantic_prompt(prompt_text('claim_database_retry_v1.md'))
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
         response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = policy.budget.max_request_bytes
-    return adapter
+    return adapter.shared_shapes_v6_copy() if policy.request_encoding_contract else adapter
 
 
 def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict:
@@ -186,6 +206,22 @@ def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict
 class ProductionPorts:
     def __init__(self, store=None):
         self.store = store or PostgresKnowledgeStore()
+        configuration = os.environ.get('WKP_CLAIM_CAPACITY_CONFIG')
+        if configuration:
+            from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+            gate = ClaimModelCapacity(json.loads(Path(configuration).read_text()))
+            def capacity_call(role, artifacts):
+                opus_api = False
+                path = Path(artifacts).parent/'materials.json'
+                if path.is_file():
+                    from backend.pipeline import claim_management as cm
+                    materials = json.loads(path.read_text())
+                    if materials.get('schema_version') == cm.VERSION:
+                        request = cm.Request.model_validate(materials['unit_request'])
+                        policy = cm.Policy.model_validate_json(cm.source.verify_file(request.policy).read_text())
+                        opus_api = policy.models['opus']['backend'] == 'anthropic_api'
+                return gate.call(role, artifacts, opus_api=opus_api)
+            self.model_call_capacity = capacity_call
 
     def current_snapshot(self, keys):
         """Fresh exact row identities, including storage metadata; no SELECT-all."""

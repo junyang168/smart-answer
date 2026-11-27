@@ -215,7 +215,11 @@ def _html_to_text(value: str) -> str:
 def _resolve_ppt_path(service: SundayServiceEntry) -> Path:
     if not service.final_ppt_filename:
         raise RuntimeError(f"Service {service.date} does not have a finalized PPT")
-    ppt_path = SUNDAY_WORSHIP_DIR / service.final_ppt_filename
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    cloud = OneDrivePpts.configured()
+    ppt_path = cloud.file(service_day(service.date), service.final_ppt_filename) if cloud else SUNDAY_WORSHIP_DIR / service.final_ppt_filename
+    if cloud and not ppt_path.exists():
+        ppt_path = SUNDAY_WORSHIP_DIR / service.final_ppt_filename
     if not ppt_path.exists():
         raise FileNotFoundError(f"Finalized PPT not found at {ppt_path}")
     return ppt_path

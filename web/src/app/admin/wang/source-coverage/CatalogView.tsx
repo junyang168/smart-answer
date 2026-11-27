@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ArgumentUpdateStatus } from "@/app/components/series/ArgumentUpdateStatus";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { getBookOrderIndex } from "@/app/utils/bible-order";
 import type { CatalogEntry, SourceMeta } from "./types";
@@ -135,7 +136,7 @@ function TopicGroups({ catalog, statsById, onOpen }: GroupProps) {
       {untopiced.length ? (
         <FlatGroup
           title="沒有主題"
-          subtitle="目錄沒有給它 topic。三份母本本來就不在講道目錄裡。"
+          subtitle="沒有登記講道主題。"
           entries={untopiced}
           statsById={statsById}
           onOpen={onOpen}
@@ -215,6 +216,9 @@ function SermonRow({
           ) : null}
         </span>
         {entry.file ? <span className="block truncate font-mono text-[10.5px] text-slate-400">{entry.file}</span> : null}
+      </span>
+      <span className="shrink-0 whitespace-nowrap text-[11px]">
+        論證層 <ArgumentUpdateStatus status={entry.argument_update_status} />
       </span>
       {stats ? (
         <span className="flex shrink-0 items-center gap-3 font-mono text-[11px] text-slate-500">

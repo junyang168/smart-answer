@@ -103,4 +103,7 @@ def project(packet):
     # occur in the previous candidate. Deduplicate only identical full records.
     existing=[*(candidate or {}).get('prior_findings',[]),*(candidate or {}).get('findings',[])]
     result['prior_findings']=clean([f for f in packet.get('prior_findings',[]) if f not in existing])
+    if packet.get('program_validation_feedback'):
+        result['program_validation_feedback']=clean({k:v for k,v in packet['program_validation_feedback'].items()
+            if k!='raw_artifact'})
     return result

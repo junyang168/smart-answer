@@ -1,5 +1,6 @@
 import json
 import os
+from .roles import role_permissions
 
 class AccessControl:
 
@@ -33,11 +34,7 @@ class AccessControl:
             return []
         
 
-        permissions = set() 
-        for role in user_roles:
-            permissions.update([rp['permission'] for rp in self.config['role_permissions'] if rp['role'] == role])
-
-        return list(permissions)  
+        return list(role_permissions(self.config, user_id))
 
     def get_status_order(self, status:str):
         return self.status_order.index(status)    

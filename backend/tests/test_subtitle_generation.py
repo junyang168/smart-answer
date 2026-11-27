@@ -328,9 +328,34 @@ def test_subtitles_are_configured_on_their_own_variable(monkeypatch) -> None:
 
     monkeypatch.delenv("SUBTITLE_MODEL", raising=False)
     monkeypatch.setenv("FULL_ARTICLE_MODEL", "gemini-9-nonsense")
-    assert subtitle_model() == "gpt-5.6-sol"
+    assert subtitle_model() == "gpt-6.1-sol"
     monkeypatch.setenv("SUBTITLE_MODEL", "gpt-5.6-sol-preview")
     assert subtitle_model() == "gpt-5.6-sol-preview"
+
+
+def test_sol61_request_preserves_medium_reasoning(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from backend.pipeline.subtitle_generation import build_client, SUBTITLE_SCHEMA
+
+    monkeypatch.delenv("SUBTITLE_MODEL", raising=False)
+    monkeypatch.delenv("SUBTITLE_REASONING_EFFORT", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-no-network")
+    client = build_client()
+    requests = []
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content='{"insertions": []}'
+        ))])
+
+    client.client = SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=create)
+    ))
+    assert client.generate_json("system", "source", SUBTITLE_SCHEMA) == {"insertions": []}
+    assert requests[0]["model"] == "gpt-6.1-sol"
+    assert requests[0]["reasoning_effort"] == "medium"
+    assert "temperature" not in requests[0]
 
 
 # -- the two consumers -----------------------------------------------------

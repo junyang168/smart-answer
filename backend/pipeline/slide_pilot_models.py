@@ -41,14 +41,18 @@ class VisionReviewer:
 
     def contents(self, ids: list[str], paths: list[Path]):
         import json
+        import mimetypes
+        mime_types = [mimetypes.guess_type(p.name)[0] for p in paths]
+        if any(mime not in ('image/jpeg', 'image/png') for mime in mime_types):
+            raise ValueError('Vision pilot accepts only JPEG or PNG images')
         if self.provider == "openai":
             parts = [{"type": "input_text", "text": "Candidate IDs: " + json.dumps(ids)}]
             parts += [{"type": "input_image", "detail": "high", "image_url":
-                "data:image/jpeg;base64," + base64.b64encode(p.read_bytes()).decode()} for p in paths]
+                f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()} for p, mime in zip(paths, mime_types)]
             return [{"role": "user", "content": parts}]
         from google.genai import types
         return [types.Part.from_text(text=self.prompt + '\nCandidate IDs: ' + json.dumps(ids))] + [
-            types.Part.from_bytes(data=p.read_bytes(), mime_type="image/jpeg") for p in paths]
+            types.Part.from_bytes(data=p.read_bytes(), mime_type=mime) for p, mime in zip(paths, mime_types)]
 
     def count(self, contents) -> int:
         if self.provider == "openai":
@@ -79,7 +83,10 @@ class VisionReviewer:
         candidates = raw.get("candidates", [])
         if len(candidates) != 1 or candidates[0].get("finish_reason") != "STOP":
             raise ValueError("Incomplete Gemini response saved; no automatic retry")
-        return ''.join(p.get("text", "") for p in candidates[0]["content"]["parts"] if not p.get("thought"))
+        parts=candidates[0].get("content", {}).get("parts", [])
+        text=''.join(p.get("text", "") for p in parts if not p.get("thought"))
+        if not text.strip():raise ValueError("Empty completed Gemini response saved; no silent empty answer")
+        return text
 
     def usage(self, raw: dict) -> dict:
         if self.provider == "openai":

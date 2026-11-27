@@ -1,0 +1,701 @@
+"""Series -> Unit argument reader for human acceptance review (zero system IDs on screen).
+
+Reads staged Layer 1 segmentation + #845 unit-argument.json + optional fidelity/roundtrip
+reports under ``DATA_BASE_PATH / "unit_argument_series" / <series_id>``.
+The only write is appending an owner acceptance ruling under ``DATA_BASE_PATH / "argument_layer"``.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import re
+from typing import Any
+
+from backend.pipeline import original_audio_index as audio
+
+SERIES_DIR_NAME = "unit_argument_series"
+RULINGS_REL = Path("argument_layer") / "series-unit-rulings.json"
+VERDICTS = {"approved", "needs_revision"}
+
+RELATION_IN_LABEL = {
+    "supports": "理由／依據",
+    "illustrates": "例證說明",
+    "refutes": "他反對的看法",
+    "qualifies": "限定條件",
+    "contextualizes": "背景脈絡",
+    "answers": "回答來源",
+}
+RELATION_OUT_LABEL = {
+    "supports": "支持",
+    "illustrates": "舉例說明",
+    "refutes": "反駁",
+    "qualifies": "限定",
+    "contextualizes": "交代背景",
+    "answers": "回答問題",
+}
+NODE_KIND_LABEL = {
+    "claim": "論點",
+    "evidence": "依據",
+    "observation": "他指出",
+    "example": "例證",
+    "position": "他反對的看法",
+    "question": "問題",
+}
+
+
+def _parse_clock_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    parts = value.strip().split(":")
+    try:
+        nums = [float(x) for x in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        return round(nums[0] * 3600 + nums[1] * 60 + nums[2], 1)
+    if len(nums) == 2:
+        return round(nums[0] * 60 + nums[1], 1)
+    return None
+
+
+def _load_matching_attribution(rd: dict[str, Any], attr_file: Path) -> dict[str, str] | None:
+    """Return {finding_id: root_cause} only if attribution is cryptographically bound to this diff report."""
+    if not attr_file.exists():
+        return None
+    from backend.pipeline.argument_roundtrip_verify import sha256_json
+
+    ad = json.loads(attr_file.read_text(encoding="utf-8"))
+    expected_diff_sha = sha256_json(rd)
+    if not ad.get("diff_sha256") or ad.get("diff_sha256") != expected_diff_sha:
+        return None
+    return {a.get("finding_id"): a.get("root_cause", "") for a in ad.get("attributions", [])}
+
+
+def _apply_roundtrip_attribution(rd: dict[str, Any], attr_file: Path) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Apply bound Stage 3 attribution to distortions/omissions; fail closed if stale or unbound."""
+    rc_by_id = _load_matching_attribution(rd, attr_file)
+    dists = rd.get("stance_and_logic_distortions", [])
+    omissions = rd.get("core_argument_omissions", [])
+    if rc_by_id is None:
+        return rd.get("summary_metrics", {}).get("distortion_count", 0), omissions, dists, False
+    tagged_dists = [
+        d | {"root_cause": rc_by_id.get(d.get("distortion_id"), "extraction_defect")}
+        for d in dists
+    ]
+    tagged_omissions = [
+        o | {"root_cause": rc_by_id.get(o.get("omission_id"), "extraction_defect")}
+        for o in omissions
+    ]
+    filtered_dist_count = sum(
+        1 for d in tagged_dists
+        if d.get("root_cause") in ("extraction_defect", "mixed")
+    )
+    return filtered_dist_count, tagged_omissions, tagged_dists, True
+
+
+def _short_lecture_label(source_id: str, lecture_code: str | None = None) -> str:
+    if lecture_code and re.fullmatch(r"L(\d+)", lecture_code):
+        return f"第 {lecture_code[1:]} 講"
+    m = re.search(r"(\d+)\s*$", source_id.strip())
+    if m:
+        return f"第 {m.group(1)} 講"
+    return source_id
+
+
+def _load_rulings(data_base_dir: Path) -> list[dict[str, Any]]:
+    path = Path(data_base_dir) / RULINGS_REL
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def record_unit_ruling(
+    data_base_dir: Path,
+    series_id: str,
+    unit_id: str,
+    verdict: str,
+    note: str = "",
+) -> dict[str, Any]:
+    if verdict not in VERDICTS:
+        raise ValueError(f"invalid verdict: {verdict}")
+    path = Path(data_base_dir) / RULINGS_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = _load_rulings(data_base_dir)
+    entry = {
+        "series_id": series_id,
+        "unit_id": unit_id,
+        "verdict": verdict,
+        "note": note.strip(),
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    rows.append(entry)
+    path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    return entry
+
+
+def _latest_rulings(data_base_dir: Path, series_id: str) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in _load_rulings(data_base_dir):
+        if row.get("series_id") == series_id:
+            latest[row["unit_id"]] = row
+    return latest
+
+
+def _series_root(data_base_dir: Path) -> Path:
+    return Path(data_base_dir) / SERIES_DIR_NAME
+
+
+def _loaded_unit_keys(series_id: Optional[str] = None) -> set[tuple[str, str]]:
+    """Return ``(series_id, unit_id)`` pairs currently loaded in ``ARGUMENT_DATABASE_URL``."""
+    try:
+        from backend.pipeline import argument_review
+
+        with argument_review.connect() as conn:
+            if series_id:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata->>'series_id' = %s
+                       AND metadata ? 'unit_id'
+                    """,
+                    (series_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT metadata->>'series_id', metadata->>'unit_id'
+                      FROM wang_knowledge.change_sets
+                     WHERE status = 'applied'
+                       AND metadata ? 'series_id'
+                       AND metadata ? 'unit_id'
+                    """
+                ).fetchall()
+        return {(str(r[0]), str(r[1])) for r in rows if r[0] and r[1]}
+    except Exception:
+        return set()
+
+
+def _read_unit_from_db(series_id: str, unit_id: str) -> Optional[dict[str, Any]]:
+    """Read a loaded unit's graph & sentences from ``ARGUMENT_DATABASE_URL``, or ``None`` if not loaded."""
+    try:
+        from backend.pipeline import argument_review
+
+        unit_key = f"{series_id}/{unit_id}"
+        with argument_review.connect() as conn:
+            cs_row = conn.execute(
+                """
+                SELECT change_set_id, metadata
+                  FROM wang_knowledge.change_sets
+                 WHERE status = 'applied'
+                   AND metadata->>'unit_key' = %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM wang_knowledge.change_sets r
+                        WHERE r.status = 'applied'
+                          AND r.metadata->>'replaces' = wang_knowledge.change_sets.change_set_id
+                   )
+                 ORDER BY applied_at DESC
+                 LIMIT 1
+                """,
+                (unit_key,),
+            ).fetchone()
+            if not cs_row:
+                return None
+            cs_id, meta = cs_row[0], cs_row[1] or {}
+            rows = conn.execute(
+                """
+                SELECT v.collection, v.object_id, v.payload
+                  FROM wang_knowledge.object_versions v
+                 WHERE v.change_set_id = %s
+                """,
+                (cs_id,),
+            ).fetchall()
+    except Exception:
+        return None
+
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    for col, oid, payload in rows:
+        p = dict(payload or {})
+        if p.get("review_status") == "retired":
+            continue
+        if col == "claims":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "claim", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col == "evidence_steps":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {
+                "kind": str(p.get("step_type") or "evidence"),
+                "statement": p.get("statement", ""),
+                "at": list(p.get("at") or []),
+            }
+        elif col == "questions":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "question", "statement": p.get("text", ""), "at": list(p.get("at") or [])}
+        elif col == "position_nodes":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "position", "statement": p.get("title", ""), "at": list(p.get("at") or [])}
+        elif col == "observations":
+            nid = str(p.get("unit_node_id") or oid)
+            nodes[nid] = {"kind": "observation", "statement": p.get("statement", ""), "at": list(p.get("at") or [])}
+        elif col in {"knowledge_relations", "claim_relations"}:
+            edges.append(
+                {
+                    "from_id": str(p.get("unit_from_id") or p.get("from_id") or ""),
+                    "to_id": str(p.get("unit_to_id") or p.get("to_id") or ""),
+                    "relation": str(p.get("relation_type") or ""),
+                    "reason": str(p.get("reason") or ""),
+                    "at": list(p.get("at") or []),
+                }
+            )
+
+    return {
+        "source": "db",
+        "change_set_id": cs_id,
+        "sources": list(meta.get("sources") or []),
+        "sentences": list(meta.get("sentences") or []),
+        "question_states": list(meta.get("question_states") or []),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def list_series(data_base_dir: Path) -> list[dict[str, Any]]:
+    root = _series_root(data_base_dir)
+    if not root.exists():
+        return []
+    loaded_keys = _loaded_unit_keys()
+    out: list[dict[str, Any]] = []
+    for folder in sorted(root.iterdir()):
+        seg_file = folder / "segmentation.json"
+        if not folder.is_dir() or not seg_file.exists():
+            continue
+        seg = json.loads(seg_file.read_text(encoding="utf-8"))
+        units = seg.get("units", [])
+        ready = sum(1 for u in units if (folder / "units" / u["unit_id"] / "unit-argument.json").exists())
+        loaded = sum(1 for u in units if (folder.name, u["unit_id"]) in loaded_keys)
+        rulings = _latest_rulings(data_base_dir, folder.name)
+        approved = sum(1 for r in rulings.values() if r.get("verdict") == "approved")
+        out.append(
+            {
+                "id": folder.name,
+                "title": seg.get("series") or folder.name,
+                "lecture_count": len(seg.get("sources", [])),
+                "unit_count": len(units),
+                "ready_count": ready,
+                "loaded_count": loaded,
+                "approved_count": approved,
+            }
+        )
+    return out
+
+
+def get_series(data_base_dir: Path, series_id: str) -> dict[str, Any]:
+    folder = _series_root(data_base_dir) / series_id
+    seg_file = folder / "segmentation.json"
+    if not seg_file.exists():
+        raise ValueError(f"series not found: {series_id}")
+    seg = json.loads(seg_file.read_text(encoding="utf-8"))
+    rulings = _latest_rulings(data_base_dir, series_id)
+    loaded_keys = _loaded_unit_keys(series_id)
+    src_by_lec = {s["lecture"]: s for s in seg.get("sources", [])}
+
+    unit_rows: list[dict[str, Any]] = []
+    for u in seg.get("units", []):
+        uid = u["unit_id"]
+        udir = folder / "units" / uid
+        arg_file = udir / "unit-argument.json"
+        fid_file = udir / "fidelity_summary.json"
+        rtv_file = udir / "roundtrip_diff.json"
+
+        lectures_in_unit: list[str] = []
+        for rng in u.get("ranges", []):
+            lec = rng.split("-")[0]
+            if lec not in lectures_in_unit:
+                lectures_in_unit.append(lec)
+
+        loaded_in_db = (series_id, uid) in loaded_keys
+        cand = _read_unit_from_db(series_id, uid) if loaded_in_db else None
+        ready = bool(cand) or arg_file.exists()
+        node_count = edge_count = claim_count = 0
+        if cand:
+            node_count = len(cand.get("nodes", {}))
+            edge_count = len(cand.get("edges", []))
+            claim_count = sum(1 for n in cand.get("nodes", {}).values() if n.get("kind") == "claim")
+        elif arg_file.exists():
+            cand = json.loads(arg_file.read_text(encoding="utf-8"))
+            node_count = len(cand.get("nodes", {}))
+            edge_count = len(cand.get("edges", []))
+            claim_count = sum(1 for n in cand.get("nodes", {}).values() if n.get("kind") == "claim")
+
+        fidelity_summary = None
+        if fid_file.exists():
+            fd = json.loads(fid_file.read_text(encoding="utf-8"))
+            fidelity_summary = {
+                "faithful": fd.get("faithful", 0),
+                "total": fd.get("total_nodes", 0),
+                "changed": fd.get("changed", 0),
+                "added": fd.get("added", 0),
+            }
+
+        roundtrip_summary = None
+        if rtv_file.exists():
+            rd = json.loads(rtv_file.read_text(encoding="utf-8"))
+            m = rd.get("summary_metrics", {})
+            dist_count, _, _, attr_verified = _apply_roundtrip_attribution(rd, udir / "roundtrip_attribution.json")
+            roundtrip_summary = {
+                "core_covered": m.get("core_units_covered", 0),
+                "core_total": m.get("core_units_total", 0),
+                "distortions": dist_count,
+                "omissions": m.get("omission_count", 0),
+                "attribution_verified": attr_verified,
+            }
+
+        unit_rows.append(
+            {
+                "unit_id": uid,
+                "title": u.get("title", uid),
+                "passage": u.get("passage", ""),
+                "chars": u.get("chars", 0),
+                "cross_lecture": bool(u.get("cross_lecture")),
+                "lectures": [_short_lecture_label(src_by_lec.get(l, {}).get("source_id", l), l) for l in lectures_in_unit],
+                "ready": ready,
+                "loaded_in_db": (series_id, uid) in loaded_keys,
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "claim_count": claim_count,
+                "fidelity": fidelity_summary,
+                "roundtrip": roundtrip_summary,
+                "ruling": rulings.get(uid),
+            }
+        )
+
+    non_arg_rows = [
+        {"pk": item["pk"], "reason": item["reason"]}
+        for item in seg.get("non_argument_paragraphs", [])
+        if item.get("reason") != "empty"
+    ]
+    return {
+        "id": series_id,
+        "title": seg.get("series") or series_id,
+        "lectures": [
+            {"lecture": s["lecture"], "label": _short_lecture_label(s["source_id"], s["lecture"]), "title": s["source_id"]}
+            for s in seg.get("sources", [])
+        ],
+        "units": unit_rows,
+        "non_argument_shells": non_arg_rows,
+    }
+
+
+def _resolve_media_map(data_base_dir: Path, sources: list[dict[str, Any]], lec_code_by_sid: dict[str, str]) -> dict[str, dict[str, Any]]:
+    sermons = audio.Sermons(Path(data_base_dir))
+    media: dict[str, dict[str, Any]] = {}
+    for s in sources:
+        sid = s["source_id"]
+        info = sermons._media_for(sid)
+        media[sid] = {
+            "source_id": sid,
+            "label": _short_lecture_label(sid, lec_code_by_sid.get(sid)),
+            "title": sid,
+            "media_url": info.get("media_url"),
+            "duration": info.get("media_duration"),
+        }
+    return media
+
+
+def get_unit(data_base_dir: Path, series_id: str, unit_id: str) -> dict[str, Any]:
+    folder = _series_root(data_base_dir) / series_id
+    seg_file = folder / "segmentation.json"
+    arg_file = folder / "units" / unit_id / "unit-argument.json"
+    cand = _read_unit_from_db(series_id, unit_id)
+    if not seg_file.exists() or (cand is None and not arg_file.exists()):
+        raise ValueError(f"unit not ready: {series_id}/{unit_id}")
+
+    seg = json.loads(seg_file.read_text(encoding="utf-8"))
+    unit_meta = next((u for u in seg.get("units", []) if u["unit_id"] == unit_id), None)
+    if not unit_meta:
+        raise ValueError(f"unit metadata missing: {unit_id}")
+
+    if cand is None:
+        cand = json.loads(arg_file.read_text(encoding="utf-8"))
+    lec_code_by_sid = {s["source_id"]: s["lecture"] for s in seg.get("sources", [])}
+    media = _resolve_media_map(data_base_dir, cand.get("sources", []), lec_code_by_sid)
+
+    sents = cand["sentences"]
+    nodes = cand["nodes"]
+    edges = cand["edges"]
+
+    # Optional fidelity & roundtrip reports
+    udir = folder / "units" / unit_id
+    fidelity_by_node: dict[str, dict[str, Any]] = {}
+    fidelity_overview = None
+    if (udir / "fidelity_summary.json").exists():
+        fd = json.loads((udir / "fidelity_summary.json").read_text(encoding="utf-8"))
+        fidelity_overview = {
+            "total": fd.get("total_nodes", 0),
+            "faithful": fd.get("faithful", 0),
+            "changed": fd.get("changed", 0),
+            "added": fd.get("added", 0),
+            "findings": fd.get("findings", []),
+        }
+        for f in fd.get("findings", []):
+            fidelity_by_node[f["id"]] = f
+
+    roundtrip_overview = None
+    if (udir / "roundtrip_diff.json").exists():
+        rd = json.loads((udir / "roundtrip_diff.json").read_text(encoding="utf-8"))
+        dist_count, tagged_omissions, tagged_dists, attr_verified = _apply_roundtrip_attribution(
+            rd, udir / "roundtrip_attribution.json"
+        )
+        metrics = dict(rd.get("summary_metrics", {}))
+        metrics["distortion_count"] = dist_count
+        roundtrip_overview = {
+            "metrics": metrics,
+            "omissions": tagged_omissions,
+            "distortions": tagged_dists,
+            "noise": rd.get("non_argument_noise", []),
+            "attribution_verified": attr_verified,
+        }
+
+    def _first_pos(at_list: list[int]) -> int:
+        return min(at_list) if at_list else 10**9
+
+    def _quotes_for_positions(at_list: list[int]) -> list[dict[str, Any]]:
+        if not at_list:
+            return []
+        ordered = sorted(set(at_list))
+        grouped: list[dict[str, Any]] = []
+        for pos in ordered:
+            row = sents[pos - 1]
+            sid = row["source_id"]
+            if (
+                grouped
+                and grouped[-1]["source_id"] == sid
+                and grouped[-1]["paragraph"] == row["paragraph"]
+                and grouped[-1]["_last_pos"] == pos - 1
+            ):
+                grouped[-1]["text"] += row["text"]
+                grouped[-1]["_last_pos"] = pos
+            else:
+                grouped.append(
+                    {
+                        "text": row["text"],
+                        "source_id": sid,
+                        "lecture_label": _short_lecture_label(sid, lec_code_by_sid.get(sid)),
+                        "paragraph": row["paragraph"],
+                        "start": _parse_clock_seconds(row.get("time")),
+                        "_last_pos": pos,
+                    }
+                )
+        for g in grouped:
+            g.pop("_last_pos", None)
+        return grouped
+
+    # Order Claims chronologically
+    claim_ids = [nid for nid, n in nodes.items() if n["kind"] == "claim"]
+    claim_ids.sort(key=lambda nid: _first_pos(nodes[nid]["at"]))
+    point_no_by_id = {nid: i for i, nid in enumerate(claim_ids, 1)}
+
+    # Order Questions chronologically
+    q_ids = [nid for nid, n in nodes.items() if n["kind"] == "question"]
+    q_ids.sort(key=lambda nid: _first_pos(nodes[nid]["at"]))
+    q_no_by_id = {nid: i for i, nid in enumerate(q_ids, 1)}
+    q_state_by_id = {row["question_id"]: row for row in cand.get("question_states", [])}
+
+    # Build questions list with answers
+    questions_out: list[dict[str, Any]] = []
+    for qid in q_ids:
+        qn = nodes[qid]
+        first_row = sents[_first_pos(qn["at"]) - 1]
+        st = q_state_by_id.get(qid, {"state": "open", "remaining": ""})
+        answers = []
+        for e in edges:
+            if e["to_id"] == qid and e["relation"] == "answers":
+                src_node = nodes[e["from_id"]]
+                answers.append(
+                    {
+                        "point_no": point_no_by_id.get(e["from_id"]),
+                        "statement": src_node["statement"],
+                        "reason": e["reason"],
+                        "lecture_label": _short_lecture_label(
+                            sents[_first_pos(src_node["at"]) - 1]["source_id"],
+                            lec_code_by_sid.get(sents[_first_pos(src_node["at"]) - 1]["source_id"]),
+                        ),
+                    }
+                )
+        questions_out.append(
+            {
+                "no": q_no_by_id[qid],
+                "statement": qn["statement"],
+                "source_id": first_row["source_id"],
+                "lecture_label": _short_lecture_label(first_row["source_id"], lec_code_by_sid.get(first_row["source_id"])),
+                "start": _parse_clock_seconds(first_row.get("time")),
+                "state": st.get("state", "open"),
+                "remaining": st.get("remaining", ""),
+                "answers": answers,
+            }
+        )
+
+    # Track which sentences are used by which points
+    sent_uses: dict[int, set[int]] = {}
+    points_out: list[dict[str, Any]] = []
+
+    for cid in claim_ids:
+        pno = point_no_by_id[cid]
+        cn = nodes[cid]
+        for pos in cn["at"]:
+            sent_uses.setdefault(pos, set()).add(pno)
+        first_row = sents[_first_pos(cn["at"]) - 1]
+
+        incoming = []
+        for e in edges:
+            if e["to_id"] == cid:
+                src = nodes[e["from_id"]]
+                for pos in src["at"]:
+                    sent_uses.setdefault(pos, set()).add(pno)
+                for pos in e["at"]:
+                    sent_uses.setdefault(pos, set()).add(pno)
+                kind_label = (
+                    "他反對的看法"
+                    if src["kind"] == "position" or e["relation"] == "refutes"
+                    else RELATION_IN_LABEL.get(e["relation"], NODE_KIND_LABEL.get(src["kind"], "理由"))
+                )
+                incoming.append(
+                    {
+                        "kind_label": kind_label,
+                        "relation": e["relation"],
+                        "from_point_no": point_no_by_id.get(e["from_id"]),
+                        "statement": src["statement"],
+                        "reason": e["reason"],
+                        "quotes": _quotes_for_positions(src["at"]),
+                        "fidelity_warning": fidelity_by_node.get(e["from_id"]),
+                    }
+                )
+        # Also include outgoing refutes (this claim refutes an external position)
+        outgoing = []
+        for e in edges:
+            if e["from_id"] == cid:
+                dst = nodes[e["to_id"]]
+                for pos in e["at"]:
+                    sent_uses.setdefault(pos, set()).add(pno)
+                if e["relation"] == "refutes" and dst["kind"] == "position":
+                    for pos in dst["at"]:
+                        sent_uses.setdefault(pos, set()).add(pno)
+                    incoming.append(
+                        {
+                            "kind_label": "他反對的看法",
+                            "relation": "refutes",
+                            "from_point_no": None,
+                            "statement": dst["statement"],
+                            "reason": e["reason"],
+                            "quotes": _quotes_for_positions(dst["at"]),
+                            "fidelity_warning": fidelity_by_node.get(e["to_id"]),
+                        }
+                    )
+                else:
+                    outgoing.append(
+                        {
+                            "relation_label": RELATION_OUT_LABEL.get(e["relation"], e["relation"]),
+                            "to_point_no": point_no_by_id.get(e["to_id"]),
+                            "to_question_no": q_no_by_id.get(e["to_id"]),
+                            "to_statement": dst["statement"],
+                            "reason": e["reason"],
+                        }
+                    )
+
+        points_out.append(
+            {
+                "no": pno,
+                "statement": cn["statement"],
+                "source_id": first_row["source_id"],
+                "lecture_label": _short_lecture_label(first_row["source_id"], lec_code_by_sid.get(first_row["source_id"])),
+                "start": _parse_clock_seconds(first_row.get("time")),
+                "quotes": _quotes_for_positions(cn["at"]),
+                "incoming": incoming,
+                "outgoing": outgoing,
+                "fidelity_warning": fidelity_by_node.get(cid),
+            }
+        )
+
+    # Build multi-lecture transcript view
+    transcript_lectures: list[dict[str, Any]] = []
+    cur_sid = None
+    cur_para = None
+    for idx, row in enumerate(sents, 1):
+        sid = row["source_id"]
+        if sid != cur_sid:
+            cur_sid = sid
+            cur_para = None
+            transcript_lectures.append(
+                {
+                    "source_id": sid,
+                    "lecture_label": _short_lecture_label(sid, lec_code_by_sid.get(sid)),
+                    "title": sid,
+                    "paragraphs": [],
+                }
+            )
+        if row["paragraph"] != cur_para:
+            cur_para = row["paragraph"]
+            transcript_lectures[-1]["paragraphs"].append(
+                {
+                    "paragraph": cur_para,
+                    "pieces": [],
+                }
+            )
+        transcript_lectures[-1]["paragraphs"][-1]["pieces"].append(
+            {
+                "text": row["text"],
+                "start": _parse_clock_seconds(row.get("time")),
+                "uses": sorted(sent_uses.get(idx, ())),
+            }
+        )
+
+    # Build lightweight graph payload (no raw system IDs shown in UI; keys used only for tree/graph layout)
+    graph_nodes = {}
+    for nid, n in nodes.items():
+        first_row = sents[_first_pos(n["at"]) - 1]
+        graph_nodes[nid] = {
+            "id": nid,
+            "kind": n["kind"],
+            "kind_label": NODE_KIND_LABEL.get(n["kind"], n["kind"]),
+            "point_no": point_no_by_id.get(nid),
+            "question_no": q_no_by_id.get(nid),
+            "statement": n["statement"],
+            "source_id": first_row["source_id"],
+            "lecture_label": _short_lecture_label(first_row["source_id"], lec_code_by_sid.get(first_row["source_id"])),
+            "start": _parse_clock_seconds(first_row.get("time")),
+            "quotes": _quotes_for_positions(n["at"]),
+            "fidelity_warning": fidelity_by_node.get(nid),
+        }
+    graph_edges = [
+        {
+            "from_id": e["from_id"],
+            "to_id": e["to_id"],
+            "relation": e["relation"],
+            "relation_label": RELATION_IN_LABEL.get(e["relation"], e["relation"]),
+            "reason": e["reason"],
+            "attribution": e.get("attribution", "explicit"),
+        }
+        for e in edges
+    ]
+
+    rulings = _latest_rulings(data_base_dir, series_id)
+    return {
+        "series_id": series_id,
+        "series_title": seg.get("series") or series_id,
+        "unit_id": unit_id,
+        "title": unit_meta.get("title", unit_id),
+        "passage": unit_meta.get("passage", ""),
+        "chars": unit_meta.get("chars", 0),
+        "cross_lecture": bool(unit_meta.get("cross_lecture")),
+        "media": media,
+        "questions": questions_out,
+        "points": points_out,
+        "graph": {"nodes": graph_nodes, "edges": graph_edges},
+        "transcript": transcript_lectures,
+        "fidelity": fidelity_overview,
+        "roundtrip": roundtrip_overview,
+        "ruling": rulings.get(unit_id),
+    }

@@ -1,0 +1,141 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>按經文查經 · 試用</title></head><body><div id="scripture-picker" lang="zh-Hant">
+<style>
+#scripture-picker{--bg:light-dark(#fffdf9,#24231f);--ink:light-dark(#292620,#f5efe6);--quiet:light-dark(#62594f,#c4baaa);--line:light-dark(#ddd3c5,#584e42);--brown:light-dark(#783e17,#f4bc8c);font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:clamp(14px,4vw,32px);max-width:650px;margin:auto;box-sizing:border-box}
+#scripture-picker *{box-sizing:border-box}#scripture-picker [hidden]{display:none!important}
+#scripture-picker h1{font:600 29px/1.4 "Songti TC",serif;margin:4px 0 18px}#scripture-picker h2{font-size:18px;margin:18px 0 9px}#scripture-picker small{color:var(--quiet)}
+#scripture-picker input{width:100%;border:1px solid var(--line);border-radius:9px;padding:11px 14px;background:var(--bg);color:var(--ink);font:inherit}
+#scripture-picker button,#scripture-picker summary,#scripture-picker a{font:inherit;cursor:pointer;min-height:44px;color:var(--brown)}
+#scripture-picker button{background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 13px}
+#scripture-picker .chapters{display:flex;flex-wrap:wrap;gap:8px}#scripture-picker details{border-top:1px solid var(--line);margin-top:20px;padding-top:8px}#scripture-picker summary{padding:10px 0}
+#scripture-picker .books{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:6px}#scripture-picker .books button{font-size:15px}
+#scripture-picker .back{border:0;padding:0}#scripture-picker .passage{display:block;border-bottom:1px solid var(--line);padding:12px 0}#scripture-picker a.passage{font-weight:600}
+#scripture-picker .sp-tabs{display:flex;gap:6px;margin:16px 0 10px}#scripture-picker button[aria-pressed=true]{background:var(--brown);color:var(--bg)}#scripture-picker .chapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(48px,1fr));gap:5px}#scripture-picker .range{margin:12px 0 6px}#scripture-picker .sp-ready{display:inline-block;margin:3px 0 10px;color:var(--quiet)}
+#scripture-picker button:disabled{color:var(--quiet);background:var(--bg);border-color:var(--line);cursor:default}#scripture-picker button small{display:block;font-size:12px}
+#scripture-picker .chapter-buttons{display:flex;flex-wrap:wrap;gap:9px;margin:8px 0 24px}#scripture-picker .chapter-buttons button{min-width:80px;background:var(--brown);color:var(--bg);border-color:var(--brown);font-weight:600}
+#scripture-picker .study-row{display:block;width:100%;text-align:left;margin:10px 0;background:var(--brown);color:var(--bg);font-weight:600}
+#scripture-picker{max-width:960px;margin:0 auto}body{margin:0;background:#fffdf9}#sp-mode{font:inherit;max-width:100%;padding:8px}#scripture-picker .booknav button{margin:3px}#scripture-picker .chapter-buttons button{min-width:65px}
+@media(min-width:760px){#scripture-picker .multibook{display:grid;grid-template-columns:minmax(170px,1fr) 3fr;gap:24px}#scripture-picker .booknav button{display:block;width:100%}}
+</style>
+<section id="sp-home"><small>按經文查經</small><h1>選擇章節</h1>
+<input type="search" id="sp-query" aria-label="搜尋書卷或章" placeholder="輸入書卷或經文，例如：太 5">
+<div id="sp-results" aria-live="polite"></div>
+<div id="sp-library"><div id="sp-books"></div></div><details><summary>示範情境</summary><label>收錄範圍 <select id="sp-mode"><option value="current">目前書目</option><option value="sparse">模擬多卷 · 少量章節</option><option value="dense">模擬多卷 · 完整詩篇</option></select></label></details></section>
+<section id="sp-page" hidden><button class="back" type="button">← 選擇經文</button><h1 id="sp-title"></h1><div id="sp-sections"></div></section>
+<section id="sp-reader" hidden><button type="button" id="sp-from-reader" class="back">← 馬太福音 第 5 章</button><article id="beat-reader" lang="zh-Hant">
+<style>
+#beat-reader{--ink:light-dark(#29251f,#eee7dc);--dim:light-dark(#665e52,#c6bcac);--paper:light-dark(#fffdf8,#242321);--rule:light-dark(#ded7ca,#504b42);--rust:light-dark(#81481f,#f0bb8c);box-sizing:border-box;background:var(--paper);color:var(--ink);padding:clamp(16px,5%,36px);font:16px/1.65 system-ui,sans-serif}
+#beat-reader header{border-bottom:1px solid var(--rule);padding-bottom:14px}#beat-reader header small,#beat-reader footer{color:var(--dim)}#beat-reader h1{font:600 30px/1.3 "Songti TC",serif;margin:6px 0}
+#beat-reader p{font:400 18px/1.75 "Songti TC","Noto Serif TC",serif;margin:8px 0}
+#beat-reader sup{font:500 12px system-ui;color:var(--dim);margin-right:6px}
+#beat-reader details{margin:6px 0 16px;padding-left:12px;border-left:2px solid var(--rule)}
+#beat-reader summary{color:var(--rust);font-weight:600;cursor:pointer;padding:9px 0;min-height:44px;box-sizing:border-box}
+#beat-reader blockquote{margin:4px 0 8px;font-size:15px}#beat-reader a{background:var(--rust);color:var(--paper);display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:8px;font-weight:600;text-decoration:none}
+#beat-reader footer{border-top:1px solid var(--rule);margin-top:18px;padding-top:10px;font-size:13px}
+</style>
+<header><small>查經工具　／　馬太福音</small><h1>八福</h1>馬太福音 5:1–12 · 和合本</header>
+<p><sup>1</sup>耶穌看見這許多的人，就上了山，既已坐下，門徒到他跟前來，<sup>2</sup>他就開口教訓他們，說：</p>
+<p><sup>3</sup>虛心的人有福了！因為天國是他們的。</p>
+<details><summary>為什麼八福要放在一起讀？</summary><small>太 5:3–10</small><blockquote>教授從第一福和第八福共有的「天國是他們的」，講到中間各福與天國的關係。</blockquote><a target="_blank" rel="noopener" href="https://dallas-hlc.org/resources/wang-repository/books/mat/5/listen?source=紐約靈命進深會&amp;section=mat-5-1-12-sub-1.2-run-2"><span aria-hidden="true">▶</span>播放講解</a></details>
+<p><sup>4</sup>哀慟的人有福了！因為他們必得安慰。</p>
+<p><sup>5</sup>溫柔的人有福了！因為他們必承受地土。</p>
+<details><summary>「溫柔的人」指誰？</summary><small>太 5:5</small><blockquote>教授從詩篇 37 篇讀起，把「謙卑人」和「等候耶和華的」放在一起，解釋這裡的「溫柔」。</blockquote><a target="_blank" rel="noopener" href="https://dallas-hlc.org/resources/wang-repository/books/mat/5/listen?source=紐約靈命進深會&amp;section=mat-5-1-12-sub-1.3-run-3"><span aria-hidden="true">▶</span>播放講解</a></details>
+<p><sup>6</sup>飢渴慕義的人有福了！因為他們必得飽足。</p>
+<p><sup>7</sup>憐恤人的人有福了！因為他們必蒙憐恤。</p>
+<p><sup>8</sup>清心的人有福了！因為他們必得見神。</p>
+<p><sup>9</sup>使人和睦的人有福了！因為他們必稱為神的兒子。</p>
+<p><sup>10</sup>為義受逼迫的人有福了！因為天國是他們的。</p>
+<p><sup>11</sup>「人若因我辱罵你們，逼迫你們，捏造各樣壞話毀謗你們，你們就有福了！<sup>12</sup>應當歡喜快樂，因為你們在天上的賞賜是大的。在你們以前的先知，人也是這樣逼迫他們。」</p>
+<details><summary>耶穌為什麼說「因我」？</summary><small>太 5:11–12</small><blockquote>教授問，以前的先知是為誰受逼迫？他從先知的經歷，講到耶穌怎樣表明自己的身分。</blockquote><a target="_blank" rel="noopener" href="https://dallas-hlc.org/resources/wang-repository/books/mat/5/listen?source=紐約靈命進深會&amp;section=mat-5-1-12-sub-1.2-run-4"><span aria-hidden="true">▶</span>播放講解</a></details>
+<footer>原聲講解取自王守仁教授於 2011 年紐約靈命進深會的馬太福音釋經第一講。</footer>
+</article>
+</section>
+</div>
+<script>
+(()=>{
+const root=document.getElementById('scripture-picker'), el=id=>root.querySelector('#sp-'+id);
+const books='創世記 出埃及記 利未記 民數記 申命記 約書亞記 士師記 路得記 撒母耳記上 撒母耳記下 列王紀上 列王紀下 歷代志上 歷代志下 以斯拉記 尼希米記 以斯帖記 約伯記 詩篇 箴言 傳道書 雅歌 以賽亞書 耶利米書 耶利米哀歌 以西結書 但以理書 何西阿書 約珥書 阿摩司書 俄巴底亞書 約拿書 彌迦書 那鴻書 哈巴谷書 西番雅書 哈該書 撒迦利亞書 瑪拉基書 馬太福音 馬可福音 路加福音 約翰福音 使徒行傳 羅馬書 哥林多前書 哥林多後書 加拉太書 以弗所書 腓立比書 歌羅西書 帖撒羅尼迦前書 帖撒羅尼迦後書 提摩太前書 提摩太後書 提多書 腓利門書 希伯來書 雅各書 彼得前書 彼得後書 約翰一書 約翰二書 約翰三書 猶大書 啟示錄'.split(' ');
+const abbr='創 出 利 民 申 書 士 得 撒上 撒下 王上 王下 代上 代下 拉 尼 斯 伯 詩 箴 傳 歌 賽 耶 哀 結 但 何 珥 摩 俄 拿 彌 鴻 哈 番 該 亞 瑪 太 可 路 約 徒 羅 林前 林後 加 弗 腓 西 帖前 帖後 提前 提後 多 門 來 雅 彼前 彼後 約一 約二 約三 猶 啟'.split(' ');
+const traditional='創記數約書亞師紀歷詩傳賽結彌鴻該瑪馬羅後門來猶啟錄',simple='创记数约书亚师纪历诗传赛结弥鸿该玛马罗后门来犹启录';
+const norm=t=>Array.from(t.normalize('NFKC').replace(/\s/g,'')).map(c=>simple.includes(c)?traditional[simple.indexOf(c)]:c).join('');
+const mat='馬太福音', chapters={5:['5:1–12　八福','5:17–20　律法的成全、誡命與更大的義','5:27–30　淫念、意圖與行動','5:31–32　離婚與再婚','5:33–37　起誓與誠實','5:38–48　不報復與愛仇敵'],6:['6:8–7:11　主教導的禱告與生活'],7:['7:12–29　登山寶訓的結語']};
+function add(parent,tag,value,cls){const n=document.createElement(tag);n.textContent=value;if(cls)n.className=cls;parent.append(n);return n}
+function btn(parent,label,fn){const b=add(parent,'button',label);b.type='button';b.onclick=fn;return b}
+const counts=[50,40,27,36,34,24,21,4,31,24,22,25,29,36,10,13,10,42,150,31,12,8,66,52,5,48,12,14,3,9,1,4,7,3,3,3,2,14,4,28,16,24,21,28,16,16,13,6,6,4,4,5,3,6,4,3,1,13,5,5,3,5,1,1,1,22];
+const q=el('query'), results=el('results'), mode=el('mode');
+const preparation=['約翰福音','羅馬書','哥林多前書','哥林多後書','提摩太前書','提摩太後書','提多書'];
+let current=39, pageNumber=0;
+const unit=i=>i===18?'篇':'章';
+function numbers(i){
+ if(i===39)return [5,6,7];
+ if(mode.value==='current')return [];
+ if(i===42)return [1,3,15];
+ if(i===18)return mode.value==='dense'?Array.from({length:150},(_,n)=>n+1):[23,51,119];
+ return [];
+}
+function choose(i,n){current=i;pageNumber=n;location.hash='chapter/'+i+'/'+n+(mode.value==='current'?'':'/'+mode.value)}
+function drawNumbers(parent,i){
+ add(parent,'h2',books[i]);
+ const ns=numbers(i);
+ for(let offset=0;offset<ns.length;offset+=25){
+  let group=parent;
+  if(ns.length>25){group=add(parent,'details','');group.open=ns.slice(offset,offset+25).includes(ns.includes(pageNumber)?pageNumber:ns[0]);add(group,'summary',ns[offset]+'–'+ns[Math.min(offset+24,ns.length-1)]+' '+unit(i))}
+  const row=add(group,'div','','chapter-buttons');
+  for(const n of ns.slice(offset,offset+25))btn(row,'第 '+n+' '+unit(i),()=>choose(i,n))
+ }
+}
+function library(){
+ const box=el('books');box.replaceChildren();
+ if(mode.value==='current')drawNumbers(box,39);
+ else{
+  add(box,'small','模擬書目 · 用於試用選章');
+  const layout=add(box,'div','','multibook'),nav=add(layout,'div','','booknav'),panel=add(layout,'div','');
+  for(const [label,ids] of [['新約',[39,42]],['舊約',[18]]]){
+   add(nav,'h2',label);
+   for(const i of ids){const b=btn(nav,books[i],()=>{current=i;library()});b.setAttribute('aria-pressed',String(i===current));if(i===current&&innerWidth<760)drawNumbers(nav,i)}
+  }
+  if(innerWidth>=760)drawNumbers(panel,current);
+ }
+ const pending=preparation.filter(name=>!numbers(books.indexOf(name)).length);
+ const details=add(box,'details','');add(details,'summary','整理校對中的書卷（'+pending.length+'）');
+ const grid=add(details,'div','','books');
+ for(const name of pending){const b=add(grid,'button',name);b.disabled=true}
+}
+function search(){
+ results.replaceChildren();const raw=norm(q.value);el('library').hidden=!!raw;
+ if(!raw){library();return}
+ const match=raw.match(/^(.*?)(?:第)?(\d+)(?:章|篇)?(?:[:：]\d+)?$/);
+ const name=match?match[1]:raw;
+ const exact=books.findIndex((b,i)=>b===name||abbr[i]===name);
+ const ids=!name?[current]:exact>=0?[exact]:books.map((_,i)=>i).filter(i=>books[i].includes(name));
+ if(!ids.length)add(results,'p','找不到這卷書。');
+ for(const i of ids){
+  if(match&&(+match[2]<1||+match[2]>counts[i])){add(results,'p',books[i]+'共有 '+counts[i]+' '+unit(i));continue}
+  if(!numbers(i).length){add(results,'p',books[i]+(preparation.includes(books[i])?' · 整理校對中':' · 目前沒有可研讀資料'));continue}
+  if(!match){drawNumbers(results,i);continue}
+  const n=Number(match[2]);if(numbers(i).includes(n))btn(results,books[i]+' 第 '+n+' '+unit(i),()=>choose(i,n));else add(results,'p','本章目前沒有可研讀資料。')
+ }
+}
+function route(){
+ const [view,id,num]=location.hash.slice(1).split('/'),i=Number(id),n=Number(num);
+ const scenario=location.hash.slice(1).split('/')[3];if(['dense','sparse'].includes(scenario))mode.value=scenario;
+ const valid=numbers(i).includes(n),reader=valid&&i===39&&n===5&&view==='beatitudes',chapter=valid&&view==='chapter';
+ el('home').hidden=reader||chapter;el('page').hidden=!chapter;el('reader').hidden=!reader;
+ if(!reader&&!chapter){search();return}
+ current=i;pageNumber=n;
+ if(reader)return;
+ el('title').textContent=books[i]+' 第 '+n+' '+unit(i);const list=el('sections');list.replaceChildren();
+ if(i!==39){add(list,'p','模擬章節，供選章測試。');return}
+ for(const item of chapters[n]){
+  if(n===5&&item.startsWith('5:1–12')){btn(list,item+'　›',()=>{location.hash='beatitudes/39/5'}).className='study-row'}
+  else add(list,'p',item,'passage')
+ }
+ const a=add(list,'a','查看本章聆聽資料 ↗','passage');a.target='_blank';a.rel='noopener';a.href='https://dallas-hlc.org/resources/wang-repository/books/mat/'+n+'?source='+encodeURIComponent('紐約靈命進深會');
+}
+el('page').querySelector('.back').onclick=()=>{location.hash='books'};
+el('from-reader').onclick=()=>{location.hash='chapter/39/5'};
+q.oninput=search;q.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&results.querySelectorAll('button').length===1){e.preventDefault();results.querySelector('button').click()}};
+mode.onchange=()=>{current=39;pageNumber=0;q.value='';route()};
+matchMedia('(min-width:760px)').addEventListener('change',()=>{if(!q.value)library()});
+window.addEventListener('hashchange',route);route();
+})();
+</script></body></html>

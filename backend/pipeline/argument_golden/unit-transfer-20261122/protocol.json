@@ -1,0 +1,59 @@
+{
+  "model": "gpt-6.1-sol",
+  "reasoning": "medium",
+  "generator_prompts": {
+    "plan": "e8002e7ee0f74f0c76345a247a5a58f6e9c6d206452c44544007ec6013e448e3",
+    "claim": "570d76f1ead3974e9972bd21a34a43a17b28ba4e2f0e136ca904d2b8ac352fc9",
+    "graph": "cb5d7e7b727b7e5b8e9fb11e44b5007443e5a1d233b335c8011427bbd173e011"
+  },
+  "reader": "你只收到整理后的论证节点和关系。为没听过这篇讲论的读者，用自己的话复述题目下教授的判断和推理。说明每一步的依据、具体应用、条件和例子实际说明什么，仅保留与问题有关者；讲者若明说而没给理由就如实说明。每一步标出对应节点或关系。缺少关键连接请注明，勿用常识、外部资料或工具补足。",
+  "source_key": "仅按所给有编号的逐句原文，独立列出回答本题必须保留的判断、推理、例证或应用、限定。把主干和补充细节分开，各条注明句号、作用和理由；无须凑项，不替讲者表态。",
+  "grades": [
+    "完整",
+    "部分",
+    "缺失",
+    "多出或错接"
+  ],
+  "cases": {
+    "blood": {
+      "question": "教授怎样讨论基督徒可不可以吃血？",
+      "reason": "整篇回答具体实践问题",
+      "manifest": {
+        "sources": [
+          {
+            "source_id": "2019-10-20 利17章3-12徒 15章19-21基督徒可以吃血嗎mp4",
+            "file": "/opt/homebrew/var/www/church/web/data/script_published/2019-10-20 利17章3-12徒 15章19-21基督徒可以吃血嗎mp4.json",
+            "sha256": "f48f9dfa28abe403fabc68d04500dfd6585a70e5f0b1b49134b3d29d4b17cc1c",
+            "ranges": [
+              {
+                "first": "S0001",
+                "last": "S0043"
+              }
+            ]
+          }
+        ]
+      },
+      "sentences": 243
+    },
+    "joy": {
+      "question": "教授怎样解释喜乐？",
+      "reason": "整篇讲解一个概念",
+      "manifest": {
+        "sources": [
+          {
+            "source_id": "2019-05-19 喜乐",
+            "file": "/opt/homebrew/var/www/church/web/data/script_published/2019-05-19 喜乐.json",
+            "sha256": "f3b09b4ceaa7d0b3679aa5d694c704c85e8d7dba8e9d438d51dc1934566c15ee",
+            "ranges": [
+              {
+                "first": "S0001",
+                "last": "S0099"
+              }
+            ]
+          }
+        ]
+      },
+      "sentences": 430
+    }
+  }
+}

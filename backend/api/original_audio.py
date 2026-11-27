@@ -31,15 +31,54 @@ def passages() -> dict[str, Any]:
 
 
 @router.get("/{passage}")
-def index(passage: str) -> dict[str, Any]:
+def index(passage: str, source: str | None = None, units: bool = False, legacy: bool = False) -> dict[str, Any]:
     """一段经文底下，教授讲过的每一段。
 
-    只认列在 `PASSAGES` 里的段落。任由 URL 指定经文范围的话，`mat-16-14-15` 这
+    只认 `passages()` 列出的段落。任由 URL 指定经文范围的话，`mat-16-14-15` 这
     种没人对过逐字稿的切法也会出一个页面——而「每个入口都对过逐字稿」是这一页
     的验收条件，不是可选项。
     """
 
-    if passage not in {slug for slug, _ in original_audio_index.PASSAGES}:
+    from backend.pipeline import chapter_listening_cuts, chapter_topics, notes_chapter
+
+    data_root = Path(DATA_BASE_PATH)
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    has_unit_plan = passage in CHAPTERS and (data_root / 'chapter_exposition' / passage / 'listening-units.json').is_file()
+    unit_source = source in (None, '紐約靈命進深會')
+
+    def unit_index():
+        from backend.pipeline.chapter_listening_units import build
+
+        plan, held = chapter_listening_cuts.available_plan(data_root, passage)
+        result = build(data_root, passage, plan=plan) if held else build(data_root, passage)
+        return result, held
+
+    if units:
+        if not unit_source or not has_unit_plan:
+            raise HTTPException(status_code=404, detail='這一章尚無單元預覽。')
+        try:
+            found, held = unit_index()
+            return chapter_listening_cuts.protect(found, data_root, held_sources=held)
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
+
+    if source == notes_chapter.NOTES_SOURCE:
+        # 教授釋經筆記：AI 朗读母本，另一份章的清单（`notes_chapters.json`）。
+        found = original_audio_index.build_notes_index(Path(DATA_BASE_PATH), passage)
+        if found is None:
+            raise HTTPException(status_code=404, detail="這段經文還沒有筆記的朗讀頁面。")
+        return chapter_topics.attach(found, Path(DATA_BASE_PATH), notes=True)
+    if passage not in {slug for slug, _ in original_audio_index.passages()}:
         raise HTTPException(status_code=404, detail="這段經文還沒有原聲頁面。")
     store = PostgresKnowledgeStore()
-    return original_audio_index.build_index(store, Path(DATA_BASE_PATH), passage)
+    found = chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
+    held = []
+    if not legacy and unit_source and has_unit_plan:
+        from backend.pipeline.chapter_listening_catalog import compose
+        try:
+            selected, held = unit_index()
+            found = compose(found, selected)
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
+    return chapter_listening_cuts.protect(found, data_root, held_sources=held)

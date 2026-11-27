@@ -76,7 +76,7 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
     request=Request.model_validate(request).model_dump(mode='json')
     verify(preflight,'wang_cvp_recall_preflight_v1')
     if not PurePath(root).is_absolute():raise ValueError('CVP2 requires an absolute stable root')
-    groups=work_groups(request['input']['grouping'],request['input']['claim_ids'])
+    groups=work_groups(request['input']['grouping'],request['input']['claim_ids'],update='update' in request['input'])
     if preflight['groups']!=groups or preflight['request_sha256']!=request['input']['artifact_sha256']:
         raise ValueError('CVP2 admission must preserve the complete input/grouping')
     run_id='CVPM-'+sha256_json(request['action_id'])
@@ -96,9 +96,10 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
             return {**old[0],'run_id':run_id}
         conflicts=cursor.execute('''SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
             WHERE metadata->>'kind'='cvp_management_action'
-            AND metadata->'request'->'input'->'claim_ids' ?| %s
+            AND (metadata->'request'->'input'->'claim_ids' ?| %s
+                 OR metadata->'request'->'maintenance_viewpoint_ids' ?| %s)
             AND metadata->'result'->>'status' NOT IN ('completed','superseded')
-            FOR UPDATE''',(request['input']['claim_ids'],)).fetchall()
+            FOR UPDATE''',(request['input']['claim_ids'],request['maintenance_viewpoint_ids'])).fetchall()
         if (nonlaunch or interruption) and not conflicts:
             raise ChangeSetConflict('recovery proof has no original pending CVP2 task')
         if conflicts:

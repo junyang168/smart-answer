@@ -1,0 +1,82 @@
+[
+  {
+    "original_call": "CMR-4c25ae6ba4cd91bd285300693823ae8a049a18919a6a1496a2ae5f47f9476ec9:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0047",
+    "paragraph": "其實我告訴你很多地方，\n，我可以大堆聖經你看，提這個字指著我們整個的人；體這個字；靈這個字也指著你整個的人。",
+    "returned_quote": "提這個字指著我們整個的人；體這個字；靈這個字也指著你整個人。",
+    "expected_literal": "提這個字指著我們整個的人；體這個字；靈這個字也指著你整個的人。"
+  },
+  {
+    "original_call": "CMR-4c25ae6ba4cd91bd285300693823ae8a049a18919a6a1496a2ae5f47f9476ec9:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0047",
+    "paragraph": "其實我告訴你很多地方，\n，我可以大堆聖經你看，提這個字指著我們整個的人；體這個字；靈這個字也指著你整個的人。",
+    "returned_quote": "我可以大堆聖經你看，提這個字指著我們整個的人；體這個字；靈這個字也指著你整個人。",
+    "expected_literal": "我可以大堆聖經你看，提這個字指著我們整個的人；體這個字；靈這個字也指著你整個的人。"
+  },
+  {
+    "original_call": "CMR-7e784820436d268d0cbba6b8435cf9bf85264c94bf16a4ad9712e9a5fcb6dd06:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0050",
+    "paragraph": "今天這個週末可能有機會談到一件事，因為耶穌講到：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。\n(聽眾:盡心盡意)。對對，就是那個地方。等一下我給你看，你就知道。",
+    "returned_quote": "因為耶穌講：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。",
+    "expected_literal": "因為耶穌講到：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。"
+  },
+  {
+    "original_call": "CMR-7e784820436d268d0cbba6b8435cf9bf85264c94bf16a4ad9712e9a5fcb6dd06:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0050",
+    "paragraph": "今天這個週末可能有機會談到一件事，因為耶穌講到：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。\n(聽眾:盡心盡意)。對對，就是那個地方。等一下我給你看，你就知道。",
+    "returned_quote": "(聽眾:盡心盡意)。對對，就是那個地方。等一下我給你看，你就知道問題很大。",
+    "expected_literal": "(聽眾:盡心盡意)。對對，就是那個地方。等一下我給你看，你就知道。"
+  },
+  {
+    "original_call": "CMR-7e784820436d268d0cbba6b8435cf9bf85264c94bf16a4ad9712e9a5fcb6dd06:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0050",
+    "paragraph": "今天這個週末可能有機會談到一件事，因為耶穌講到：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。\n(聽眾:盡心盡意)。對對，就是那個地方。等一下我給你看，你就知道。",
+    "returned_quote": "因為耶穌講：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。\n(聽眾:盡心盡意)。對對，就是那個地方。",
+    "expected_literal": "因為耶穌講到：「你們要存心全力愛主你的神。」那個地方中文翻譯很差。\n(聽眾:盡心盡意)。對對，就是那個地方。"
+  },
+  {
+    "original_call": "CMR-394e5028381292aa8fa9f4a3752f970ccb06b136e966edae459fc84ba4ca872b:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0029",
+    "paragraph": "聽眾問: 那能不能理解成說靈魂得救，身體還沒有得贖？\n教授: 不是，那個說法錯。",
+    "returned_quote": "聽眾問: 那能不能理解成說靈魂得救，身體還沒有得贖？\n教授: 不是，那個說法錯了。",
+    "expected_literal": "聽眾問: 那能不能理解成說靈魂得救，身體還沒有得贖？\n教授: 不是，那個說法錯。"
+  },
+  {
+    "original_call": "CMR-394e5028381292aa8fa9f4a3752f970ccb06b136e966edae459fc84ba4ca872b:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0029",
+    "paragraph": "聽眾問: 那能不能理解成說靈魂得救，身體還沒有得贖？\n教授: 不是，那個說法錯。",
+    "returned_quote": "教授: 不是，那個說法錯了。",
+    "expected_literal": "教授: 不是，那個說法錯。"
+  },
+  {
+    "original_call": "CMR-394e5028381292aa8fa9f4a3752f970ccb06b136e966edae459fc84ba4ca872b:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0036",
+    "paragraph": "其實一個很好的例子是什麼例子？什麼很好的例子？就是第二次世界大戰的時候，德國一開始把整個歐洲大陸佔去，把英美聯軍趕出去，趕出去歐洲大陸，OK？",
+    "returned_quote": "其實一個很好的例子是什麼意思呢？什麼很好的例子？",
+    "expected_literal": "其實一個很好的例子是什麼例子？什麼很好的例子？"
+  },
+  {
+    "original_call": "CMR-085341c19c5a030d0471cec7f693644ede56eb56bc7410f1c1a56406b569a1ed:gpt",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0031",
+    "paragraph": "因為聖經有時候用體這個字，σώμα，來指我們整個的人；聖經有時候用我們的靈，πνεύμα，來指我們整個的人；聖經有時候用魂這個字來指我們整個的人。那個東西完全講不通。",
+    "returned_quote": "因為聖經有時候用體這個字，σώμα，來指我們整個的人；聖經有時候用我們的靈，πνεύμα，來指我們整個的人；聖經有時候用魂這個字，來指我們整個的人。",
+    "expected_literal": "因為聖經有時候用體這個字，σώμα，來指我們整個的人；聖經有時候用我們的靈，πνεύμα，來指我們整個的人；聖經有時候用魂這個字來指我們整個的人。"
+  },
+  {
+    "original_call": "CMR-5904a1177093dbff1a1faff282b7ea1d9a9e389b76ab8cf269285f6fc9edc426:opus",
+    "source_id": "SRC-2018_NYSC_1-8c366a6206fe",
+    "paragraph_key": "S0058",
+    "paragraph": "所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的。看到沒有？這種經文很多。",
+    "returned_quote": "所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的人的。看到沒有？",
+    "expected_literal": "所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的。看到沒有？"
+  }
+]

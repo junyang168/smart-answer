@@ -1,0 +1,16 @@
+{
+ "schema": "diagram-gold-key-grade.v1", "key": "A", "lecture": "2017 NYSC 專題：馬太福音釋經（六）3",
+ "run": "split2: section-split rule 「不在一個小標題之內切開」; covenant group only",
+ "graded_from": "saved claims and argument-steps replies of G005 (the run stopped at G005's step check, in the Q&A part)",
+ "split": {"verdict": "fixed", "finding": "G005 = S0010–S0016 + S0020, one section: 宗主國與附庸國之約：先施恩後要求，以及新舊約律法的關係"},
+ "parts": {
+  "1 施恩→要求": {"held": true, "claims": ["CL0002"], "reasons": "ST01 不是討價還價, ST03 宗主國之約, ST06 先恩待再要求, ST08 出埃及→十誡, ST10 耶31 立約公式"},
+  "3 維持／破裂": {"held": true, "claims": ["CL0001", "CL0002"], "reasons": "ST07 只能維持既有的好關係, ST09 被擄滅國; 維持 in CL0001 (the section's cover), 破裂 in CL0002 under it"},
+  "4 舊約=摩西律法": {"held": true, "claims": ["CL0003"], "reasons": "ST08, ST11"},
+  "5 新約=基督的律法": {"held": true, "claims": ["CL0003"], "reasons": "ST12 拯救脫離罪, ST17 en nomos Christou, ST20 加6:2"},
+  "A3 條文／字句 vs 原則／聖靈": {"held": true, "claims": ["CL0004", "CL0005"], "reasons": "ST13 幼稚園／大學, ST14, ST15 字句／聖靈, ST16 參孫"}
+ },
+ "structure": {"verdict": "pass", "finding": "every part in one section; CL0002–CL0005 hang under the section's cover CL0001"},
+ "content": {"verdict": "pass", "finding": "every must-have part and every expected reason present; nothing he did not say"},
+ "run_stop": {"claim": "CL0009 將來的審判不是降洪水，而是把地球燒掉", "finding": "his one-line answer in the Q&A (S0020) went to claim_text; its only step is the listener's question, which the program does not count as support. Same Q&A paragraph stopped the first run (CL0027). Outside diagram A."}
+}

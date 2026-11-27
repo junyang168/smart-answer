@@ -154,3 +154,52 @@ def test_saved_pilot_excludes_all_cursor_candidates():
     results = {r['candidate_id']: r for r in saved['review']['results']}
     assert all(results[i]['kind'] == 'same_content' for i in saved['cursor_or_controls_candidate_ids'])
     assert saved['summary']['exported_state_count'] == 24
+
+
+def test_lecturer_only_views_export_no_pictures_and_leave_empty_intervals():
+    candidates = {'candidates': [{'id': 'c0', 'change_from_ms': 0, 'stable_ms': 520},
+                                  {'id': 'c1', 'change_from_ms': 1040, 'stable_ms': 1560}]}
+    review = {'candidates_sha256': pilot.object_sha(candidates), 'results': [
+        {'candidate_id': c['id'], 'kind': 'not_visible', 'confidence': .9,
+         'label': '教授鏡頭', 'reason': 'no visible slide'} for c in candidates['candidates']]}
+    events = pilot.selected_events(candidates, review)
+    assert events == []
+    timeline = pilot.visibility_timeline({'identity': {'start_ms': 0, 'end_ms': 2080}}, candidates, review, events)
+    assert all(s['state'] == 'no_slide' and s['image'] is None and s['slide_event_id'] is None
+               for s in timeline['spans'])
+    assert sum(s['end_ms'] - s['start_ms'] for s in timeline['spans']) == 2080
+
+
+def test_absence_and_occlusion_clear_picture_until_a_new_visible_acquisition():
+    kinds = ['new_slide', 'same_content', 'not_visible', 'same_content', 'new_slide', 'uncertain']
+    candidates = {'candidates': [{'id': f'c{i}', 'change_from_ms': i * 1000, 'stable_ms': i * 1000 + 200}
+                                  for i in range(len(kinds))]}
+    review = {'candidates_sha256': pilot.object_sha(candidates), 'results': [
+        {'candidate_id': f'c{i}', 'kind': kind, 'confidence': .9, 'label': kind, 'reason': kind}
+        for i, kind in enumerate(kinds)]}
+    events = [{**event, 'slide_image': f'{event["id"]}.png'} for event in pilot.selected_events(candidates, review)]
+    timeline = pilot.visibility_timeline({'identity': {'start_ms': 0, 'end_ms': 6000}}, candidates, review, events)
+    from backend.pipeline.transcript_slide_assembly import slide_at_time
+    assert slide_at_time(timeline, 100) is None  # Before first confirmed slide.
+    assert slide_at_time(timeline, 1500) == 'c0.png'  # Cursor-only change preserves visible slide.
+    assert slide_at_time(timeline, 2000) is None  # Professor-only view clears it immediately.
+    assert slide_at_time(timeline, 3500) is None  # No resurrection via same_content alone.
+    assert slide_at_time(timeline, 4500) == 'c4.png'  # Visible acquisition resumes output.
+    assert slide_at_time(timeline, 5000) is None  # Obscured/unreadable also stays blank.
+    assert slide_at_time(timeline, 6000) is None
+
+
+@pytest.mark.parametrize('kind,expected', [('new_slide','visible'), ('not_visible','no_slide'), ('uncertain','unknown')])
+def test_recording_initial_state_is_classified_even_without_any_change(tmp_path, kind, expected):
+    image = np.full((240, 320, 3), 40, np.uint8)
+    cv2.putText(image, 'Rom 9:1-33', (25, 90), cv2.FONT_HERSHEY_SIMPLEX, .7, (255,255,255), 2)
+    manifest = sample_manifest(tmp_path, [image, image, image])
+    candidates = pilot.detect(tmp_path, manifest, include_initial=True)
+    assert len(candidates['candidates']) == 1
+    initial = candidates['candidates'][0]
+    assert initial['initial_acquisition'] and initial['change_from_ms'] == 0
+    review = dict(candidates_sha256=pilot.object_sha(candidates), results=[dict(candidate_id='c-initial',kind=kind,confidence=.9,label='',reason='')])
+    events = [dict(id='c-initial',slide_image='initial.png')] if kind == 'new_slide' else []
+    timeline = pilot.visibility_timeline(manifest,candidates,review,events)
+    assert timeline['spans'] == [dict(start_ms=0,end_ms=1560,state=expected,slide_event_id='c-initial' if events else None,image='initial.png' if events else None,evidence_candidate_id='c-initial')]
+    assert pilot.pair_image(tmp_path,manifest,initial).is_file()

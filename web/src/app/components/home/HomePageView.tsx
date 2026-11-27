@@ -192,7 +192,7 @@ export const HomePageView = ({ missionStatement }: { missionStatement: string })
                                 <Users className="w-8 h-8 text-gray-700" />
                             </div>
                             <h3 className="text-2xl font-bold">团契</h3>
-                            <p className="mt-2 text-lg font-semibold">每兩週一次 週五晚 8:00 CST</p>
+                            <p className="mt-2 text-lg font-semibold">每兩週一次，週四晚 8:00（美國中部時間）</p>
                             <p className="text-gray-500 mt-1">下一次團契時間{fellowshipData.date}</p>
                             <p className="mt-4 text-gray-600 flex-grow">
                                 與弟兄姊妹們在線上，線下深入查经、分享生活、彼此代祷。这里是建立真实关系、经历生命同行的温馨家园。

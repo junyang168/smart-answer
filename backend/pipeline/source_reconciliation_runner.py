@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import json
 import os
@@ -435,50 +435,53 @@ class Runner:
             return raw
         replay = reservation.exists()
         artifacts = self.root / (stage + '.transport')
-        if replay:
-            if body(read(reservation)) != request:
-                raise Stop("reserved model request drift", status="proof_failure", waiting_for="system")
-            if not (artifacts / 'exit.json').is_file():
+        capacity = getattr(self.ports, 'model_call_capacity', None)
+        admission = capacity(stage, artifacts) if capacity and not replay else nullcontext()
+        with admission:
+            if replay:
+                if body(read(reservation)) != request:
+                    raise Stop("reserved model request drift", status="proof_failure", waiting_for="system")
+                if not (artifacts / 'exit.json').is_file():
+                    raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
+            else:
+                preflight = getattr(self.ports, "before_model_call", None)
+                if preflight:
+                    preflight(stage)
+                # Persist intent before side effects. Interrupted calls stay spent.
+                write(reservation, request)
+                reserved = getattr(self.ports, "model_call_reserved", None)
+                if reserved:
+                    reserved(stage, request)
+            client = adapter._client
+            if adapter.backend in {'codex_subscription', 'claude_subscription', 'anthropic_api'}:
+                client.call_artifacts = artifacts
+                client.replay_only = replay
+            elif replay:
                 raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
-        else:
-            preflight = getattr(self.ports, "before_model_call", None)
-            if preflight:
-                preflight(stage)
-            # Persist intent before side effects. Interrupted calls stay spent.
-            write(reservation, request)
-            reserved = getattr(self.ports, "model_call_reserved", None)
-            if reserved:
-                reserved(stage, request)
-        client = adapter._client
-        if adapter.backend in {'codex_subscription', 'claude_subscription'}:
-            client.call_artifacts = artifacts
-            client.replay_only = replay
-        elif replay:
-            raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
-        self.state(stage, next_action="read saved subscription response" if replay else "await the single subscription response")
-        try:
-            response = dict(adapter.generate(packet))
-        except Exception as exc:
-            failure = self.root / (stage + ".failure.json")
-            if not failure.exists():
-                write(failure, {"error": str(exc), "automatic_retry": False,
-                    "provider_raw": getattr(adapter._client, "last_raw_response", None),
-                    "transport_directory": str(artifacts)})
-            raise Stop("subscription call failed; original reservation retained", status="model_failed", waiting_for="owner") from exc
-        provider_raw = getattr(adapter._client, "last_raw_response", None)
-        executable = getattr(adapter._client, "executable", None)
-        runtime_identity = getattr(adapter._client, "cli_identity", None)
-        if executable:
-            import shutil
-            actual = Path(shutil.which(executable) or executable).resolve(strict=True)
-            runtime_identity = {"executable": str(actual), "file_sha256": contract.file_sha256(actual),
-                "model_id": adapter.model_id, "backend": adapter.backend, "reasoning_effort": adapter._client.reasoning_effort,
-                "cli_identity": runtime_identity}
-        raw = write(raw_path, {**request, "response": response, "response_sha256": sha256_json(response),
-            "provider_raw": provider_raw, "provider_raw_sha256": sha256_json(provider_raw), "runtime_identity": runtime_identity,
-            "completed_at": datetime.now(timezone.utc).isoformat()})
-        bound_model_response(adapter, packet, response, raw_path)
-        return raw
+            self.state(stage, next_action="read saved subscription response" if replay else "await the single subscription response")
+            try:
+                response = dict(adapter.generate(packet))
+            except Exception as exc:
+                failure = self.root / (stage + ".failure.json")
+                if not failure.exists():
+                    write(failure, {"error": str(exc), "automatic_retry": False,
+                        "provider_raw": getattr(adapter._client, "last_raw_response", None),
+                        "transport_directory": str(artifacts)})
+                raise Stop("subscription call failed; original reservation retained", status="model_failed", waiting_for="owner") from exc
+            provider_raw = getattr(adapter._client, "last_raw_response", None)
+            executable = getattr(adapter._client, "executable", None)
+            runtime_identity = getattr(adapter._client, "cli_identity", None)
+            if executable:
+                import shutil
+                actual = Path(shutil.which(executable) or executable).resolve(strict=True)
+                runtime_identity = {"executable": str(actual), "file_sha256": contract.file_sha256(actual),
+                    "model_id": adapter.model_id, "backend": adapter.backend, "reasoning_effort": adapter._client.reasoning_effort,
+                    "cli_identity": runtime_identity}
+            raw = write(raw_path, {**request, "response": response, "response_sha256": sha256_json(response),
+                "provider_raw": provider_raw, "provider_raw_sha256": sha256_json(provider_raw), "runtime_identity": runtime_identity,
+                "completed_at": datetime.now(timezone.utc).isoformat()})
+            bound_model_response(adapter, packet, response, raw_path)
+            return raw
 
     def review_input(self, frozen, response, proposal, stage):
         from backend.pipeline.source_review_input_repair import add_receipt, check_packet
@@ -1074,11 +1077,15 @@ def validate_bound_call(root, stage, packet, adapter):
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)
     reservation = body(read(root / (stage + ".reservation.json")))
-    proof = adapter.request_encoding_proof(packet)
+    if callable(measure := getattr(adapter, 'request_measurements', None)):
+        request_bytes, proof = measure(packet)
+    else:
+        proof = adapter.request_encoding_proof(packet)
+        request_bytes = adapter.request_bytes(packet)
     expected = {"model_id": adapter.model_id, "backend": adapter.backend,
         "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
         "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
-        "request_bytes": adapter.request_bytes(packet), "stage": stage, "automatic_retry": False}
+        "request_bytes": request_bytes, "stage": stage, "automatic_retry": False}
     limit,budget=request_limit(adapter,root/(stage+'.raw.json'),saved=raw)
     if budget is not None:expected['request_budget']=budget
     if expected["request_bytes"] > limit or expected != reservation or any(raw.get(k) != v for k, v in expected.items()) or raw["response_sha256"] != sha256_json(raw["response"]):

@@ -1,0 +1,93 @@
+import pytest
+from backend.pipeline.boundary_audio_review import validate_result
+
+
+def test_missing_cases_remain_absent_and_cannot_shift_verdict_to_another_case():
+    import copy
+    from backend.pipeline.boundary_audio_review import coalesce_case_rows
+    cases=[{'case_id':i,'candidates':[{'id':'c0'}]} for i in ['a','b','c']]
+    row=lambda i:dict(case_id=i,reference_issue='none',candidates=[dict(id='c0',verdict='clean_boundary',heard_target_phrase='實際原聲',reason='已聽音')])
+    answer={'results':[row('c')]};before=copy.deepcopy(answer)
+    actual=coalesce_case_rows(answer,cases)
+    validate_result(actual,cases,allow_partial=True)
+    assert actual==answer==before
+    assert actual['results'][0]['case_id']=='c'
+    with pytest.raises(ValueError):validate_result(actual,cases)
+    for bad in [[row('b'),row('a')],[row('a'),row('b'),row('a')],[row('unknown')]]:
+        with pytest.raises(ValueError):validate_result(coalesce_case_rows({'results':bad},cases),cases,allow_partial=True)
+    validate_result({'results':[]},cases,allow_partial=True)
+    from backend.pipeline.boundary_audio_review import assert_control
+    with pytest.raises(ValueError,match='calibration is incomplete'):
+        assert_control({'results':[]})
+
+
+def test_flattened_case_rows_regroup_without_changing_verdicts_or_hiding_conflicts():
+    import copy
+    from backend.pipeline.boundary_audio_review import coalesce_case_rows
+    cases=[{'case_id':'p1-start','candidates':[{'id':'c0'},{'id':'c1'}]}]
+    rows=[{'case_id':'p1-start','reference_issue':'none','candidates':[{'id':i,'verdict':v,'heard_target_phrase':'原聲','reason':'原聲核對'}]} for i,v in [('c0','wrong_segment'),('c1','clean_boundary')]]
+    raw={'results':rows};before=copy.deepcopy(raw)
+    normalized=coalesce_case_rows(raw,cases)
+    validate_result(normalized,cases,allow_partial=True)
+    assert raw==before
+    assert normalized['results'][0]['candidates']==[r['candidates'][0] for r in rows]
+    conflicting=copy.deepcopy(raw);conflicting['results'][1]['reference_issue']='unclear'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(conflicting,cases),cases,allow_partial=True)
+    duplicate=copy.deepcopy(raw);duplicate['results'][1]['candidates'][0]['id']='c0'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(duplicate,cases),cases,allow_partial=True)
+    invented=copy.deepcopy(raw);invented['results'][1]['case_id']='invented'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(invented,cases),cases,allow_partial=True)
+    placeholder=copy.deepcopy(raw)
+    placeholder['results'][1]['candidates'].append(dict(id='c99',verdict='uncertain',heard_target_phrase='',reason='並無此項目'))
+    projected=coalesce_case_rows(placeholder,cases)
+    validate_result(projected,cases,allow_partial=True)
+    assert [c['id'] for c in projected['results'][0]['candidates']]==['c0','c1']
+    assert len(placeholder['results'][1]['candidates'])==2
+    placeholder['results'][1]['candidates'][-1]['verdict']='clean_boundary'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(placeholder,cases),cases,allow_partial=True)
+
+
+def test_actual_previous_tail_is_not_an_acceptable_boundary():
+    cases=[{'case_id':'p10-start','candidates':[{'id':'old'},{'id':'fixed'}]}]
+    answer={'results':[{'case_id':'p10-start','reference_issue':'none','candidates':[
+        {'id':'old','verdict':'wrong_segment','heard_target_phrase':'魔鬼來作王','reason':'上一段尾句'},
+        {'id':'fixed','verdict':'clean_boundary','heard_target_phrase':'所以從神的國度來看','reason':'本段開頭完整可聞'}]}]}
+    validate_result(answer,cases)
+    answer['results'][0]['candidates'][1]['heard_target_phrase']=''
+    with pytest.raises(ValueError):validate_result(answer,cases)
+
+
+def test_no_invented_or_reordered_boundary_candidates():
+    cases=[{'case_id':'p10-start','candidates':[{'id':'expected'}]}]
+    answer={'results':[{'case_id':'p10-start','reference_issue':'unclear','candidates':[{'id':'invented','verdict':'uncertain','heard_target_phrase':'','reason':'聽不清'}]}]}
+    with pytest.raises(ValueError):validate_result(answer,cases)
+
+
+def test_empty_positive_is_excluded_without_rewriting_or_repeating_saved_answer(tmp_path):
+    import json
+    from backend.pipeline.boundary_audio_review import control_case,batches_from_plan,saved_verdicts,PROMPT,SCHEMA
+    from backend.pipeline.slide_change_pilot import save_json,file_sha,object_sha,read_json
+    root=tmp_path;save_json(root/'plan.json',{'source':'fixed'})
+    control=control_case(root)
+    case={**control,'case_id':'actual-p10','lecture':'1','paragraph_id':'p10'}
+    missing={**control,'case_id':'omitted-p9','lecture':'1','paragraph_id':'p9'}
+    plan={'parent_plan_sha256':file_sha(root/'plan.json'),'cases':[control,missing,case]};save_json(root/'boundary-audio-plan.json',plan)
+    for index,cases in enumerate(batches_from_plan(plan)):
+        rows=[]
+        for c in cases:
+            if c['case_id']=='omitted-p9':continue
+            judgments=[]
+            for option in c['candidates']:
+                verdict='wrong_segment' if index==0 and option['id']=='c0' else 'clean_boundary'
+                heard='' if index==1 and option['id']=='c0' else '所以從神的國度來看'
+                judgments.append({'id':option['id'],'verdict':verdict,'heard_target_phrase':heard,'reason':'原聲核對'})
+            rows.append({'case_id':c['case_id'],'reference_issue':'none','candidates':judgments})
+        answer={'results':rows};raw={'candidates':[{'finish_reason':'STOP','content':{'parts':[{'text':json.dumps(answer,ensure_ascii=False)}]}}]}
+        material=[{k:v for k,v in c.items() if k!='candidates'}|{'candidates':[{k:v for k,v in p.items() if k!='clip'} for p in c['candidates']]} for c in cases]
+        request={'parent_plan_sha256':file_sha(root/'boundary-audio-plan.json'),'cases':material,'prompt':PROMPT,'schema':SCHEMA}
+        folder=root/'boundary-calls'/f'b{index:04d}';call=folder/'calls'/'saved';save_json(call/'request.json',request);save_json(call/'response.json',raw)
+        save_json(folder/'validated.json',{'answer':answer,'request_sha256':object_sha(request),'raw_response_sha256':object_sha(raw)})
+    accepted=saved_verdicts(root)
+    assert accepted[('1','p10','start')]['time_ms']==200500
+    assert ('1','p9','start') not in accepted
+    assert read_json(root/'boundary-calls/b0001/validated.json')['answer']['results'][0]['candidates'][0]['heard_target_phrase']==''

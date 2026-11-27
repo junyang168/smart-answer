@@ -6,7 +6,34 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-10-24 (America/Chicago)
+Updated: 2026-10-28 (America/Chicago)
+
+## 2026-10-28 Draft-first: 萬人的贖價 passed review, the first essay on the new command
+
+Card #488, branch `wkp-488-ransom-essay`. Run directory
+`$DATA_BASE_DIR/wang-knowledge-platform/staging/essays/ransom-for-many-v1`.
+
+**Done.** The essay passed the two-way review in round 6 (92/100, every
+dimension at or above its minimum) after five owner-note files: `01` cut the
+blood-and-covenant and election sections and made 「耶穌是不是白死了」 its own
+section; `02`–`05` were extra rounds with no notes. Binding and register ran;
+the run stops at `final_review`, page
+`/admin/wang/operations/articles/reviews/ransom-for-many-v1`.
+
+**Waiting on the owner.** Final review and the publish button on that page.
+
+**Changed on the way.** Calibration is no longer a pipeline stage: `wrap-up.sh`
+runs `scripts/draft-first-calibrate.py --if-needed` when a branch changes the
+reviewer's prompt, rules or model (#494). 「重点突出，不枝不蔓」 is in the shared
+standard and scored under structural fidelity. Four false flags in the quote and
+unsourced-verse checks, and three places where a resumed round reused stale
+results, were fixed on the branch.
+
+**Next, on #494.** Owner's 「讲 / 不讲」 and adjacent decisions reach the author
+and the reviewer (sections 7–8 strayed because nothing told them the boundary);
+a revised draft passes the program checks before review; one definition of the
+verses the sources cite; the whole 和合本 cached locally; an end-to-end test of
+a resumed round.
 
 ## 2026-10-24 Draft-first: 人子 essay registered; repeatable pipeline in progress
 

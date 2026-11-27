@@ -127,7 +127,7 @@ def prepare(store, jobs, root, instruction, current):
     return plan
 
 
-def run(store, jobs, root, *, instruction):
+def run(store, jobs, root, *, instruction, model_capacity=None):
     """Advance one frozen currentness pass, then reread the whole cohort."""
     root = Path(root).resolve()
     current = batch._paragraph_results(store,jobs)
@@ -144,7 +144,7 @@ def run(store, jobs, root, *, instruction):
                 _, staged = batch.load(plan['manifest']['path'],root/'batch',store=store)
                 stage = batch._paragraph_results(store,staged)
                 if not all(v.get('status')=='completed' for v in stage['results'].values()):
-                    batch.run(plan['manifest']['path'],root/'batch')
+                    batch.run(plan['manifest']['path'],root/'batch', **({'model_capacity': model_capacity} if model_capacity else {}))
                     stage = batch._paragraph_results(store,staged)
                 current = batch._paragraph_results(store,jobs)
                 if not stage['all_actions_completed']:

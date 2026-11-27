@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+import json
+from urllib.parse import quote
 from email.utils import parseaddr
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -38,6 +40,7 @@ from .models import (
     GenerateHymnLyricsResponse,
     HymnMetadata,
     SundayServiceEntry,
+    SundayServiceUpdate,
     SundayServiceResources,
     SundayServiceEmailResult,
     SundayServiceEmailBody,
@@ -342,6 +345,37 @@ def delete_sermon_series_entry(series_id: str) -> None:
 sunday_service_router = APIRouter(prefix="/admin/sunday-services", tags=["sunday-services"])
 
 
+@sunday_service_router.get("/presenter/upcoming")
+def get_presenter_folder(response: Response) -> dict:
+    from backend.sunday_presenter import upcoming_folder
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return upcoming_folder()
+    except (ValueError, OSError) as exc:
+        raise HTTPException(503, str(exc), headers={"Cache-Control": "no-store"}) from exc
+
+
+class SundayPrayerUpdate(BaseModel):
+    markdown: str
+    revision: str
+
+
+@sunday_service_router.get("/prayer")
+def read_sunday_prayer(response: Response) -> dict:
+    from .service import repository
+    response.headers["Cache-Control"] = "no-store"
+    return repository.get_sunday_prayer()
+
+
+@sunday_service_router.put("/prayer")
+def write_sunday_prayer(payload: SundayPrayerUpdate) -> dict:
+    from .service import repository
+    try:
+        return repository.save_sunday_prayer(payload.markdown, payload.revision)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @sunday_service_router.get("", response_model=list[SundayServiceEntry])
 def get_sunday_services() -> list[SundayServiceEntry]:
     return list_sunday_services()
@@ -365,8 +399,11 @@ def write_sunday_service_email_body(date: str, payload: SundayServiceEmailBody) 
 
 
 @sunday_service_router.put("/{date:path}", response_model=SundayServiceEntry)
-def update_sunday_service_entry(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
-    return update_sunday_service(date, entry)
+def update_sunday_service_entry(date: str, entry: SundayServiceUpdate) -> SundayServiceEntry:
+    return update_sunday_service(
+        date, SundayServiceEntry.model_validate(entry.model_dump()),
+        original_scripture=entry.original_scripture,
+    )
 
 
 @sunday_service_router.delete("/{date:path}")
@@ -381,11 +418,30 @@ def get_sunday_service_resources() -> SundayServiceResources:
 
 @sunday_service_router.post("/{date:path}/ppt")
 def create_sunday_service_ppt(date: str) -> FileResponse:
-    ppt_path = generate_sunday_service_ppt(date)
+    from backend.sunday_presenter import PptPublicationPending
+    cloud_pending = False
+    try:
+        ppt_path = generate_sunday_service_ppt(date)
+    except PptPublicationPending as exc:
+        ppt_path = exc.draft_path
+        cloud_pending = True
+    from .service import repository
+    from backend.sunday_presenter import service_day
+    from backend.sunday_service_skeletons import skeleton_status
+    entry = next(entry for entry in list_sunday_services() if entry.date == date)
+    missing = ['本週奉獻總額'] if entry.donation_amount is None else []
+    missing.extend(
+        row['date'] + '：' + '、'.join(row['missing'])
+        for row in skeleton_status(repository, service_day(date))
+        if row['missing']
+    )
     return FileResponse(
         ppt_path,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=ppt_path.name,
+        headers={"X-Sunday-Ppt-Missing": quote(json.dumps(missing, ensure_ascii=False)),
+                 "X-Sunday-Ppt-Cloud-Status": "pending" if cloud_pending else "published",
+                 "Cache-Control": "no-store"},
     )
 
 

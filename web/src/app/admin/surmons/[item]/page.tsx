@@ -1,5 +1,11 @@
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { getServerSession } from "next-auth";
+import { hasTranscriptBetaAccess } from "@/app/utils/roles";
+import { authConfig } from "@/app/utils/auth";
 import { SurmonEditor } from "@/app/components/admin/surmons/SurmonEditor";
+
+import { TranscriptReviewEntry } from "@/app/components/admin/surmons/TranscriptProofreader";
 
 type PageProps = {
   params: Promise<{ item: string }>;
@@ -23,12 +29,32 @@ export default async function SurmonEditorPage(props: PageProps) {
   const searchParams = await props.searchParams;
   const params = await props.params;
   const item = decodeURIComponent(params.item);
+  if (process.env.TRANSCRIPT_EDITOR_CUTOVER === "1")
+    redirect(`/admin/transcripts/${encodeURIComponent(item)}`);
   const query = searchParams ?? {};
-  const viewChanges = toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
+  const viewChanges =
+    toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
+  const session = await getServerSession(authConfig);
+  const beta =
+    process.env.NODE_ENV === "development" ||
+    hasTranscriptBetaAccess(session?.user?.email, session?.user?.role);
+  const legacyView = query.redirect === "false";
+  const legacy = <SurmonEditor item={item} viewChanges={viewChanges} legacyView={legacyView} />;
 
   return (
     <Suspense fallback={<EditorFallback />}>
-      <SurmonEditor item={item} viewChanges={viewChanges} />
+      {beta && !legacyView ? (
+        <TranscriptReviewEntry
+          item={item}
+          legacy={legacy}
+          preferBeta={hasTranscriptBetaAccess(
+            session?.user?.email,
+            session?.user?.role,
+          )}
+        />
+      ) : (
+        legacy
+      )}
     </Suspense>
   );
 }

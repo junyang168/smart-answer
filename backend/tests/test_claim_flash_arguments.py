@@ -1,0 +1,610 @@
+"""Argument routes: existing node decisions, typed pairs, synchronized SQL and replay."""
+from copy import deepcopy
+import json
+import pytest
+from backend.pipeline import claim_flash_arguments as stage,claim_flash_statements as statements
+from backend.pipeline import claim_flash_evidence as eo,claim_flash_common as f,evidence_refresh as e
+from backend.tests.test_claim_flash_evidence import Ports as EvidencePorts,saved_inventory
+from backend.tests.test_claim_update_flash import Ports as BasePorts
+from backend.tests.test_evidence_refresh import sample
+from backend.tests.test_claim_management_postgres import postgres_store,_temporary_postgres
+
+class Ports(BasePorts):
+    def __init__(self,proposed=(),**kwargs):
+        super().__init__(**kwargs)
+        self.proposed=[{'relation_type':'supports','direction':'a_to_b',**p} for p in proposed]
+        self.dispositions=[]
+    def repair(self,request):
+        task=request['input']['task']
+        if task=='argument_completeness':
+            self.calls.append(('gpt',request))
+            return {'items':[{'job_id':j['job_id'],'action':'complete','pairs':self.proposed,'reason':'對照原文與實際路線。'} for j in request['input']['jobs']],
+                    **({'material_dispositions':deepcopy(self.dispositions)} if 'material_dispositions' in request['schema']['properties'] else {})}
+        if task.startswith('pair_'):
+            self.calls.append(('gpt',request))
+            return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b','reason':'原文的行為觀察支持這項判斷。'} for j in request['input']['jobs']]}
+        if task=='argument_final_support':
+            self.calls.append(('gpt',request));return {'items':[{'job_id':j['job_id'],'action':'keep','reason':'完整材料合起來支持。'} for j in request['input']['jobs']]}
+        return super().repair(request)
+
+@pytest.fixture
+def ready(sample,tmp_path):
+    store,root,_=sample;p=store.get_record_state('evidence_steps','E')['payload'];p['statement']='沒有聽從祂的話，顯明沒有真正相信祂。'
+    cp=store.get_record_state('claims','C')['payload'];cp['statement']=p['statement']
+    store.apply_plan(store.plan_package({'package_id':'arguments-fixture','evidence_steps':[p],'claims':[cp],
+        'observations':[{'observation_id':'O','statement':'教授以沒有聽從的行為說明沒有真正相信。','source_fragment_id':'F'}]}))
+    records,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],
+        'groups':[{'group_id':'G','title':'one','paragraph_keys':list(sources['S']['paragraphs']),'claim_ids':['C'],
+                   'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';prior=saved_inventory(tmp_path/'prior',sources)
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),prior,apply=True)['status']=='completed'
+    sroot=root/'statements';assert statements.run(store,'S',['C'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    return store,root,plan,eroot,sroot
+
+
+def test_new_argument_and_zero_model_replay(ready):
+    store,root,plan,eroot,sroot=ready;old=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    proposed={'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'行為觀察作為論據。'}
+    ports=Ports([proposed]);result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='applied'
+    rel=[p for k,p in result['updates'].items() if k.startswith('knowledge_relations/')]
+    assert len(rel)==1 and (rel[0]['from_id'],rel[0]['to_id'],rel[0]['relation_type'])==('O','E','supports')
+    assert store.get_record_state('evidence_steps','E')['payload']==old
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert f.RELATION_REASON_RULES in request['system']
+    assert not any('record_fidelity' in r.get('questions',{}) or 'statement_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
+    replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
+    assert replay.calls==[]
+
+
+def test_missing_support_restored_and_owners_synchronized(ready):
+    store,root,plan,eroot,sroot=ready;c=store.get_record_state('claims','C')['payload'];c['evidence_step_ids']=[]
+    p=store.get_record_state('evidence_steps','E')['payload'];p['produced_claim_ids']=[]
+    store.apply_plan(store.plan_package({'package_id':'remove-only-route','claims':[c],'evidence_steps':[p]}))
+    ports=Ports([{'a':'evidence_steps/E','b':'claims/C','fragment_ids':['F'],'reason':'恢復教授已表達的支持。'}])
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='applied'
+    assert store.get_record_state('claims','C')['payload']['evidence_step_ids']==['E']
+    assert store.get_record_state('claims','C')['payload']['statement']==c['statement']
+    assert store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids']==['C']
+
+
+@pytest.mark.parametrize('defect',['endpoint','source','claim_pair'])
+def test_unprovided_proposals_cannot_write(ready,defect):
+    store,root,plan,eroot,sroot=ready;before=store.get_record_state('claims','C')
+    p={'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'候選。'}
+    if defect=='endpoint':p['a']='observations/OTHER'
+    elif defect=='source':p['fragment_ids']=['OTHER']
+    else:p.update(a='claims/C',b='claims/C')
+    with pytest.raises(ValueError):stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Ports([p]),apply=True)
+    assert store.get_record_state('claims','C')==before
+    assert not list((root/'arguments').glob('commit*.json'))
+
+
+def test_missing_material_is_handoff_not_automatic_creation(ready):
+    store,root,plan,eroot,sroot=ready;before=store.get_record_state('claims','C')
+    class Handoff(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='argument_completeness':raw['items'][0].update(action='needs_material',reason='這項論據缺少材料節點。')
+            return raw
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Handoff(),apply=True)
+    assert result['status']=='needs_attention' and result['pending'][0]['layer']=='evidence'
+    assert store.get_record_state('claims','C')==before
+
+
+def test_unsettled_or_changed_statement_does_not_reuse(ready):
+    store,root,plan,eroot,sroot=ready;p=store.get_record_state('claims','C')['payload'];p['statement']='另外一個判斷。'
+    store.apply_plan(store.plan_package({'package_id':'statement-drift','claims':[p]}));ports=Ports()
+    with pytest.raises(ValueError,match='statement changed'):stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert ports.calls==[]
+
+
+def test_human_approved_relation_is_not_rewritten(ready):
+    store,root,plan,eroot,sroot=ready
+    store.apply_plan(store.plan_package({'package_id':'approved-relation','knowledge_relations':[{
+        'relation_id':'H','from_id':'O','to_id':'E','relation_type':'supports','reason':'已有人確認。',
+        'record_namespace':f.VERSION,'review_status':'human_approved'}]}))
+    before=store.get_record_state('knowledge_relations','H')
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Ports(choices={'relation':'none'}),apply=True)
+    assert result['status']=='needs_attention' and any(x['reason']=='protected_relation' for x in result['pending'])
+    assert store.get_record_state('knowledge_relations','H')==before
+
+
+def test_completed_proposal_is_not_rejudged_but_existing_support_is_still_checked(ready):
+    store,root,plan,eroot,sroot=ready
+    class Remove(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='pair_lower':
+                for x in raw['items']:x.update(action='remove',reason='已有路線，不必建立直接邊。')
+            return raw
+    ports=Remove([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'候選。'}],choices={'relation':'none'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert not any(role=='gpt' and r['input']['task']=='pair_lower' for role,r in ports.calls)
+    assert not any(role=='jev' and r['state'].get('A',{}).get('object_key')=='observations/O' for role,r in ports.calls)
+    assert result['status']=='needs_attention' # Existing sole support was also rejected; never complete with none.
+
+
+def test_sole_support_removal_cannot_be_completed(ready):
+    store,root,plan,eroot,sroot=ready;before=store.get_record_state('claims','C')
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Ports(choices={'relation':'none'}),apply=True)
+    assert result['status']=='needs_attention' and any(x['reason']=='final_argument_has_no_support' for x in result['pending'])
+    assert store.get_record_state('claims','C')==before
+
+
+def test_statement_connection_handoff_commits_candidate_and_route_together(ready):
+    store,root,plan,eroot,_=ready
+    original=store.get_record_state('claims','C')
+    text='沒有聽從耶穌的話，表示並未真正相信祂。'
+    class StatementPorts(BasePorts):
+        def repair(self,request):
+            task=request['input']['task'];action='repair' if task=='claim_fidelity' else 'needs_connection'
+            return {'items':[{'job_id':j['job_id'],'action':action,'statement':text if action=='repair' else None,
+                             'reason':'原文有此判斷，另有論據需要補連。'} for j in request['input']['jobs']]}
+    sroot=root/'pending-statements'
+    checked=statements.run(store,'S',['C'],eroot,sroot,StatementPorts(choices={'statement_fidelity':'changed','support':'partial'}),apply=True)
+    assert checked['status']=='needs_attention' and store.get_record_state('claims','C')==original
+    ports=Ports([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'補齊原文觀察。'}])
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='applied' and result['resolved_statement_handoffs']
+    assert store.get_record_state('claims','C')['payload']['statement']==text
+    assert len([k for k in result['updates'] if k.startswith('knowledge_relations/')])==1
+    assert not any('statement_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
+
+
+@pytest.mark.parametrize('selected',[True,False])
+def test_connection_lookup_can_find_evidence_already_owned_by_another_claim(ready,selected):
+    store,root,plan,_,_=ready
+    evidence=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    evidence.update(evidence_step_id='E024',produced_claim_ids=['PEER'],
+        statement='保羅不在摩西律法之下，卻仍在基督律法之下。',scripture_refs=[])
+    peer=deepcopy(store.get_record_state('claims','C')['payload'])
+    peer.update(claim_id='PEER',evidence_step_ids=['E024'],statement=evidence['statement'])
+    store.apply_plan(store.plan_package({'package_id':'peer-evidence','claims':[peer],'evidence_steps':[evidence]}))
+    plan['groups'][0]['lower_record_keys'].append('evidence_steps/E024')
+    _,sources=f.load_source(store,'S')
+    eroot=root/'with-peer-evidence'
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),saved_inventory(root/'peer-inventory',sources),apply=True)['status']=='completed'
+    finding='缺少保羅不受摩西律法管轄、卻仍受基督律法管轄的前提。'
+    class Handoff(Ports):
+        def repair(self,request):
+            if request['input']['task']=='claim_support':
+                return {'items':[{'job_id':job['job_id'],'action':'needs_connection','reason':finding}
+                                 for job in request['input']['jobs']]}
+            return super().repair(request)
+    sroot=root/'peer-statements'
+    statements.run(store,'S',['C'],eroot,sroot,Handoff(choices={'support':'partial'}),apply=True)
+    ports=Ports([{'a':'evidence_steps/E024','b':'claims/C','fragment_ids':['F'],'reason':finding}],
+                choices={'candidate':'E0' if selected else 'none'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'peer-arguments',ports,apply=True)
+    assert result['status']=='applied' and result['resolved_statement_handoffs'][0]['reason']==finding
+    lookup,=[req for role,req in ports.calls if role=='jev' and 'candidate' in req['questions']]
+    assert lookup['state']['evidence']=={'E0':evidence['statement']}
+    argument,=[req for role,req in ports.calls if role=='gpt' and req['input']['task']=='argument_completeness']
+    job,=argument['input']['jobs']
+    assert job['remaining_findings'][0]['reason']==finding
+    assert job['candidate_evidence_keys']==(['evidence_steps/E024'] if selected else [])
+    assert 'evidence_steps/E024' in argument['input']['nodes']
+    assert 'E024' in store.get_record_state('claims','C')['payload']['evidence_step_ids']
+    assert set(store.get_record_state('evidence_steps','E024')['payload']['produced_claim_ids'])=={'PEER','C'}
+
+
+def test_argument_commit_crash_reuses_saved_candidate_without_new_models(ready,monkeypatch):
+    store,root,plan,eroot,sroot=ready;apply=store.apply_plan
+    def crash(*a,**kw):apply(*a,**kw);raise RuntimeError('after SQL')
+    monkeypatch.setattr(store,'apply_plan',crash)
+    ports=Ports([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'原文觀察。'}])
+    with pytest.raises(RuntimeError,match='after SQL'):stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    monkeypatch.setattr(store,'apply_plan',lambda *a,**kw:pytest.fail('duplicate SQL'))
+    replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
+    assert replay.calls==[]
+
+
+def test_saved_plan_cannot_silently_shrink_or_change_source(ready):
+    store,root,plan,eroot,sroot=ready;plan=deepcopy(plan);plan['groups'][0]['lower_record_keys']=['evidence_steps/E'];ports=Ports()
+    with pytest.raises(ValueError,match='differs'):stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert ports.calls==[]
+
+
+@pytest.fixture
+def ready_pair(sample,tmp_path):
+    store,root,_=sample
+    ev=store.get_record_state('evidence_steps','E')['payload'];ev.update(statement='沒有聽從祂的話，顯明沒有真正相信祂。',produced_claim_ids=['C','D'])
+    claim=store.get_record_state('claims','C')['payload'];claim['statement']=ev['statement']
+    second={**deepcopy(claim),'claim_id':'D','statement':'教授以有沒有聽從耶穌的話判斷是否真正相信祂。'}
+    store.apply_plan(store.plan_package({'package_id':'two-final-checks','evidence_steps':[ev],'claims':[claim,second],
+        'observations':[{'observation_id':'O','statement':'教授以沒有聽從的行為說明沒有真正相信。','source_fragment_id':'F'}]}))
+    _,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],
+        'groups':[{'group_id':'G','title':'one','paragraph_keys':list(sources['S']['paragraphs']),'claim_ids':['C','D'],
+                   'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';prior=saved_inventory(tmp_path/'prior-pair',sources)
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),prior,apply=True)['status']=='completed'
+    sroot=root/'statements';assert statements.run(store,'S',['C','D'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    return store,root,plan,eroot,sroot
+
+
+def test_two_changed_claim_support_checks_share_one_call_and_replay(ready_pair):
+    store,root,plan,eroot,sroot=ready_pair
+    ports=Ports([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'行為觀察支持判斷。'}],choices={'support':'partial'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='applied'
+    requests=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_final_support']
+    assert len(requests)==1 and [j['job_id'] for j in requests[0]['input']['jobs']]==['claims/C','claims/D']
+    assert '每個job_id獨立判定' in requests[0]['system']
+    outcomes=[v for v in result['outcomes'] if v['basis']=='gpt_final_support']
+    assert {v['object_key'] for v in outcomes}=={'claims/C','claims/D'} and len(outcomes)==2
+    replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
+    assert replay.calls==[]
+
+
+def test_batch_keeps_unresolved_claim_separate_and_does_not_commit(ready_pair):
+    store,root,plan,eroot,sroot=ready_pair;old={k:store.get_record_state('claims',k) for k in ['C','D']}
+    class Mixed(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            if request['input']['task']=='argument_final_support':
+                for item in result['items']:
+                    if item['job_id']=='claims/D':item.update(action='needs_connection',reason='D仍缺少連接。')
+            return result
+    ports=Mixed([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'行為觀察支持判斷。'}],choices={'support':'partial'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='needs_attention'
+    assert [v['object_key'] for v in result['pending'] if v.get('reason')=='D仍缺少連接。']==['claims/D']
+    assert {k:store.get_record_state('claims',k) for k in old}==old
+    assert not (root/'arguments/commit.json').exists()
+
+
+def _final_jobs():
+    return [{'job_id':'claims/'+k,'material':{'claim':{'statement':k}},'findings':{'support':'partial'}} for k in ['C','D']]
+
+
+def test_saved_legacy_single_answer_is_reused_only_unsolved_claim_sent(tmp_path):
+    jobs=_final_jobs();ports=Ports();root=tmp_path/'final'
+    list(f.gpt(root,ports,'argument_final_support',jobs[:1],statements.Edits.model_json_schema(),stage.FINAL_SUPPORT_PROMPT,semantic_review=False))
+    ports.calls=[];result=stage.final_support_decisions(root,ports,jobs)
+    assert [v.job_id for v in result]==['claims/C','claims/D']
+    assert len(ports.calls)==1 and [j['job_id'] for j in ports.calls[0][1]['input']['jobs']]==['claims/D']
+
+
+def test_unknown_legacy_single_call_cannot_be_reissued_as_batch(tmp_path):
+    jobs=_final_jobs();ports=Ports();root=tmp_path/'final'
+    request={'identity':ports.identity['gpt'],'system':stage.FINAL_SUPPORT_PROMPT,
+        'input':{'task':'argument_final_support','jobs':jobs[:1]},'schema':statements.Edits.model_json_schema()}
+    e.save(root/'gpt'/e.digest(request)/'request.json',request);e.save(root/'gpt'/e.digest(request)/'started.json',{'request_sha256':e.digest(request)})
+    with pytest.raises(ValueError,match='no saved reply'):stage.final_support_decisions(root,ports,jobs)
+    assert ports.calls==[]
+
+
+@pytest.mark.parametrize('defect',['duplicate','foreign'])
+def test_invalid_batched_final_answer_cannot_assign_a_verdict_to_another_claim(tmp_path,defect):
+    class Bad(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            result['items'][1]['job_id']='claims/C' if defect=='duplicate' else 'claims/OTHER'
+            return result
+    with pytest.raises(ValueError):stage.final_support_decisions(tmp_path,Bad(),_final_jobs())
+
+
+def test_omitted_job_only_receives_one_bounded_correction(tmp_path):
+    class Omit(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            if len(request['input']['jobs'])==2:result['items']=result['items'][:1]
+            return result
+    ports=Omit();result=stage.final_support_decisions(tmp_path,ports,_final_jobs())
+    assert [v.job_id for v in result]==['claims/C','claims/D']
+    assert [[j['job_id'] for j in req['input']['jobs']] for _,req in ports.calls]==[['claims/C','claims/D'],['claims/D']]
+
+
+def test_fragment_id_correction_restores_only_supplied_repeated_prefix():
+    source_id = 'SRC-lecture-123456789abc'
+    canonical = 'FR-lecture-123456789abc-DK-123456789abc-P04-E009-01'
+    shortened = 'FR-lecture-123456789abc-P04-E009-01'
+    missing = 'FR-lecture-123456789abc-P04-E009-02'
+    assert stage.expand_fragment_ids(source_id, {canonical}, [shortened, missing]) == [canonical, missing]
+    assert stage.expand_fragment_ids(source_id, {canonical, shortened}, [shortened]) == [shortened]
+
+
+@pytest.mark.parametrize('approve', [True, False])
+def test_source_clarification_checks_only_stopped_route(ready_pair, approve):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+
+    class Review(Ports):
+        def repair(self, request):
+            result = super().repair(request)
+            task = request['input']['task']
+            if task == 'argument_completeness':
+                for item in result['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_source', reason='補核前段經文。')
+            if task == 'argument_final_support' and not approve:
+                result['items'][0].update(action='needs_connection', reason='仍缺連接。')
+            return result
+
+    original = stage.run(store, 'S', plan, 'G', eroot, sroot, target, Review(), apply=True)
+    assert original['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Resolve source scope',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/D': ['source_fragments/F']},
+    })
+    ports = Review()
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert result['status'] == ('verified' if approve else 'needs_attention')
+    assert (target / 'verification.json').read_bytes() == parent
+    assert len(ports.calls) == 1
+    _, request = ports.calls[0]
+    jobs = request['input']['jobs']
+    assert [job['job_id'] for job in jobs] == ['claims/D']
+    assert jobs[0]['source_context'][0]['fragment_id'] == 'F'
+    replay = Review()
+    assert stage.run(store, 'S', plan, 'G', eroot, sroot, target, replay, apply=True) == result
+    assert replay.calls == []
+
+
+def test_argument_continuation_corrects_only_the_pending_claim_statement(ready_pair):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+    proposal = {'a': 'observations/O', 'b': 'evidence_steps/E',
+                'fragment_ids': ['F'], 'reason': '原文行為支持判斷。'}
+
+    class Finding(Ports):
+        def repair(self, request):
+            reply = super().repair(request)
+            if request['input']['task'] == 'argument_final_support':
+                for item in reply['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_connection', reason='措辭超出教授原話。')
+            return reply
+
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target,
+                       Finding([proposal], choices={'support': 'partial'}), apply=True)
+    assert result['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    old_c = store.get_record_state('claims', 'C')
+    old_e = store.get_record_state('evidence_steps', 'E')
+    statement = '沒有聽從祂的話，顯明沒有真正相信祂。'
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct the stopped statement',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': 'claims/D', 'statement': statement,
+                                 'before_sha256': e.digest(before['records']['claims/D']['payload'])},
+    })
+    ports = Ports()
+    completed = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert completed['status'] == 'applied', completed.get('pending')
+    assert store.get_record_state('claims', 'D')['payload']['statement'] == statement
+    assert store.get_record_state('claims', 'C') == old_c
+    assert store.get_record_state('evidence_steps', 'E') == old_e
+    assert (target / 'verification.json').read_bytes() == parent
+    assert [j['job_id'] for role, req in ports.calls if role == 'gpt'
+            and req['input']['task'] == 'argument_completeness' for j in req['input']['jobs']] == ['claims/D']
+
+
+def test_route_context_continuation_binds_the_saved_connection_finding(tmp_path):
+    root = tmp_path / 'arguments'
+    pending = {'object_key': 'claims/C', 'layer': 'source', 'reason': '需要前段原文。'}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention', 'pending': [pending]}
+    before = {'records': {}, 'sources': {}}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Check source context',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/C': ['source_fragments/F']},
+    })
+    source_root = stage.active_root(root)
+    finding = '前段解釋仍缺論證連接。'
+    review = {**parent, 'outcomes': [{'basis': 'route_source_clarification',
+        'object_key': 'claims/C', 'action': 'needs_connection', 'reason': finding}]}
+    e.save(source_root/'verification.json', review)
+    followup = {'owner_direction': 'Resolve the recorded connection',
+                'review_sha256': e.digest(review), 'finding': finding,
+                'record_keys': ['evidence_steps/E']}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == source_root/'route-context'/e.digest(followup)
+    assert json.loads((source_root/'verification.json').read_text()) == review
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'finding': 'Different finding'}))
+    with pytest.raises(ValueError, match='saved source clarification'):
+        stage.active_root(root)
+
+
+def test_route_context_can_clarify_a_source_request_after_wording_review(tmp_path):
+    root = tmp_path / 'arguments'
+    key = 'claims/C'
+    before = {'records': {}, 'sources': {}}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention',
+              'pending': [{'object_key': key, 'layer': 'claim_connections'}]}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct wording',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': key},
+    })
+    first = stage.active_root(root)
+    reason = '需要獨立的語法證明。'
+    review = {**parent, 'pending': [{'object_key': key, 'layer': 'source', 'reason': reason}]}
+    e.save(first/'verification.json', review)
+    e.save(first/'statement-correction.json', {'pending': [], 'updates': {}})
+    followup = {'owner_direction': 'Check attribution',
+                'review_sha256': e.digest(review), 'previous_reason': reason,
+                'finding': '只核對講者原話是否支持此歸屬。'}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == first/'route-context'/e.digest(followup)
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'previous_reason': '另一項'}))
+    with pytest.raises(ValueError, match='verified wording'):
+        stage.active_root(root)
+
+
+@pytest.mark.parametrize('error_type', ['max_tokens_exceeded', 'invalid_request'])
+def test_final_argument_support_recognizes_only_the_recorded_token_limit(tmp_path, error_type):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    class Reject(Ports):
+        def judge(self, request):
+            self.calls.append(('jev', request))
+            body = json.dumps({'detail': {'error_type': error_type}}).encode()
+            raise HTTPError('https://example.invalid', 400, 'Bad Request', {}, BytesIO(body))
+
+    material = {'claim': {'statement': '保存完整的待查內容。'}}
+    ports = Reject()
+    if error_type == 'max_tokens_exceeded':
+        expected = {'support': 'not_run_provider_token_limit', 'scripture': 'not_run_provider_token_limit'}
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+    else:
+        with pytest.raises(HTTPError):
+            stage.argument_support_issues(tmp_path, ports, material)
+        with pytest.raises(e.RecordedCallRejected):
+            stage.argument_support_issues(tmp_path, ports, material)
+    assert len(ports.calls) == 1
+
+
+def test_scripture_decision_reuses_same_material_but_support_is_rechecked(tmp_path):
+    material = {'claim': {'statement': '耶穌談到外邦人的掌權。', 'scripture_refs': []},
+                'evidence': [{'object_key': 'evidence_steps/E', 'statement': '外邦人掌權。',
+                              'relation_type': 'supports'}],
+                'source_paragraphs': {'S0001': '主說，外邦人有君王為主治理他們。'}}
+    key = 'claims/C'
+    outcome = {'object_key': key, 'task': 'claim_scripture', 'action': 'keep',
+               'reason': '教授沒有給出具體出處。',
+               'scripture_input_sha256': statements.scripture_input_hash(material)}
+    changed = deepcopy(material)
+    changed['evidence'][0]['relation_type'] = 'explains'
+    assert statements.scripture_verified([outcome], key, changed)
+
+    class Judge:
+        def judge(self, request):
+            assert set(request['questions']) == {'support'}
+            return {'model': e.MODEL, 'answers': {'support': {'type': 'choice', 'choice': 'partial',
+                    'probabilities': {key: float(key == 'partial') for key in request['questions']['support']['criteria']}}}}
+
+    assert stage.argument_support_issues(tmp_path, Judge(), changed, scripture_verified=True) == {'support': 'partial'}
+    assert not statements.scripture_verified([{**outcome, 'action': 'needs_source'}], key, changed)
+    changed['source_paragraphs']['S0001'] += ' 見馬太福音二十章。'
+    assert not statements.scripture_verified([outcome], key, changed)
+
+
+def test_final_gpt_support_only_prompt_preserves_prior_scripture_decision(tmp_path):
+    ports = Ports()
+    job = {'job_id': 'claims/C', 'material': {}, 'findings': {'support': 'partial'}, 'reuse_scripture_check': True}
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
+    assert '經文出處已核對，沿用該判定' in ports.calls[0][1]['system']
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
+
+
+@pytest.mark.parametrize('drift', ['additive', 'transcript', 'removed', 'started', 'pending'])
+def test_statement_handoff_rechecks_only_new_source_context(ready, monkeypatch, drift):
+    from backend.pipeline import claim_human_source as human
+    from backend.tests.test_claim_flash_human_source import fact, save
+
+    store, root, plan, evidence_root, statement_root = ready
+    before = json.loads((statement_root/'before.json').read_text())
+    if drift == 'removed':
+        now = deepcopy(before['sources'])
+        original = fact(now)
+        human.project(now, [original])
+        now['S']['human_source_guard'] = {'paragraphs': {'S': ['S0001']}, 'entries': [original]}
+        with pytest.raises(ValueError, match='clarification changed'):
+            stage.added_source_context(now, before['sources'])
+        return
+
+    _, sources = f.load_source(store, 'S')
+    save(store, [fact(sources)])
+    records, current = f.load_group_source(store, 'S', plan['groups'][0])
+    if drift == 'transcript':
+        current['S']['file']['file_sha256'] = '0'*64
+        with pytest.raises(ValueError, match='statement source differs'):
+            stage.statement_proof(statement_root, ['C'], records, current)
+        return
+
+    reviewed = []
+    original_review = statements.review
+
+    def track(records, sources, targets, source_id, path, ports, **kwargs):
+        reviewed.extend(targets)
+        assert sources[source_id]['human_source_decisions']
+        return original_review(records, sources, targets, source_id, path, ports, **kwargs)
+
+    monkeypatch.setattr(statements, 'review', track)
+    args = (store, 'S', plan, 'G', evidence_root, statement_root, root/'arguments')
+    if drift == 'started':
+        e.save(root/'arguments'/'routes'/'gpt'/'prior'/'started.json', {})
+        ports = Ports()
+        with pytest.raises(ValueError, match='already-started argument request'):
+            stage.run(*args, ports, apply=True)
+        assert not reviewed and not ports.calls
+        return
+    if drift == 'pending':
+        finding = {'object_key':'claims/C','layer':'source','reason':'仍需補原文。'}
+        monkeypatch.setattr(statements, 'review', lambda *args, **kwargs:
+                            {'pending':[finding],'outcomes':[],'updates':{}})
+        ports = Ports()
+        result = stage.run(*args, ports, apply=True)
+        assert result['status'] == 'needs_attention' and result['pending'] == [finding]
+        assert not ports.calls and not (root/'arguments'/'commit.json').exists()
+        return
+    result = stage.run(*args, Ports(), apply=True)
+    assert result['status'] == 'verified'
+    assert reviewed == ['claims/C']
+    assert json.loads((statement_root/'before.json').read_text()) == before
+    replay = Ports()
+    stage.run(*args, replay, apply=True)
+    assert reviewed == ['claims/C']
+    assert replay.calls == []
+
+
+def test_unrouted_material_dispositions_are_recorded_for_the_reverse_lookup(ready):
+    store,root,plan,eroot,sroot=ready;ports=Ports()
+    ports.dispositions=[{'object_key':'observations/O','disposition':'background','duplicate_of':'','reason':'只交代背景。'}]
+    assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)['status'] in {'verified','applied'}
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert request['input']['unrouted_material']==['observations/O'] and stage.DISPOSITION_PROMPT in request['system']
+    saved=json.loads((root/'arguments'/'verification.json').read_text())
+    assert [(x['object_key'],x['disposition'],x['stage']) for x in saved['lower_dispositions']]==[
+        ('observations/O','background','argument_completeness')]
+
+
+@pytest.mark.parametrize('bad',[
+    {'object_key':'evidence_steps/E','disposition':'background','duplicate_of':''},     # already routed
+    {'object_key':'observations/O','disposition':'duplicate','duplicate_of':''},        # names no record
+    {'object_key':'observations/O','disposition':'duplicate','duplicate_of':'observations/O'},
+    {'object_key':'observations/O','disposition':'background','duplicate_of':'evidence_steps/E'}])
+def test_material_disposition_outside_its_contract_is_rejected(ready,bad):
+    store,root,plan,eroot,sroot=ready;ports=Ports();ports.dispositions=[{**bad,'reason':'理由。'}]
+    with pytest.raises(ValueError,match='disposition'):
+        stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+
+
+def test_legacy_policy_root_keeps_its_wire_contract(ready):
+    store,root,plan,eroot,sroot=ready;aroot=root/'legacy-policy';aroot.mkdir()
+    intent={'version':stage.VERSION,'source':f.bind_source(store,'S',aroot),'group':plan['groups'][0],'models':Ports.identity,
+            'evidence_root':str(eroot.resolve()),'statement_root':str(sroot.resolve()),
+            'policy_sha256':stage.LEGACY_POLICY_SHA256,'candidate_scope':stage.CANDIDATE_SCOPE}
+    e.save(aroot/'intent.json',intent);ports=Ports()
+    stage.run(store,'S',plan,'G',eroot,sroot,aroot,ports,apply=True)
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert request['schema']==stage.LegacyRoutes.model_json_schema() and 'unrouted_material' not in request['input']
+    assert stage.DISPOSITION_PROMPT not in request['system']
+    assert 'lower_dispositions' not in json.loads((aroot/'verification.json').read_text())
+
+
+def test_removed_edge_records_the_record_it_leaves_without_a_route(ready):
+    store,root,plan,eroot,sroot=ready
+    store.apply_plan(store.plan_package({'package_id':'removable-relation','knowledge_relations':[{
+        'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'舊連接。','record_namespace':f.VERSION}]}))
+    stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Ports(choices={'relation':'none'}),apply=True)
+    saved=json.loads((root/'arguments'/'verification.json').read_text())
+    removed=[x for x in saved['lower_dispositions'] if x['object_key']=='observations/O']
+    assert [(x['disposition'],x['other_end'],x['stage']) for x in removed]==[('relation_removed','evidence_steps/E','pairs_review')]

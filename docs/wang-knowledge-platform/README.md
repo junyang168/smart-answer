@@ -42,11 +42,31 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
+| [論證層重建設計](./10-extraction/argument_layer_rebuild_design.md) | #787 草案：分步生成寫入新知識庫實例、Flash 在新實例驗證、重放、投影片讀新實例、試作代碼轉正式 |
+| [从局部主张还原教授的整体论证](./10-extraction/unit_argument_design.md) | #845 设计草案、系列三长短双案例评测与盲测自审 |
+| [系列三单元通读与局部抽取试验](./10-extraction/unit_argument_context_trial_20261122.md) | #845 首轮实现、可复查的试验入口与长短两题结果 |
+| [系列三「耶稣为什么用比喻」整单元实测](./10-extraction/unit_argument_full_trial_20261122.md) | 20 条候选 Claim，跨讲推理、原句定位与长短两题验收 |
+| [GPT 第 1 講首次評分 2026 11 16](./10-extraction/argument_layer_gpt_lecture1_20261116.md) | GPT 6.1 sol 對太5 第 1 講：定案答案 20／22 對，題外話正確提出 |
+| [論證形態評測集](./10-extraction/argument_shape_eval_set.md) | prompt 改動怎麼驗證：按論證形態收的短案例、程式判的斷言、隨每講增長 |
+| [GPT 論證層各輪評分 2026 11 16](./10-extraction/argument_layer_gpt_rounds_20261116.md) | 第 1 講 36／36 通過；第 2 講保留分數 24／33、第二輪 28／33；第 3 講暫停 |
+| [論證層試作經驗 2026 11 16](./10-extraction/argument_layer_poc_lessons_20261116.md) | 太5 第一講試作的十二條經驗：發生了什麼、為什麼、因此怎麼改 |
+| [錄像轉錄與投影片時間軸流程 v1](./10-extraction/video_transcription_pipeline_v1.md) | 繁體逐字稿、中文時間對齊、換頁與逐步顯示、原始投影片自動嵌入的待實作流程與驗收契約 |
+| [錄像轉錄與投影片模型能力查證記錄 2026 10 27](./10-extraction/video_transcription_capabilities_20261027.md) | 官方能力、限制及本機舊流程觀察；不是新管線實測成績 |
 | [第一遍普查格式 v1](./10-extraction/corpus_survey_format_v1.md) | 全库普查的 JSON 格式 |
+| [圖文逐字稿同工審核設計](./10-extraction/transcript_human_review_design_v1.md) | 沿用認領與 Markdown 編輯，接入自動保存、slide 審核及精確版本發佈（待實作） |
 | [逐句详细知识整理与双模型复审流程 v1](./10-extraction/detailed_knowledge_extraction_workflow_v1.md) | 一篇讲道怎样被逐句拆成主张与证据 |
 | [來源逐句對帳與 claim 層完整性 v1](./10-extraction/source_to_claim_layer_ledger_v1.md) | 来源里的东西有没有真的进入论证图 |
 | [講道口語抽取實測 v1](./10-extraction/transcript_extraction_on_spoken_sermon_v1.md) | 抽取在口语讲道上的实际表现（记录） |
 | [投影片換頁辨識試跑](./10-extraction/slide_change_pilot_20261027.md) | 15 分鐘原片的換頁、逐步顯示、游標排除與雙模型實測（記錄） |
+| [音訊轉錄與投影片組合試跑](./10-extraction/transcript_slide_pilot_20261027.md) | 15 分鐘 ASR、中文對齊、標點分段與 24 張原圖的私人圖文試稿（記錄） |
+| [投影片可見性與空白輸出 v1](./10-extraction/slide_visibility_output_v1.md) | 教授單獨入鏡或無法判斷時清空圖片，保留口述與可見性時段 |
+| [投影片文字與圖表證據抽取 v1](./10-extraction/slide_visual_evidence_v1.md) | 可見文字、原圖座標、SVG 派生與論證取材來源分軌 |
+| [投影片文字與 SVG 試跑記錄](./10-extraction/slide_visual_evidence_pilot_20261027.md) | 24 張原圖的 124 個文字區域、獨立抽樣差異與遠端試稿（記錄） |
+| [原聲校對與投影片提示初次試跑](./10-extraction/transcript_audio_correction_pilot_20261027.md) | 已停用的重複 ASR 否決試驗歷史（記錄） |
+| [原聲與投影片校對重跑](./10-extraction/transcript_audio_slide_correction_v2_20261027.md) | 移除重複 ASR 否決，31 處 Gemini 修改及原聲回聽（記錄） |
+| [S 210307 全片圖文校對](./10-extraction/full_video_transcript_s210307_20261027.md) | 71 分鐘全片、閱讀稿清理與重新對齊時間檢查（記錄） |
+| [視頻轉錄與文庫接入 v1](./10-extraction/video_transcript_integration_v1.md) | 來源處理入口、圖文來源格式橋接與尚未接通的正式准入 |
+| [未記錄人工編輯講道的全片試跑](./10-extraction/unedited_video_20190901_20261028.md) | 成聖（II）全片、實體投影、全片清理上下文及文庫格式橋接（記錄） |
 | [分節抽取後獨立複審的價值 v1](./10-extraction/independent_review_value_after_section_extraction_v1.md) | 分节之后 AI 复审还抓得到什么（记录） |
 | [论证层视图 v1](./10-extraction/argument_layer_view_v1.md) | 怎样查看单篇来源的论证层 |
 | [講道目錄分類與 ingestion 邊界](./10-extraction/sermon_catalog_ingestion.md) | 目录导航、内容分类与跨讲归组的分界 |
@@ -59,6 +79,7 @@
 | --- | --- |
 | ★ [CanonicalViewpoint 设计](./20-knowledge/canonical_viewpoint_design.md) | 观点身份、论证路线、观点关系：怎样判断两条主张是同一个观点，以及谁能读什么 |
 | [Claim／CVP Management 2.0 主控设计](./20-knowledge/claim_cvp_management_2_design.md) | #357 两管理域的目标职责、Claim 多轮修订与独立终审、必要人工出口及完整生命周期验收；尚未启用 |
+| [新知識庫實例與題外話標記：方案](./20-knowledge/knowledge_instance_and_asides_solution.md) | #787 草案：Claim 層寫入新實例並在條件滿足後取代舊實例；無依據的評論與個人插曲經編輯批准後不出投影片、播放時跳過 |
 | [CVP 3.0：主题式 CVP Agent](./20-knowledge/topic_cvp_agent_solution.md) | 主题式 Agent 取代 CVP 2.0 的分批生成：一次处理一个主题，召回、按需读原文、提议、多轮复核修订，拿不准的转负责人；关系须附教授原话；写库后再生成论证路线。2026-10-26 批准 |
 | [主题式 CVP 试跑记录（2026-10-25／26）](./20-knowledge/topic_cvp_agent_pilot_record_20261025.md) | 「人子」九次试跑与一次合并试验的经过和数字 |
 | [CVP 2.0 执行入口与恢复](./20-knowledge/cvp2_recall_preparation_v1.md) | 完整 action、增量召回、共同材料、多轮、维护权限、SQL 提交／恢复及独立质量状态；真实模型验收另行进行 |
@@ -88,10 +109,12 @@
 | [釋經文章寫作品質評分表 v1](./30-authoring/matthew_exposition_writing_quality_rubric_v1.md) | 正文的评分维度与 hard gates |
 | [釋經初稿的程序化審計流程 v1](./30-authoring/editorial_draft_audit_workflow_v1.md) | 编排计划与初稿之间的程序化审计 |
 | [篇章编排双模型审核 v1](./30-authoring/composition_ai_review_v1.md) | 编排计划怎样被双模型复核 |
+| [文库入口：先选书卷和来源，再选章](./30-authoring/repository_book_source_navigation_solution.md) | 文库入口页怎样按书卷、来源、章导航到按章页面（待评审） |
 | [馬太福音釋經：來源進入論證層與跨來源整合 v1](./30-authoring/matthew_source_to_argument_workflow_v1.md) | 笔记与讲稿两种来源怎样进入论证层 |
 | [馬太福音十六章來源地圖 v1](./30-authoring/matthew_16_source_map_v1.md) | 十六章有哪些来源、哪些算独立证据 |
 | [马太福音第 17 章释经篇章蓝图](./30-authoring/matthew_17_exposition_blueprint.md) | 太17 释经文章的结构（候选，应迁移为 CompositionPlan） |
 | [马太福音文章进度页设计 v1](./30-authoring/matthew_exposition_progress_design_v1.md) | `/admin/wang/matthew-progress` 只读进度页的设计 |
+| [马太福音按章释经页：方案](./30-authoring/matthew_chapter_exposition_page_solution.md) | NYSC 马太系列：一章的原声与同步幻灯从哪些主张取材、怎样组成一页 |
 
 ## 40-qa-search —— 智能问答与搜索
 
@@ -115,6 +138,7 @@
 | --- | --- |
 | [参考释经书：Carson 马太福音扫描页的 OCR 与研读](./60-reference-commentary/reference_commentary_solution_v1.md) | 扫描页怎样变成可校对的文字、放在哪里、谁能读、与文库的分界 |
 | [查经准备：从 Carson 与教授讲道到逐字稿和 PPT](./60-reference-commentary/bible_study_prep_solution_v1.md) | 讨论纪要怎样进逐字稿、逐字稿怎样追到来源、PPT 只放重点 |
+| [查經工具：按經文研讀，接上王教授的講解與其他釋經書](./60-reference-commentary/bible_study_tool_solution_v1.md) | 查經工具在網站上的定位（草案），與文庫、團契查經回顧、參考釋經書的分界 |
 
 ## 90-ops —— 运营与工作台
 

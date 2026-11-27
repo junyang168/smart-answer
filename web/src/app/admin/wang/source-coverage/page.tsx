@@ -248,6 +248,7 @@ function SourceCoverageView() {
             selectedFragmentId={selectedFragmentId}
             selectedClaimId={selectedClaimId}
             onSelectFragment={selectFragment}
+            onFocusFragment={(id) => scrollToOrdinal(activeDetail.fragments[id]?.segment_ordinal ?? null)}
             onSelectClaim={selectClaim}
             onClearClaim={() => {
               setSelectedClaimId(null);

@@ -63,6 +63,29 @@ def _write_packages(tmp_path: Path, count: int = 3) -> list[Path]:
     return paths
 
 
+def test_external_node_identity_is_explicit_and_not_trusted_from_package_metadata():
+    package=_package(1);package['claims'].pop()
+    package['flash_application']={'external_reference_pins':{'claims/CLAIM-TARGET-1':{'revision':1}}}
+    with pytest.raises(KnowledgePackageMergeError,match='unknown produced claims'):
+        validate_merged_package(package)
+    validate_merged_package(package,external_reference_records={'claims':[{'claim_id':'CLAIM-TARGET-1','evidence_step_ids':['EVIDENCE-1']}]})
+    with pytest.raises(KnowledgePackageMergeError,match='reciprocal'):
+        validate_merged_package(package,external_reference_records={'claims':[{'claim_id':'CLAIM-TARGET-1','evidence_step_ids':[]}]})
+    with pytest.raises(KnowledgePackageMergeError,match='unknown produced claims'):
+        validate_merged_package(package,external_reference_records={'observations':[{'observation_id':'CLAIM-TARGET-1'}]})
+    with pytest.raises(KnowledgePackageMergeError,match='explicit semantic node'):
+        validate_merged_package(package,external_reference_records={'source_fragments':[{'fragment_id':'F'}]})
+
+
+def test_external_reference_cannot_hide_a_missing_local_fragment_or_id_collision():
+    package=_package(1);package['source_fragments']=[]
+    with pytest.raises(KnowledgePackageMergeError,match='unknown fragments'):
+        validate_merged_package(package,external_reference_records={'claims':[{'claim_id':'OUTSIDE'}]})
+    package=_package(1)
+    with pytest.raises(KnowledgePackageMergeError,match='globally unique'):
+        validate_merged_package(package,external_reference_records={'claims':[{'claim_id':'EVIDENCE-1'}]})
+
+
 def test_merge_packages_preserves_all_objects(tmp_path: Path) -> None:
     paths = _write_packages(tmp_path)
     merged = merge_packages(paths, package_id="SYNTHETIC-MERGE")

@@ -30,3 +30,33 @@ def test_batch_authenticates_registered_source_without_guessing_format(action,ki
         plan,jobs=batch.load(manifest,tmp/'batch',store=store)
         assert jobs[request.action_id][0]==request
     assert store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id)) is None
+
+
+def test_worker_refill_keeps_original_plan_and_requires_admission(action):
+    store,_,_,_,tmp,_=action;seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    policy=cm.Policy.model_validate_json(Path(request.policy.path).read_text())
+    authorize(request,policy,tmp/'policy.json')
+    req=tmp/'request.json';req.write_text(request.model_dump_json())
+    content={'max_workers':1,'jobs':[{'request':binding(req),'root':str(root)}]}
+    original=tmp/'original.json';original.write_text(json.dumps(content))
+    coordinator=tmp/'coordinator';coordinator.mkdir()
+    batch.load(original,coordinator,store=store)
+    frozen=(coordinator/'plan.json').read_bytes()
+    _,jobs=batch.worker_jobs(original,coordinator,store=store)
+    assert request.action_id in jobs
+    incoming=tmp/'incoming';incoming.mkdir()
+    extra=incoming/'manifest.json';extra.write_text(json.dumps(content))
+    batch.load(extra,incoming/'batch',store=store)
+    with pytest.raises(ValueError,match='not admitted'):
+        batch.worker_jobs(extra,coordinator,store=store)
+    dispatch=coordinator/'dispatch-inputs';dispatch.mkdir()
+    (dispatch/'000000.json').write_text(json.dumps(binding(extra)))
+    for _ in range(2):
+        _,jobs=batch.worker_jobs(extra,coordinator,store=store)
+        assert request.action_id in jobs
+        assert (coordinator/'plan.json').read_bytes()==frozen
+    extra.write_text(extra.read_text()+'\n')
+    with pytest.raises(ValueError,match='not admitted'):
+        batch.worker_jobs(extra,coordinator,store=store)
+    assert store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id)) is None

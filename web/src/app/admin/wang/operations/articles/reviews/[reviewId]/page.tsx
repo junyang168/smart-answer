@@ -87,6 +87,19 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
         </div>
       </header>
 
+      {(review.reader_intro || review.reader_summary) && (
+        <section aria-label="读者看到的引言与提要" className="mt-5 grid gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-black tracking-[0.12em] text-slate-500">卡片引言 · 文库主题页</p>
+            <p className="mt-2 text-sm leading-7 text-stone-800">{review.reader_intro}</p>
+          </div>
+          <div>
+            <p className="text-xs font-black tracking-[0.12em] text-slate-500">本文提要 · 文章开头</p>
+            <p className="mt-2 text-sm leading-7 text-stone-800">{review.reader_summary}</p>
+          </div>
+        </section>
+      )}
+
       <section aria-label="稿件状态" className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap gap-2">
           {review.stage_checks.map((check) => {
