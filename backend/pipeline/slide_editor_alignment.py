@@ -733,6 +733,8 @@ def import_bindings_to_review(
                 "height": height,
                 "content": asset["content"],
                 "svg_review_status": "repaired_model_candidate" if asset.get("fidelity_review", {}).get("repaired") else "unreviewed_model_candidate",
+                **({"display_content_sha256": digest(asset["content"]),
+                    "display_renderer": asset["display_note"]} if asset.get("display_note") == "source-glyphs.v1" else {}),
                 **({"svg_path": svg_rel, "svg_sha256": svg_sha} if svg_rel else {}),
                 **({"fidelity_review": asset["fidelity_review"]} if asset.get("fidelity_review") else {}),
             }

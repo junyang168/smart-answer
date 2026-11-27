@@ -237,14 +237,67 @@ def test_full_lecture_saved_rehearsal(tmp_path, monkeypatch):
         read_json(args.out / "slide_evidence.json"),
         read_json(args.out / "report.json"),
     )
-    assert scores["matched"]
-    assert len(scores["matched"]) == len(ctx["groups"])
-    reasons = {
-        r["event_id"]: r["reason"]
-        for r in read_json(args.out / "report.json")["events"]
-    }
-    for missing in scores["missing"]:
-        assert reasons[missing].startswith(("fidelity:", "layout:", "source highlight"))
+    assert len(scores["matched"]) == len(reference["placements"])
+    assert (
+        not scores["missing"]
+        and not scores["misplaced"]
+        and not scores["incorrect_merge"]
+    )
+    # These two additional mixed-colour slides were expressly held for
+    # the same colour loss. Preserve the original baseline and score the delta.
+    assert scores["extra"] == scores["previously_held_attached"] == ["c-0011", "c-0345"]
+    assert len(ctx["groups"]) == len(scores["matched"]) + len(scores["extra"])
+    import xml.etree.ElementTree as ET
 
-    for metric in ("extra", "misplaced", "incorrect_merge", "previously_held_attached"):
-        assert not scores[metric]
+    for sid in [
+        "c-0043",
+        "c-0074",
+        "c-0136",
+        "c-0188",
+        "c-0195",
+        "c-0210",
+        "c-0264",
+        *scores["extra"],
+    ]:
+        aid = ctx["occurrences"][sid]["asset_id"]
+        a = ctx["visual_assets"][aid]
+        svg = ET.parse(root / a["svg_path"]).getroot()
+        assert svg.get("data-text-renderer") == "source-glyphs.v1"
+        assert svg.find("{*}desc").text == a["visible_text"]
+        fills = {p.get("fill") for p in svg.findall("{*}path")}
+        assert "#111827" in fills
+        if sid != "c-0074":
+            assert "#92400E" in fills
+
+
+def test_only_verified_display_punctuation_is_eligible():
+    assert runner.punctuation_width_only("minor", ["部分全形逗號被擷取為半形逗號"])
+    assert runner.punctuation_width_only(
+        "minor", ["Half-width comma instead of full-width comma."]
+    )
+    for severity, issues in [
+        ("major", ["冒號誤提取為半形標點符號"]),
+        ("minor", ["半形標點差異及遺漏經文"]),
+        ("minor", ["缺少逗號"]),
+        ("minor", []),
+    ]:
+        assert not runner.punctuation_width_only(severity, issues)
+
+
+def test_source_colour_reconstruction_refuses_unrepresented_red_text():
+    from backend.pipeline.slide_source_ink import source_ink_svg
+
+    im = np.full((120, 200, 3), (90, 25, 8), np.uint8)
+    for text, y, colour in [
+        ("ab", 30, (248, 248, 248)),
+        ("cd", 55, (0, 245, 245)),
+        ("ef", 85, (0, 0, 240)),
+    ]:
+        cv2.putText(im, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2)
+    content = {
+        "has_diagram": False,
+        "shapes": [],
+        "edges": [],
+        "text_regions": [{"text": "ab cd ef", "bbox": [0, 0, 1000, 1000]}],
+    }
+    assert source_ink_svg(im, content, "0" * 64) is None

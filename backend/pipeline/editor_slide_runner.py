@@ -5,6 +5,7 @@ import copy
 import fcntl
 import json
 import math
+import re
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -14,6 +15,7 @@ import numpy as np
 
 from backend.api.sc_api.transcript_review import ReviewStore, digest
 from backend.pipeline import slide_editor_alignment as alignment
+from backend.pipeline.slide_source_ink import source_ink_svg
 from backend.pipeline.editor_slide_display import measure
 from backend.pipeline.full_video_transcript import classify_slides
 from backend.pipeline.slide_change_pilot import (
@@ -158,6 +160,7 @@ def collect(run, snap):
             audited = {a["asset_id"]: a for a in read_json(audit_file)["assets"]}
             verdicts = {r["asset_id"]: r for r in audit["results"]}
             for aid, a in audited.items():
+                a["audit_severity"] = verdicts[aid]["severity"]
                 if (a["fidelity_review"]["status"] == "passed") != verdicts[aid][
                     "passed"
                 ] or object_sha(a["content"]) != a["content_sha256"]:
@@ -202,10 +205,35 @@ def svg_for(a):
     )
 
 
+def punctuation_width_only(severity, issues):
+    """Conservatively accept a width-only report; all other words require review."""
+    if severity != "minor" or not issues:
+        return False
+    for issue in issues:
+        text = unicodedata.normalize("NFKC", issue).strip().lower()
+        if not re.search(r"全形|半形|全角|半角|full[- ]?width|half[- ]?width", text):
+            return False
+        if not re.search(r"標點|标点|冒號|逗號|句號|punctuation|colon|comma", text):
+            return False
+        tokens = (
+            r"標點符號|標點|标点符号|标点|冒號|逗號|句號|分號|問號|驚嘆號|"
+            r"全形|半形|全角|半角|誤提取為|被擷取為|被轉為|轉為|混用|與|及|和|僅|部分|差異|"
+            r"full[- ]?width|half[- ]?width|punctuation|colon|comma|instead of|only|and|"
+            r"[\s,、.:;。]"
+        )
+        if re.sub(tokens, "", text):
+            return False
+    return True
+
+
 def display_assets(assets, out):
     svgs = {}
     for aid, a in assets.items():
-        if a["fidelity_review"]["status"] != "passed" or not a["svg"]:
+        audit = a["fidelity_review"]
+        # Require a sole width-of-punctuation finding. Keep the original
+        # negative verdict and OCR text available to reviewers.
+        width_only = punctuation_width_only(a.get("audit_severity"), audit["issues"])
+        if (audit["status"] != "passed" and not width_only) or not a["svg"]:
             continue
         for region in a["content"]["text_regions"]:
             x, y, r, b = region["bbox"]
@@ -218,6 +246,15 @@ def display_assets(assets, out):
             ):
                 region["text"] = "\n".join(chars)
         svgs[aid] = svg_for(a)
+        if width_only or missing_highlight(a):
+            traced = source_ink_svg(
+                cv2.imread(a["original_image"]), a["content"], a["image_sha256"]
+            )
+            if traced:
+                svgs[aid] = traced
+                a["display_note"] = "source-glyphs.v1"
+            elif width_only:
+                del svgs[aid]
     checks = measure(svgs)
     for aid, issues in checks.items():
         shifts = {}
@@ -271,7 +308,53 @@ def same_frame(left, right, prior, current):
 
     a, b = thumbnail(left), thumbnail(right)
     diff = cv2.absdiff(a, b).max(axis=2)
-    return float(np.mean(diff)) < 4 and np.count_nonzero(diff > 50) < 0.003 * diff.size
+    return float(np.mean(diff)) < 5 and np.count_nonzero(diff > 50) < 0.003 * diff.size
+
+
+def preserves_previous_page(prior, later):
+    """A later build must retain all prior text at the same coloured locations."""
+    if any(a["content"]["has_diagram"] for a in (prior, later)):
+        return False
+    old_lines = [
+        comparison_text({"visible_text": r["text"]})
+        for r in prior["content"]["text_regions"]
+    ]
+    new = comparison_text(later)
+    if len(new) <= len(comparison_text(prior)) or len(old_lines) < 2:
+        return False
+    # Completing a missing scripture citation can supersede the incomplete
+    # view. A new teaching line can have independent value in a progressive build.
+    added_citation = any(
+        re.fullmatch(r"[一-龥]{1,8}\s*\d+\s*[:：]\s*\d+(?:[-–]\d+)?", r["text"].strip())
+        and comparison_text({"visible_text": r["text"]}) not in comparison_text(prior)
+        for r in later["content"]["text_regions"]
+    )
+    if not added_citation:
+        return False
+    pos = 0
+    for line in old_lines:
+        start = new.find(line, pos)
+        if not line or start < 0:
+            return False
+        pos = start + len(line)
+    width, height = prior["image_width"], prior["image_height"]
+
+    def original(asset):
+        im = cv2.imread(asset["original_image"])
+        return cv2.GaussianBlur(cv2.resize(im, (width, height)), (3, 3), 0)
+
+    old, new_frame = original(prior), original(later)
+    for region in prior["content"]["text_regions"]:
+        x, y, r, b = (
+            np.array(region["bbox"]) * [width, height, width, height] / 1000
+        ).astype(int)
+        patch = old[y:b, x:r]
+        if not patch.size or patch.std(axis=(0, 1)).max() < 12:
+            return False
+        near = new_frame[max(0, y - 3) : b + 3, max(0, x - 3) : r + 3]
+        if cv2.matchTemplate(near, patch, cv2.TM_CCOEFF_NORMED).max() < 0.92:
+            return False
+    return True
 
 
 def missing_highlight(asset):
@@ -329,7 +412,7 @@ def assemble(run, snap, out):
                 reason = "missing placement"
             elif not check:
                 reason = "fidelity: " + (" / ".join(reasons) or "no verified SVG")
-            elif missing_highlight(a):
+            elif a.get("display_note") != "source-glyphs.v1" and missing_highlight(a):
                 reason = "source highlight missing from SVG"
             elif check["overlaps"] or check["outside"]:
                 reason = "layout: " + json.dumps(check, ensure_ascii=False)
@@ -365,11 +448,31 @@ def assemble(run, snap, out):
                 capture_ms=e["capture_ms"],
                 reason=reason,
                 title=e["label"],
+                display_note=assets[b["asset_id"]].get("display_note")
+                if b and b["important"]
+                else None,
                 helps_reader_understand=b["helps_reader_understand"] if b else "",
                 editor_paragraph=numbers.get(b["aligned_paragraph_id"]) if b else None,
                 paragraph=b["aligned_paragraph_id"] if b else None,
             )
         )
+    superseded = {}
+    positions = {row["event_id"]: i for i, row in enumerate(report)}
+    for old, new in zip(selected, selected[1:]):
+        sid, nid = old["event_id"], new["event_id"]
+        interval = report[positions[sid] + 1 : positions[nid] + 1]
+        if (
+            old["aligned_paragraph_id"] == new["aligned_paragraph_id"]
+            and old["category"] != "independent_build_step"
+            and all(events[r["event_id"]]["kind"] == "build" for r in interval)
+            and preserves_previous_page(kept[old["asset_id"]], kept[new["asset_id"]])
+        ):
+            superseded[sid] = nid
+            report[positions[sid]]["reason"] = "duplicate of " + nid
+    selected = [b for b in selected if b["event_id"] not in superseded]
+    occurrences = [o for o in occurrences if o["event_id"] not in superseded]
+    used = {b["asset_id"] for b in selected}
+    kept = {k: v for k, v in kept.items() if k in used}
     save_json(
         out / "slide_evidence.json",
         dict(

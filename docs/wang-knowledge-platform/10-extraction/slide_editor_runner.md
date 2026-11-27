@@ -42,3 +42,5 @@ backend/.venv/bin/python -m backend.pipeline.editor_slide_eval \
 ```
 
 整講副本測試設定 `SLIDE_881_CAPTURE` 與 `SLIDE_881_VIDEO`，執行 `backend/tests/test_editor_slide_runner.py`。其餘測試亦可在無講道資料的環境執行，影片入口測試需要瀏覽器。每次部署之後以該版本的工作目錄執行。
+
+對純色深藍底文字頁，若 OCR 同一區塊包含原圖的多種重點色，可直接描出原圖字形生成白底 SVG，並保留 OCR 說明。程式將輸出渲染回原圖尺寸，分別核對白、黃、綠色的清晰筆畫核心，要求每色至少 99% 對上其指定的高對比顏色。只涉及標點寬度的輕微覆核差異可用同一方法還原可見標點。其他重大或混合問題照常保留。Editor 發佈時核對來源與 SVG 雜湊；若同工已編輯文字，使用校訂後的文字重建。
