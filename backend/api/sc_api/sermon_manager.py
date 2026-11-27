@@ -982,6 +982,8 @@ class SermonManager:
     def get_sermon_series(self):
         from .series_review_catalog import SeriesReviewCatalog
         from backend.pipeline.claim_flash_completion import sermon_completion_status
+        from backend.pipeline.sermon_unit_progress import lecture_progress
+        unit_progress = lecture_progress(self.base_folder)
         review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'))
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
         if not os.path.exists(series_meta_file):
@@ -995,6 +997,7 @@ class SermonManager:
                 if sermon_meta:
                     fields = review_catalog.for_item(item)
                     fields["argument_update_status"] = sermon_completion_status(self.base_folder, item)
+                    fields["argument_unit_progress"] = unit_progress.get(item.removesuffix(".json"))
                     sermons.append(sermon_meta.model_copy(update=fields))
             series['sermons'] = sermons
         return series_meta

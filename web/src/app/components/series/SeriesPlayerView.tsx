@@ -119,7 +119,7 @@ export const SeriesPlayerView = () => {
                   {day(sermon.published_date) || "—"}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  <ArgumentUpdateStatus status={sermon.argument_update_status} />
+                  <ArgumentUpdateStatus status={sermon.argument_update_status} progress={sermon.argument_unit_progress} />
                 </td>
               </tr>
             ))}
