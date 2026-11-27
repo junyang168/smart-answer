@@ -325,3 +325,50 @@ def test_review_router_serves_white_background_svg_and_original_png(tmp_path, mo
     assert svg_res.status_code == 200
     assert svg_res.headers["content-type"].startswith("image/svg+xml")
     assert 'fill="#FFFFFF"' in svg_res.text
+
+
+def test_load_transcript_paragraphs_reads_formal_editor_timings_and_narrows_candidates(tmp_path):
+    import pytest
+
+    data_root = tmp_path / "data"
+    (data_root / "script_review").mkdir(parents=True)
+    review_dir = data_root / "transcript_review" / "S 200607"
+    review_dir.mkdir(parents=True)
+
+    script_path = data_root / "script_review" / "S 200607.json"
+    save_json(script_path, [
+        {"index": "71", "text": "開場段落", "type": "content"},
+        {"index": "180", "text": "中段段落", "type": "content"},
+        {"index": "520", "text": "後半段經文講解", "type": "content"},
+    ])
+    ctx_path = review_dir / "context.json"
+    save_json(ctx_path, {
+        "schema_version": "transcript-review-context.v1",
+        "paragraph_bindings": {
+            "71": {"source_paragraph_id": "71", "start_ms": 140000, "end_ms": 232000},
+            "180": {"source_paragraph_id": "180", "start_ms": 453000, "end_ms": 582000},
+            "520": {"source_paragraph_id": "520", "start_ms": 2400000, "end_ms": 2580000},
+        },
+    })
+
+    # Passing script_review/<item>.json auto-discovers transcript_review/<item>/context.json
+    rows_from_script = align.load_transcript_paragraphs(script_path)
+    assert [(r["paragraph_id"], r["start_ms"], r["end_ms"]) for r in rows_from_script] == [
+        ("71", 140000, 232000),
+        ("180", 453000, 582000),
+        ("520", 2400000, 2580000),
+    ]
+    # Passing context.json directly also resolves script_review/<item>.json
+    rows_from_ctx = align.load_transcript_paragraphs(ctx_path)
+    assert rows_from_ctx == rows_from_script
+
+    # A slide in the second half of the video must narrow to paragraph 520, never the opening
+    cands = align.candidate_paragraphs_for_time(rows_from_script, 2450000)
+    assert [c["paragraph_id"] for c in cands] == ["520"]
+
+    # Untimed transcripts must fail closed instead of falling back to the first 6 paragraphs
+    untimed_path = tmp_path / "untimed.json"
+    save_json(untimed_path, [{"index": "1", "text": "沒有時間的段落", "type": "content"}])
+    untimed_rows = align.load_transcript_paragraphs(untimed_path)
+    with pytest.raises(ValueError, match="no start_ms/end_ms timings"):
+        align.candidate_paragraphs_for_time(untimed_rows, 2450000)
