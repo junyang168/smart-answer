@@ -173,9 +173,10 @@ def test_load_unit_into_temp_postgres_and_replace(tmp_path: Path):
             with pytest.raises(ValueError, match="pass replaces="):
                 U.load_unit(conn, unit_dir, series_id="2014-nysc-matthew-4", unit_id="U04", data_base_dir=data_dir)
 
-            # Update unit-argument.json and replace.
+            # Update unit-argument.json and replace, including changing a node's kind/collection (N1: evidence -> position).
             updated = _sample_unit_data()
             updated["claims"]["C001"]["statement"] = "Updated main claim one"
+            updated["nodes"]["N1"]["kind"] = "position"
             _write_json(unit_dir / "unit-argument.json", updated)
             second = U.load_unit(
                 conn,
@@ -186,6 +187,7 @@ def test_load_unit_into_temp_postgres_and_replace(tmp_path: Path):
                 replaces=first["change_set_id"],
             )
             assert second["read_back"] == "matches"
+            assert second["retired"].get("evidence_steps", 0) >= 1
             assert U.unit_holder(conn, "2014-nysc-matthew-4", "U04") == second["change_set_id"]
     finally:
         with psycopg.connect(base + "/postgres", autocommit=True) as admin:
