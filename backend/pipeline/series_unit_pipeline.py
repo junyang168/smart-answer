@@ -145,7 +145,13 @@ class QuotaWaitingClient:
 
     @call_artifacts.setter
     def call_artifacts(self, value: Any) -> None:
+        self._base_call_artifacts = Path(value) if value is not None else None
         self.inner.call_artifacts = value
+
+    def _rotate_call_artifacts(self, suffix: str) -> None:
+        base = getattr(self, "_base_call_artifacts", None)
+        if base is not None:
+            self.inner.call_artifacts = base.parent / f"{base.name}__{suffix}"
 
     def generate_json(self, system_prompt: str, user_prompt: str, json_schema: dict[str, Any]) -> Any:
         quota_waits = 0
@@ -164,6 +170,7 @@ class QuotaWaitingClient:
                         f"({quota_waits}/{self.max_quota_waits})",
                         flush=True,
                     )
+                    self._rotate_call_artifacts(f"quota_{quota_waits}")
                     self.sleep_fn(wait_s)
                     continue
                 transient_retries += 1
@@ -174,6 +181,7 @@ class QuotaWaitingClient:
                     f"{exc}; sleeping {int(self.transient_backoff_seconds)}s",
                     flush=True,
                 )
+                self._rotate_call_artifacts(f"retry_{quota_waits}_{transient_retries}")
                 self.sleep_fn(self.transient_backoff_seconds)
 
 

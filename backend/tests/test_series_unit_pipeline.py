@@ -141,19 +141,28 @@ def test_quota_waiting_client_sleeps_on_quota_and_retries():
     class FlakyOpus:
         model = "claude-opus-5-5"
         backend = "claude_subscription"
+        call_artifacts = None
 
         def generate_json(self, system_prompt, user_prompt, json_schema):
             attempts["n"] += 1
+            seen_dirs.append(Path(self.call_artifacts).name if self.call_artifacts else None)
             if attempts["n"] == 1:
                 raise RuntimeError("You hit your 5-hour limit; resets in 1m10s")
             if attempts["n"] == 2:
                 raise RuntimeError("temporary transport hiccup")
             return {"ok": True}
 
+    seen_dirs = []
     wrapped = P.QuotaWaitingClient(
         FlakyOpus(),
         sleep_fn=sleeps.append,
         transient_backoff_seconds=5.0,
     )
+    wrapped.call_artifacts = "/tmp/stage2_judge_artifacts"
     assert wrapped.generate_json("sys", "usr", {}) == {"ok": True}
     assert sleeps == [100, 5.0]  # 70s + 30s buffer from reset_seconds, then 5s transient backoff
+    assert seen_dirs == [
+        "stage2_judge_artifacts",
+        "stage2_judge_artifacts__quota_1",
+        "stage2_judge_artifacts__retry_1_1",
+    ]
