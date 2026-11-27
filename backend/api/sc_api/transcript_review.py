@@ -921,6 +921,26 @@ class ReviewStore:
                 raise ReviewError(409, "原圖版本不一致")
             return path
 
+    def svg_path(self, item, asset_id, *, actor=None, public=False):
+        if public:
+            self.meta(item)
+        with self.lock(item):
+            if public:
+                _, snapshot = self.published_snapshot(item)
+                c = snapshot["context"]
+            else:
+                self.require(actor, item)
+                _, c = self.load(item)
+            asset = c["visual_assets"].get(asset_id)
+            if asset is None or not asset.get("svg_path"):
+                raise ReviewError(404, "找不到白底 SVG")
+            path = self.root / asset["svg_path"]
+            if not path.exists():
+                raise ReviewError(404, "找不到白底 SVG")
+            if asset.get("svg_sha256") and file_hash(path) != asset["svg_sha256"]:
+                raise ReviewError(409, "SVG 版本不一致")
+            return path
+
     def candidate_path(self, item):
         self.folder(item)  # Validate before constructing any path.
         return self.root / "transcript_candidates" / f"{item}.json"

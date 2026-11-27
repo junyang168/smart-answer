@@ -243,6 +243,125 @@ def difference(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(np.max(np.abs(a - b), axis=2) >= 35))
 
 
+def compute_dhash(frame: np.ndarray, hash_size: int = 8) -> str:
+    """Compute a 64-bit difference hash (dHash) for near-duplicate slide detection."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    resized = cv2.resize(gray, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
+    diff = resized[:, 1:] > resized[:, :-1]
+    bits = 0
+    for bit in diff.flatten():
+        bits = (bits << 1) | int(bit)
+    return f"{bits:0{(hash_size * hash_size) // 4}x}"
+
+
+def hamming_distance(a: str, b: str) -> int:
+    return (int(a, 16) ^ int(b, 16)).bit_count()
+
+
+def sample_and_detect(video: Path, out: Path, *, start_ms: int, end_ms: int,
+                      interval_ms: int = 500, threshold: float = 0.0025,
+                      stable_ms: int = 500, include_initial: bool = False) -> tuple[dict, dict]:
+    """Decode sequentially in memory and persist only candidate/context frames to disk."""
+    if interval_ms <= 0 or start_ms < 0 or end_ms <= start_ms or not 0 < threshold < 1 or stable_ms < 0:
+        raise ValueError("Invalid sample or detector settings")
+    manifest_path, cand_path = out / "manifest.json", out / "candidates.json"
+    source_sha = file_sha(video)
+    identity = {"schema_version": SCHEMA, "source_sha256": source_sha,
+                "start_ms": start_ms, "end_ms": end_ms, "interval_ms": interval_ms}
+    if manifest_path.exists() and cand_path.exists():
+        saved = read_json(manifest_path)
+        if saved["identity"] == identity:
+            return saved, read_json(cand_path)
+        raise ValueError("Output contains a different source/window; choose a new output directory")
+    started = time.perf_counter()
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {video}")
+    width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps_metadata = cap.get(cv2.CAP_PROP_FPS)
+    frames, candidates = [], []
+    anchor_row, anchor, pending, previous = None, None, None, None
+    previous_pts, frame_no, target = -1.0, 0, start_ms
+    retained: dict[str, tuple[dict, np.ndarray]] = {}
+
+    def persist_row(row: dict, scaled: np.ndarray) -> dict:
+        if "sha256" not in row:
+            image_write(out / row["image"], scaled)
+            row["sha256"] = file_sha(out / row["image"])
+            frames.append(row)
+        return row
+
+    try:
+        while cap.grab():
+            pts = cap.get(cv2.CAP_PROP_POS_MSEC)
+            if not math.isfinite(pts) or (frame_no and pts <= previous_pts):
+                raise ValueError("Decoder did not return increasing source timestamps")
+            previous_pts = pts
+            if pts >= end_ms:
+                break
+            if pts + 0.01 >= target:
+                ok, frame = cap.retrieve()
+                if not ok:
+                    raise ValueError(f"Could not decode source frame {frame_no}")
+                ms = round(pts)
+                roi = propose_roi(frame)
+                scaled = cv2.resize(frame, (960, round(height * 960 / width)))
+                x, y, w, h = roi
+                sx, sy, sw, sh = (round(x * 960 / width), round(y * 960 / width),
+                                  max(1, round(w * 960 / width)), max(1, round(h * 960 / width)))
+                crop = scaled[sy:sy + sh, sx:sx + sw]
+                image = normalized(crop if crop.size else scaled)
+                row = {"id": f"f-{ms:09d}", "time_ms": ms, "decoder_pts_ms": pts,
+                       "source_frame_number": frame_no, "image": f"frames/f-{ms:09d}.jpg",
+                       "roi_original_xywh": list(roi)}
+                if anchor is None:
+                    anchor_row, anchor = persist_row(row, scaled), image
+                    retained[row["id"]] = (row, scaled)
+                    if include_initial:
+                        candidates.append({"id": "c-initial", "before_id": row["id"], "after_id": row["id"],
+                                           "change_from_ms": ms, "stable_ms": ms, "initial_acquisition": True,
+                                           "changed_fraction": 0.0})
+                else:
+                    change, movement = difference(anchor, image), difference(previous, image)
+                    if change >= threshold:
+                        if pending is None:
+                            pending = {"from_ms": ms, "before": anchor_row}
+                        if ms - pending["from_ms"] >= stable_ms and movement < threshold:
+                            persist_row(pending["before"], retained[pending["before"]["id"]][1])
+                            persist_row(row, scaled)
+                            candidates.append({"id": f"c-{len(candidates):04d}",
+                                               "before_id": pending["before"]["id"], "after_id": row["id"],
+                                               "change_from_ms": pending["from_ms"], "stable_ms": ms,
+                                               "changed_fraction": change})
+                            anchor_row, anchor, pending = row, image, None
+                            retained[row["id"]] = (row, scaled)
+                    else:
+                        pending = None
+                        if candidates and ms - candidates[-1]["stable_ms"] < 3120:
+                            persist_row(row, scaled)
+                previous = image
+                target = ms + interval_ms
+            frame_no += 1
+    finally:
+        cap.release()
+    if not frames:
+        raise ValueError("Requested window was not completely decoded")
+    manifest = {"identity": identity, "source_path": str(video.resolve()),
+                "original_width": width, "original_height": height,
+                "timestamp_source": "OpenCV FFmpeg decoder CAP_PROP_POS_MSEC",
+                "source_fps_metadata": fps_metadata if math.isfinite(fps_metadata) else None, "frames": frames,
+                "sampling_wall_seconds": time.perf_counter() - started,
+                "streaming_candidate_only": True,
+                "limitations": ["Pilot uses decoder presentation milliseconds; native rational PTS/time_base export remains future work."]}
+    save_json(manifest_path, manifest)
+    cand_doc = {"schema_version": SCHEMA, "manifest_sha256": file_sha(manifest_path),
+                "reference_sha256": None,
+                "config": {"threshold": threshold, "stable_ms": stable_ms, "include_initial": include_initial},
+                "candidates": candidates}
+    save_json(cand_path, cand_doc)
+    return manifest, cand_doc
+
+
 def detect(out: Path, manifest: dict, *, threshold: float = 0.0025,
            stable_ms: int = 500, include_initial: bool = False) -> dict:
     if not 0 < threshold < 1 or stable_ms < 0:

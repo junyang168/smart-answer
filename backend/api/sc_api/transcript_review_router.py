@@ -336,6 +336,16 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             path, media_type="image/png", headers={"Cache-Control": "private, no-store"}
         )
 
+    @router.get("/review_document/{item}/assets/{asset_id}/svg")
+    def asset_svg(item: str, asset_id: str, request: Request):
+        store = call(lambda: store_for(item))
+        path = call(
+            lambda: store.svg_path(item, asset_id, actor=authenticated_actor(request))
+        )
+        return FileResponse(
+            path, media_type="image/svg+xml", headers={"Cache-Control": "private, no-store"}
+        )
+
     @router.get("/review_document/{item}/media")
     def media(item: str, request: Request):
         store = call(lambda: store_for(item))

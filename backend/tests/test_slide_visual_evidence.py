@@ -265,3 +265,57 @@ def test_diagram_peer_labels_share_size_despite_bad_ocr_rectangle():
     root = ET.fromstring(visual.render_svg(value, 642, 480, 'a'*64))
     sizes = [float(t.get('font-size')) for t in root.findall('s:text', ns)]
     assert len(set(sizes)) == 1 and 27 < sizes[0] < 30
+
+
+def test_white_background_svg_remaps_light_colors_with_wcag_contrast():
+    value = content(False)
+    value['background'] = '#001B54'
+    value['text_regions'] = [
+        {'id': 'r1', 'text': '神集體地揀選', 'bbox': [40, 40, 900, 140], 'color': '#FFFF00', 'uncertain': False},
+        {'id': 'r2', 'text': '不因信接受福音', 'bbox': [40, 160, 900, 260], 'color': '#00FF00', 'uncertain': False},
+        {'id': 'r3', 'text': 'ἡ ἐκλογή', 'bbox': [40, 280, 900, 380], 'color': '#FFFFFF', 'uncertain': False},
+    ]
+    svg = visual.render_svg(value, 854, 480, 'b' * 64, allow_text_only=True, white_background=True)
+    root = ET.fromstring(svg)
+    ns = {'s': 'http://www.w3.org/2000/svg'}
+    assert root.get('data-background-mode') == 'white'
+    bg_rect = root.find('s:rect', ns)
+    assert bg_rect.get('fill') == '#FFFFFF'
+    colors = [t.get('fill') for t in root.findall('s:text', ns)]
+    assert len(set(colors)) == 3
+    for c in colors:
+        assert visual.contrast_ratio_against_white(c) >= 4.5
+
+
+def test_extract_dhash_deduplication_and_all_white_svg(tmp_path, monkeypatch):
+    slides, out = tmp_path / 'slides', tmp_path / 'extracted'
+    slides.mkdir()
+    img1 = np.full((120, 160, 3), 20, np.uint8)
+    cv2.putText(img1, 'Mat 5', (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    img2 = img1.copy()
+    img2[0, 0] = (21, 20, 20)  # 1-pixel noise -> different sha256, same dhash
+    cv2.imwrite(str(slides / 's0.png'), img1)
+    cv2.imwrite(str(slides / 's1.png'), img2)
+    save_json(slides / 'report.json', {'source_sha256': 'c' * 64, 'events': [
+        {'id': 's0', 'time_ms': 0, 'capture_ms': 0, 'kind': 'new_slide', 'slide_image': 's0.png', 'slide_sha256': file_sha(slides / 's0.png')},
+        {'id': 's1', 'time_ms': 5000, 'capture_ms': 5000, 'kind': 'return', 'slide_image': 's1.png', 'slide_sha256': file_sha(slides / 's1.png')},
+    ]})
+    calls = {'generate': 0}
+    class FakeReviewer:
+        model, input_rate, output_rate = 'fake-test-only', .75, 3.75
+        def __init__(self, *args): self.config, self.prompt = {'response_json_schema': visual.SCHEMA}, visual.PROMPT
+        def contents(self, ids, paths): return ids
+        def count(self, contents): return 10
+        def generate(self, contents):
+            calls['generate'] += 1
+            row = content(False); row['asset_id'] = contents[0]
+            return {'results': [row]}
+        def text(self, raw): return json.dumps(raw, ensure_ascii=False)
+        def usage(self, raw): return {'estimated_usd_upper': .01}
+    monkeypatch.setattr(visual, 'VisionReviewer', FakeReviewer)
+    record = visual.extract(slides, out, render_all_svg=True, white_background=True, deduplicate_dhash=True)
+    assert calls['generate'] == 1
+    assert len(record['assets']) == 1
+    assert record['deduplicated_occurrence_count'] == 1
+    assert record['svg_count'] == 1
+    assert record['assets'][0]['svg']['background_mode'] == 'white'
