@@ -297,15 +297,33 @@ def render_svg(content: dict, width: int, height: int, image_sha: str, *,
             common = statistics.median(r['bbox'][3] - r['bbox'][1] for r in peers)
             for region in peers:
                 label_heights[region['id']] = common * height / 1000
+    normalized_boxes = {}
     for region in content['text_regions']:
         x1, y1, x2, y2 = region['bbox']
+        if (not content['has_diagram'] and '\n' not in region['text']
+                and len(region['text'].strip()) >= 4 and (y2 - y1) > 2.2 * (x2 - x1)):
+            x1, y1, x2, y2 = y1, x1, y2, x2
+        normalized_boxes[region['id']] = (x1, y1, x2, y2)
+
+    for region in content['text_regions']:
+        x1, y1, x2, y2 = normalized_boxes[region['id']]
         lines = region['text'].split('\n')
         line_height = label_heights.get(region['id'], (y2-y1) * height / 1000 / len(lines))
-        # Fit to the canvas edge, not an unreliable OCR width. CJK peer labels
-        # retain one font size, and browser shaping supplies natural advances.
+        # Fit to the canvas edge (or next same-line sibling), not an unreliable OCR width.
         rtl = next((unicodedata.bidirectional(ch) for ch in lines[0]
                     if unicodedata.bidirectional(ch) in ('L', 'R', 'AL')), 'L') in ('R', 'AL')
-        available_width = (x2 if rtl else 1000-x1) * width / 1000
+        right_edge, left_edge = 1000.0, 0.0
+        for other in content['text_regions']:
+            if other['id'] == region['id']:
+                continue
+            ox1, oy1, ox2, oy2 = normalized_boxes[other['id']]
+            v_overlap = min(y2, oy2) - max(y1, oy1)
+            if v_overlap > 0.5 * min(y2 - y1, oy2 - oy1):
+                if not rtl and ox1 >= x2 - 20:
+                    right_edge = min(right_edge, ox1 - 4)
+                elif rtl and ox2 <= x1 + 20:
+                    left_edge = max(left_edge, ox2 + 4)
+        available_width = max(1.0, (x2 - left_edge if rtl else right_edge - x1)) * width / 1000
         element = ET.SubElement(root, 'text', id=region['id'], fill=fg(region['color']),
             attrib={'font-family': SVG_FONT_FAMILIES[font_style],
                     'font-size': str(natural_text_size(lines, available_width, line_height)), 'dominant-baseline': 'hanging'})
