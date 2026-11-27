@@ -460,12 +460,16 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
         raise ValueError('Output belongs to another source/image/model configuration')
     save_json(manifest_path, identity)
     rows, calls = list(assets.values()), []
-    for start in range(0, len(rows), batch_size):
-        batch = rows[start:start+batch_size]
+    pending = [(rows[start:start+batch_size], None) for start in range(0, len(rows), batch_size)]
+    completed = 0
+    while pending:
+        batch, rejected_batch = pending.pop(0)
         ids, paths = [a['asset_id'] for a in batch], [Path(a['path']) for a in batch]
         request = {'stage': 'slide_visual_extraction', 'manifest_sha256': file_sha(manifest_path),
                    'model': model_name, 'config': config_obj, 'prompt': prompt_text,
                    'asset_ids': ids, 'image_sha256s': [a['image_sha256'] for a in batch]}
+        if rejected_batch is not None:
+            request['parent_rejected_batch_sha256'] = rejected_batch
         def validated_obj(value):
             check_schema(value, SCHEMA)
             if [r['asset_id'] for r in value['results']] != ids:
@@ -505,7 +509,15 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
                     '\nPrevious response: '+adapter.text(raw))]
                 repaired = saved_call(out, repair, reserved, lambda: adapter.generate(repair_parts),
                                      max_calls=max_calls, budget_usd=budget_usd)
-                answer = validated(repaired)
+                try:
+                    answer = validated(repaired)
+                except (ValueError, KeyError):
+                    if len(batch) == 1:
+                        raise
+                    calls.append({'request_sha256': object_sha(request), **adapter.usage(raw)})
+                    calls.append({'request_sha256': object_sha(repair), **adapter.usage(repaired)})
+                    pending[0:0] = [([asset], object_sha(repaired)) for asset in batch]
+                    continue
                 repair_usage = {'request_sha256': object_sha(repair), **adapter.usage(repaired)}
             call_usage = adapter.usage(raw)
         for asset, content in zip(batch, answer['results']):
@@ -541,7 +553,8 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
         calls.append({'request_sha256': object_sha(request), **call_usage})
         if repair_usage:
             calls.append(repair_usage)
-        print(f'Extracted {min(start+batch_size, len(rows))}/{len(rows)} slide images', flush=True)
+        completed += len(batch)
+        print(f'Extracted {completed}/{len(rows)} slide images', flush=True)
     results = [read_json(out / 'assets' / a['asset_id'] / 'evidence.json') for a in rows]
     record = {'schema_version': 'slide-visual-evidence-collection.v1', 'source_video_sha256': report['source_sha256'],
               'input_manifest_sha256': file_sha(manifest_path), 'assets': results, 'occurrences': occurrences,

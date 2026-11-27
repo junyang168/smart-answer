@@ -159,13 +159,20 @@ def test_native_png_and_jpeg_mime_types_are_preserved():
     assert parts[2]['image_url'].startswith('data:image/jpeg;base64,')
 
 
-def test_extract_resume_reuses_response_without_new_count_or_generation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reject_pair", [False, True])
+def test_extract_resume_reuses_response_without_new_count_or_generation(tmp_path, monkeypatch, reject_pair):
     slides, out = tmp_path / 'slides', tmp_path / 'extracted'
     slides.mkdir()
     cv2.imwrite(str(slides / 's0.png'), np.full((100, 100, 3), 255, np.uint8))
     save_json(slides / 'report.json', {'source_sha256': 'a' * 64, 'events': [
         {'id': 's0', 'time_ms': 0, 'capture_ms': 0, 'kind': 'new_slide', 'slide_image': 's0.png',
          'slide_sha256': file_sha(slides / 's0.png')}]})
+    if reject_pair:
+        cv2.imwrite(str(slides/'s1.png'), np.zeros((100, 100, 3), np.uint8))
+        report = read_json(slides/'report.json')
+        report['events'].append({**report['events'][0], 'id':'s1', 'slide_image':'s1.png',
+                                 'slide_sha256':file_sha(slides/'s1.png')})
+        save_json(slides/'report.json', report)
     calls = {'count': 0, 'generate': 0}
     class FakeReviewer:
         model, input_rate, output_rate = 'fake-test-only', .75, 3.75
@@ -177,6 +184,8 @@ def test_extract_resume_reuses_response_without_new_count_or_generation(tmp_path
             return 10
         def generate(self, contents):
             calls['generate'] += 1
+            if reject_pair and len(contents) > 1:
+                return {'results': []}
             results = []
             for asset_id in contents:
                 row = content(False)
@@ -186,14 +195,15 @@ def test_extract_resume_reuses_response_without_new_count_or_generation(tmp_path
         def text(self, raw): return json.dumps(raw, ensure_ascii=False)
         def usage(self, raw): return {'estimated_usd_upper': .01}
     monkeypatch.setattr(visual, 'VisionReviewer', FakeReviewer)
-    visual.extract(slides, out)
-    visual.extract(slides, out)
-    assert calls == {'count': 1, 'generate': 1}
+    first = visual.extract(slides, out, repair_invalid_output=True)
+    assert visual.extract(slides, out, repair_invalid_output=True) == first
+    assert len(first['assets']) == (2 if reject_pair else 1)
+    assert calls == {'count': 3 if reject_pair else 1, 'generate': 4 if reject_pair else 1}
     assert read_json(out / 'slide_evidence.json')['diagram_count'] == 0
     (slides / 's0.png').write_bytes(b'changed')
     with pytest.raises(ValueError, match='changed'):
         visual.extract(slides, out)
-    assert calls['generate'] == 1
+    assert calls['generate'] == (4 if reject_pair else 1)
 
 
 def test_independent_sample_disagreement_is_disclosed_without_rewriting_source(tmp_path):
