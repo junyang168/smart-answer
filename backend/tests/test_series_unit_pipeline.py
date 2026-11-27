@@ -132,3 +132,28 @@ def test_phase_a_runs_without_opus_and_phase_b_reuses_stage1(tmp_path, monkeypat
     assert stage2_calls[0]["reuse_stage1"] is True
     assert (unit_dir / "fidelity_summary.json").exists()
     assert (unit_dir / "roundtrip_diff.json").exists()
+
+
+def test_quota_waiting_client_sleeps_on_quota_and_retries():
+    sleeps = []
+    attempts = {"n": 0}
+
+    class FlakyOpus:
+        model = "claude-opus-5-5"
+        backend = "claude_subscription"
+
+        def generate_json(self, system_prompt, user_prompt, json_schema):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise RuntimeError("You hit your 5-hour limit; resets in 1m10s")
+            if attempts["n"] == 2:
+                raise RuntimeError("temporary transport hiccup")
+            return {"ok": True}
+
+    wrapped = P.QuotaWaitingClient(
+        FlakyOpus(),
+        sleep_fn=sleeps.append,
+        transient_backoff_seconds=5.0,
+    )
+    assert wrapped.generate_json("sys", "usr", {}) == {"ok": True}
+    assert sleeps == [100, 5.0]  # 70s + 30s buffer from reset_seconds, then 5s transient backoff

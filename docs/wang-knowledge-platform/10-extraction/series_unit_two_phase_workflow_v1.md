@@ -32,11 +32,12 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.series_unit_pipeline \
   --phase a
 ```
 
-後續補跑 Phase B（僅用 Opus，不用 Gemini）並入庫：
+後續補跑 Phase B（僅用 Opus，不用 Gemini；加上 `--wait-on-quota` 可在遇 5 小時配額上限時自動休眠至重置後續跑）並入庫：
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.series_unit_pipeline \
   --series 2016-nysc-matthew-5 \
   --phase b \
+  --wait-on-quota \
   --load
 ```

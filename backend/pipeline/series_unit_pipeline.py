@@ -29,6 +29,7 @@ from backend.pipeline import argument_roundtrip_verify as roundtrip
 from backend.pipeline import claim_unit_argument as unit_arg
 from backend.pipeline import claim_unit_plan as unit_plan
 from backend.pipeline import evidence_refresh as artifacts
+from backend.pipeline import failover_judge_client as failover
 from backend.pipeline import series_unit_segmentation as seg
 
 DEFAULT_DATA_BASE_DIR = Path("/opt/homebrew/var/www/church/web/data")
@@ -116,6 +117,64 @@ def _build_opus_clients(model: str = DEFAULT_OPUS_MODEL) -> tuple[Any, Any]:
     judge_client = ClaudeSubscriptionClient(model=model, reasoning_effort="high")
     attr_client = ClaudeSubscriptionClient(model=model, reasoning_effort="medium")
     return judge_client, attr_client
+
+
+class QuotaWaitingClient:
+    """Wrap a subscription client to sleep until quota reset and retry on transient errors."""
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        sleep_fn: Any = time.sleep,
+        max_quota_waits: int = 24,
+        max_transient_retries: int = 3,
+        transient_backoff_seconds: float = 30.0,
+    ) -> None:
+        self.inner = inner
+        self.model = getattr(inner, "model", DEFAULT_OPUS_MODEL)
+        self.backend = getattr(inner, "backend", "claude_subscription")
+        self.sleep_fn = sleep_fn
+        self.max_quota_waits = max_quota_waits
+        self.max_transient_retries = max_transient_retries
+        self.transient_backoff_seconds = transient_backoff_seconds
+
+    @property
+    def call_artifacts(self) -> Any:
+        return getattr(self.inner, "call_artifacts", None)
+
+    @call_artifacts.setter
+    def call_artifacts(self, value: Any) -> None:
+        self.inner.call_artifacts = value
+
+    def generate_json(self, system_prompt: str, user_prompt: str, json_schema: dict[str, Any]) -> Any:
+        quota_waits = 0
+        transient_retries = 0
+        while True:
+            try:
+                return self.inner.generate_json(system_prompt, user_prompt, json_schema)
+            except Exception as exc:  # noqa: BLE001
+                if failover.is_quota_error(exc):
+                    quota_waits += 1
+                    if quota_waits > self.max_quota_waits:
+                        raise
+                    wait_s = failover.reset_seconds(str(exc))
+                    print(
+                        f"[quota-wait] {self.model} quota exhausted; sleeping {int(wait_s)}s before retry "
+                        f"({quota_waits}/{self.max_quota_waits})",
+                        flush=True,
+                    )
+                    self.sleep_fn(wait_s)
+                    continue
+                transient_retries += 1
+                if transient_retries > self.max_transient_retries:
+                    raise
+                print(
+                    f"[retry] {self.model} transient error ({transient_retries}/{self.max_transient_retries}): "
+                    f"{exc}; sleeping {int(self.transient_backoff_seconds)}s",
+                    flush=True,
+                )
+                self.sleep_fn(self.transient_backoff_seconds)
 
 
 def _unit_dirs(series_dir: Path) -> list[Path]:
@@ -248,6 +307,7 @@ def run_phase_b(
     gpt_client: Any = None,
     opus_judge_client: Any = None,
     opus_attr_client: Any = None,
+    wait_on_quota: bool = False,
 ) -> dict[str, Any]:
     """Run Phase B (Claude Opus 5.5 verification, zero Gemini) for one series."""
     series_dir = Path(data_base_dir) / "unit_argument_series" / series_id
@@ -259,6 +319,11 @@ def run_phase_b(
         default_judge, default_attr = _build_opus_clients()
         opus_judge_client = opus_judge_client or default_judge
         opus_attr_client = opus_attr_client or default_attr
+    if wait_on_quota:
+        if not isinstance(opus_judge_client, QuotaWaitingClient):
+            opus_judge_client = QuotaWaitingClient(opus_judge_client)
+        if not isinstance(opus_attr_client, QuotaWaitingClient):
+            opus_attr_client = QuotaWaitingClient(opus_attr_client)
 
     unit_summaries: list[dict[str, Any]] = []
     for unit_dir in units:
@@ -326,6 +391,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--data-base-dir", type=Path, default=DEFAULT_DATA_BASE_DIR)
     parser.add_argument("--skip-roundtrip-stage1", action="store_true", help="Skip Stage 1 blind reconstruction in Phase A")
     parser.add_argument("--workers", type=int, default=1, help="Parallel unit workers for Phase A")
+    parser.add_argument("--wait-on-quota", action="store_true", help="Sleep until quota reset and retry transient errors in Phase B")
     parser.add_argument("--load", action="store_true", help="Load units into PostgreSQL after pipeline completes")
     args = parser.parse_args(argv)
 
@@ -343,6 +409,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         out["phase_b"] = run_phase_b(
             args.series,
             data_base_dir=args.data_base_dir,
+            wait_on_quota=args.wait_on_quota,
         )
     if args.load:
         from backend.pipeline import argument_review
