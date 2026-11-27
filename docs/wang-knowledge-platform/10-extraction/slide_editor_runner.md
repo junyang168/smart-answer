@@ -3,7 +3,7 @@
 > **讀者**：Developer、Solution architect
 > **類型**：規範
 > **狀態**：當前
-> **與代碼對齊**：未核對
+> **與代碼對齊**：2026-11-27，#881 工作分支
 > **權威範圍**：從一講影片到正式 Editor 草稿的自動處理和回歸驗證。
 
 ## Eval
@@ -21,3 +21,24 @@
 - Editor 可能在長時間抽取時被校訂。匯入使用鎖內版本比對與固定操作收據，已存在的不同附件拒絕覆蓋。
 
 預設產生本地逐張處理報告。明確指定寫入時，合格附件經既有版本化匯入器一次寫入。發佈與論證層由各自流程負責。
+
+## 操作
+
+在開發環境準備 ffmpeg、ffprobe、Gemini 憑證及 Chrome 或 Chromium。可用 CHROME_BIN 指定瀏覽器。用資料庫內既有的講道 ID、對應影片及其已知 SHA 執行：
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.editor_slide_runner \
+  --video "$video" --sha256 "$source_sha" --item "$item" \
+  --root "$editor_data_root" --out "$work_dir" --apply
+```
+
+省略 `--apply` 即預演。在同一工作目錄重試可重用模型回覆與 Editor 收據。每項結果記於 `report.json`，包含原影片時間、取圖時間、段號、標題與入選或保留理由。程式依原圖黃色像素檢查漏掉的強調，並用 Chromium 實際排版檢查文字重疊、越界。獨立核對涵蓋文字、其他用色與圖形。無法通過的圖留在工作目錄供檢視。
+
+離線重播可加 `--replay "$capture_dir"`，輸出另用獨立目錄。舊回放沿用當時的候選清單，新影片對每個已分類事件執行重要性判斷。評分單獨執行：
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.editor_slide_eval \
+  backend/tests/fixtures/slide_editor/matthew_2021_first.json "$work_dir"
+```
+
+整講副本測試設定 `SLIDE_881_CAPTURE` 與 `SLIDE_881_VIDEO`，執行 `backend/tests/test_editor_slide_runner.py`。其餘測試亦可在無講道資料的環境執行，影片入口測試需要瀏覽器。每次部署之後以該版本的工作目錄執行。

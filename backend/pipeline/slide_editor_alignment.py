@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -283,6 +284,33 @@ def _apply_fidelity_repair(
     save_json(evidence_dir / "assets" / asset["asset_id"] / "evidence.json", asset)
 
 
+def parse_fidelity_result(text, expected_ids):
+    """Recover only the outer envelope after every expected row has decoded."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        prefix = re.match(r'\s*\{\s*"results"\s*:\s*\[', text)
+        if not prefix:
+            raise
+        rest = text[prefix.end():].lstrip()
+        rows = []
+        decoder = json.JSONDecoder()
+        for index, aid in enumerate(expected_ids):
+            if index:
+                if not rest.startswith(","):
+                    raise
+                rest = rest[1:].lstrip()
+            row, end = decoder.raw_decode(rest)
+            if not isinstance(row, dict) or row.get("asset_id") != aid:
+                raise
+            rows.append(row)
+            rest = rest[end:].lstrip()
+        # Extra members, arrays or syntactically incomplete rows remain errors.
+        if not re.fullmatch(r'\]?\s*[\w\s。]*"?\s*\]?\s*\}', rest):
+            raise
+        return {"results": rows}
+
+
 def verify_visual_fidelity(
     evidence_dir: Path,
     *,
@@ -359,7 +387,7 @@ def verify_visual_fidelity(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            parsed = json.loads(adapter.text(raw))
+            parsed = parse_fidelity_result(adapter.text(raw), ids)
             usage = adapter.usage(raw)
         check_schema(parsed, FIDELITY_SCHEMA)
         if [r["asset_id"] for r in parsed["results"]] != ids:
@@ -661,6 +689,25 @@ def import_bindings_to_review(
 
         if expected_version is not None:
             store.version(rows, context, expected_version)
+
+        if expected_version is not None:
+            existing_group_ids = {g["id"] for g in context.get("groups", [])}
+            for b in bindings_doc["bindings"]:
+                if (b["event_id"] in context.get("occurrences", {})
+                        or f"g-{b['event_id']}" in existing_group_ids):
+                    raise ValueError(f"Attachment already occupies {b['event_id']}")
+            for a in evidence["assets"]:
+                aid = a["asset_id"]
+                target = review_dir / "assets" / aid
+                files = [("original.png", a["original_image"])]
+                if a.get("svg"):
+                    files.append(("reconstruction.svg", a["svg"]["path"]))
+                for name, source in files:
+                    dest = target / name
+                    if dest.exists() and file_sha(dest) != file_sha(evidence_dir / source):
+                        raise ValueError(f"Conflicting attachment file {aid}/{name}")
+                if aid in context.get("visual_assets", {}):
+                    raise ValueError(f"Existing Editor asset {aid} is already in use")
 
         assets_out = review_dir / "assets"
         assets_out.mkdir(parents=True, exist_ok=True)

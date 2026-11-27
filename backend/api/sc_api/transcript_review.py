@@ -335,7 +335,8 @@ class ReviewStore:
         before_script_sha256 = context["script_sha256"]
         context = copy.deepcopy(context)
         context["revision"] += 1
-        context["script_sha256"] = digest(rows)
+        if kind != "import_slide_bindings":
+            context["script_sha256"] = digest(rows)
         revision = context["revision"]
         folder = self.folder(item)
         if (folder / "revisions" / f"{revision:08}.json").exists():
@@ -376,12 +377,14 @@ class ReviewStore:
         if any(op.get("kind") == "paragraph_timing" for op in request.get("operations", [])):
             result["paragraph_bindings"] = context["paragraph_bindings"]
             result["timing_quality"] = context.get("timing_quality")
-        files = {
-            self.root / "script_review" / f"{item}.json": rows,
+        files = {}
+        if kind != "import_slide_bindings":
+            files[self.root / "script_review" / f"{item}.json"] = rows
+        files.update({
             folder / "context.json": context,
             folder / "revisions" / f"{revision:08}.json": snapshot,
             **(extra or {}),
-        }
+        })
         op = {
             "state": "prepared",
             "actor": actor,
