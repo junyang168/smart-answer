@@ -635,6 +635,8 @@ def run_verification(
     *,
     dry_run: bool = False,
     attribute: bool = True,
+    stage1_only: bool = False,
+    reuse_stage1: bool = False,
     reconstructor_client: Any = None,
     judge_client: Any = None,
     attributor_client: Any = None,
@@ -660,38 +662,64 @@ def run_verification(
     if dry_run:
         return stats
 
-    if reconstructor_client is None or judge_client is None:
+    if reconstructor_client is None or (not stage1_only and judge_client is None):
         from dotenv import load_dotenv
-        from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
         from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
         load_dotenv(".env")
         if reconstructor_client is None:
             reconstructor_client = CodexSubscriptionClient(model="gpt-6.1-sol", reasoning_effort="medium")
             reconstructor_client.capture_usage_events = True
-        if judge_client is None:
+        if not stage1_only and judge_client is None:
+            from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
+
             judge_client = ClaudeSubscriptionClient(model="claude-opus-5-5", reasoning_effort="high")
-        if attributor_client is None:
+        if not stage1_only and attributor_client is None:
+            from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
+
             attributor_client = ClaudeSubscriptionClient(model="claude-opus-5-5", reasoning_effort="medium")
-    elif attributor_client is None:
+    elif not stage1_only and attributor_client is None:
         attributor_client = judge_client
 
     # Stage 1: Blind Reconstruction
     t0 = time.time()
-    if hasattr(reconstructor_client, "call_artifacts"):
-        reconstructor_client.call_artifacts = out_dir / "stage1_reconstructor_artifacts"
-    stage1_user = (
-        "以下是唯一提供给你的论证层结构化数据（不含原文，已按无向连通分量分组）。"
-        "请严格按照防脑补且不压缩承重推论的规则重构教授的论证过程：\n\n"
-        + json.dumps(blind_graph, ensure_ascii=False, indent=2)
-    )
-    reconstruction = reconstructor_client.generate_json(
-        RECONSTRUCTOR_SYSTEM, stage1_user, RECONSTRUCTOR_SCHEMA
-    )
+    stage1_path = out_dir / "02_blind_reconstruction.json"
+    stage1_meta_path = out_dir / "02_blind_reconstruction.meta.json"
+    reconstruction = None
+    if reuse_stage1 and stage1_path.exists() and stage1_meta_path.exists():
+        meta = json.loads(stage1_meta_path.read_text(encoding="utf-8"))
+        if meta.get("blind_graph_sha256") == stats["blind_graph_sha256"]:
+            reconstruction = json.loads(stage1_path.read_text(encoding="utf-8"))
+    if reconstruction is None:
+        if hasattr(reconstructor_client, "call_artifacts"):
+            reconstructor_client.call_artifacts = out_dir / "stage1_reconstructor_artifacts"
+        stage1_user = (
+            "以下是唯一提供给你的论证层结构化数据（不含原文，已按无向连通分量分组）。"
+            "请严格按照防脑补且不压缩承重推论的规则重构教授的论证过程：\n\n"
+            + json.dumps(blind_graph, ensure_ascii=False, indent=2)
+        )
+        reconstruction = reconstructor_client.generate_json(
+            RECONSTRUCTOR_SYSTEM, stage1_user, RECONSTRUCTOR_SCHEMA
+        )
+        stage1_path.write_text(
+            json.dumps(reconstruction, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        stage1_meta_path.write_text(
+            json.dumps({"blind_graph_sha256": stats["blind_graph_sha256"]}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     t1 = time.time()
-    (out_dir / "02_blind_reconstruction.json").write_text(
-        json.dumps(reconstruction, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    if stage1_only:
+        summary = {
+            **stats,
+            "stage1_only": True,
+            "stage1_seconds": round(t1 - t0, 1),
+            "stage1_gaps": len(reconstruction["gaps"]),
+        }
+        (out_dir / "00_stage1_summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return summary
 
     # Stage 2: Black-box Structured Diff (NO raw JSON!)
     transcript_text = transcript_text_override or extract_transcript_text(raw)
