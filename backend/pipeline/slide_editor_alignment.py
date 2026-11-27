@@ -97,9 +97,34 @@ ALIGNMENT_SCHEMA = obj({
 })
 
 
-def load_transcript_paragraphs(transcript_path: Path) -> list[dict[str, Any]]:
-    """Load spoken paragraphs from either script_published/*.json or illustrated_transcript.json."""
-    data = read_json(transcript_path)
+def _resolve_editor_paths(
+    transcript_path: Path,
+    context_path: Path | None = None,
+) -> tuple[Path, Path | None]:
+    """Resolve script JSON path and optional formal Editor context.json path."""
+    if context_path is not None:
+        return transcript_path, context_path
+    if transcript_path.name == "context.json" and transcript_path.parent.parent.name == "transcript_review":
+        item = transcript_path.parent.name
+        script_path = transcript_path.parent.parent.parent / "script_review" / f"{item}.json"
+        if not script_path.exists():
+            raise FileNotFoundError(f"Editor script_review file not found for {item}: {script_path}")
+        return script_path, transcript_path
+    if transcript_path.parent.name == "script_review":
+        candidate = transcript_path.parent.parent / "transcript_review" / transcript_path.stem / "context.json"
+        if candidate.exists():
+            return transcript_path, candidate
+    return transcript_path, None
+
+
+def load_transcript_paragraphs(
+    transcript_path: Path,
+    *,
+    context_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Load spoken paragraphs from formal Editor (script_review + context.json), argument_source, or script_published."""
+    script_path, resolved_ctx = _resolve_editor_paths(transcript_path, context_path)
+    data = read_json(script_path)
     if isinstance(data, dict) and isinstance(data.get("paragraphs"), list):
         rows = data["paragraphs"]
         result = []
@@ -110,12 +135,16 @@ def load_transcript_paragraphs(transcript_path: Path) -> list[dict[str, Any]]:
             start_ms = p.get("start_ms")
             end_ms = p.get("end_ms")
             result.append({
-                "paragraph_id": str(p.get("id") or f"p-{idx}"),
+                "paragraph_id": str(p.get("paragraph_id") or p.get("id") or f"p-{idx}"),
                 "start_ms": int(start_ms) if isinstance(start_ms, (int, float)) else None,
                 "end_ms": int(end_ms) if isinstance(end_ms, (int, float)) else None,
                 "text": text,
             })
         return result
+    bindings: dict[str, Any] = {}
+    if resolved_ctx is not None:
+        ctx_data = read_json(resolved_ctx)
+        bindings = ctx_data.get("paragraph_bindings") or {}
     items = data.get("script", data) if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError("Unsupported transcript JSON format")
@@ -123,14 +152,26 @@ def load_transcript_paragraphs(transcript_path: Path) -> list[dict[str, Any]]:
     for idx, item in enumerate(items):
         if not isinstance(item, dict) or item.get("type") == "subtitle":
             continue
+        pid = str(item.get("index") if item.get("index") is not None else f"p-{idx}")
+        tb = bindings.get(pid)
         text = str(item.get("text") or "").strip()
-        if not text or (text.startswith("##") and "start_time" not in item):
+        if not text or (text.startswith("##") and tb is None and "start_time" not in item):
             continue
         start_s, end_s = item.get("start_time"), item.get("end_time")
+        start_ms = (
+            int(tb["start_ms"])
+            if tb and isinstance(tb.get("start_ms"), (int, float))
+            else (round(float(start_s) * 1000) if isinstance(start_s, (int, float)) else None)
+        )
+        end_ms = (
+            int(tb["end_ms"])
+            if tb and isinstance(tb.get("end_ms"), (int, float))
+            else (round(float(end_s) * 1000) if isinstance(end_s, (int, float)) else None)
+        )
         result.append({
-            "paragraph_id": str(item.get("index") if item.get("index") is not None else f"p-{idx}"),
-            "start_ms": round(float(start_s) * 1000) if isinstance(start_s, (int, float)) else None,
-            "end_ms": round(float(end_s) * 1000) if isinstance(end_s, (int, float)) else None,
+            "paragraph_id": pid,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
             "text": text,
         })
     return result
@@ -145,7 +186,10 @@ def candidate_paragraphs_for_time(
 ) -> list[dict[str, Any]]:
     timed = [p for p in paragraphs if p["start_ms"] is not None and p["end_ms"] is not None]
     if not timed:
-        return paragraphs[:max_candidates]
+        raise ValueError(
+            "Transcript paragraphs have no start_ms/end_ms timings; "
+            "provide formal Editor context.json paragraph_bindings or a timed transcript"
+        )
     in_window = [
         p for p in timed
         if p["end_ms"] >= time_ms - window_padding_ms and p["start_ms"] <= time_ms + window_padding_ms
@@ -415,6 +459,7 @@ def align_and_filter_important_slides(
     transcript_path: Path,
     out_dir: Path,
     *,
+    context_path: Path | None = None,
     provider: str = "gemini",
     model: str | None = None,
     batch_size: int = 2,
@@ -426,7 +471,8 @@ def align_and_filter_important_slides(
     evidence_path = evidence_dir / "slide_evidence.json"
     collection = read_json(evidence_path)
     assets_by_id = {a["asset_id"]: a for a in collection["assets"]}
-    paragraphs = load_transcript_paragraphs(transcript_path)
+    script_path, resolved_ctx = _resolve_editor_paths(transcript_path, context_path)
+    paragraphs = load_transcript_paragraphs(script_path, context_path=resolved_ctx)
     occurrences = collection["occurrences"]
     if not occurrences:
         raise ValueError("No slide occurrences to align")
@@ -474,7 +520,8 @@ def align_and_filter_important_slides(
             "stage": "slide_editor_alignment",
             "provider": provider,
             "slide_evidence_sha256": file_sha(evidence_path),
-            "transcript_sha256": file_sha(transcript_path),
+            "transcript_sha256": file_sha(script_path),
+            **({"context_sha256": file_sha(resolved_ctx)} if resolved_ctx is not None else {}),
             "prompt_version": ALIGNMENT_PROMPT_VERSION,
             "model": model_name,
             "event_ids": ids,
