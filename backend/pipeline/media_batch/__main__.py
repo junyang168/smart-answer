@@ -100,6 +100,8 @@ def main():
     args = p.parse_args()
     store = Store()
     if args.command == "rough-plan":
+        from .retirement import require_cli_retired
+        require_cli_retired()
         from .rough_plan import create
 
         print(
@@ -153,101 +155,6 @@ def main():
                 and f.suffix.lower() in EXTENSIONS]}
         batch = create(store,manifest,cfg,args.actor)
         print(json.dumps({'batch':batch,'progress_href':'/admin/media-batches/'+batch},ensure_ascii=False))
-        return
-        from .planner import plan as create
-
-        if args.budget_usd <= 0 or args.max_calls <= 0:
-            raise ValueError("Positive explicit budgets required")
-        if (
-            args.ssd_reserve_gib < 0
-            or args.internal_reserve_gib < 0
-            or args.working_set_gib <= 0
-        ):
-            raise ValueError(
-                "Disk reserves must be nonnegative and working set positive"
-            )
-        cfg = {
-            k: str(v.resolve()) if isinstance(v, Path) else v
-            for k, v in vars(args).items()
-            if k not in ("command", "folder")
-        }
-        cfg["aligner_python"] = str(
-            args.aligner_python.absolute()
-        )  # Keep the venv launcher; resolving its symlink loses the environment.
-        cfg.update(
-            title=args.title or args.folder.name,
-            profile=args.profile,
-            pipeline_sha=subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], text=True
-            ).strip(),
-        )
-        from .runtime import file_sha, storage_guards
-
-        cfg["storage_guards"] = storage_guards(cfg)
-        cfg["vocabulary_sha"] = file_sha(args.vocabulary) if args.vocabulary else None
-        base = Path(__file__).resolve().parents[1]
-        from .store import key
-
-        stage_files = {
-            "prepare": ["full_video_transcript.py", "transcript_audio_pilot.py"],
-            "visuals": [
-                "full_video_transcript.py",
-                "slide_change_pilot.py",
-                "slide_visual_evidence.py",
-                "slide_pilot_models.py",
-            ],
-            "speech": [
-                "media_batch/window_tasks.py",
-                "full_video_transcript.py",
-                "transcript_audio_pilot.py",
-                "transcript_text_layout.py",
-                "transcript_seam_repair.py",
-                "transcript_audio_seams.py",
-                "transcript_seam_retention.py",
-                "transcript_audio_correction.py",
-                "transcription_vocabulary.py",
-            ],
-            "final-align": [
-                "full_video_transcript.py",
-                "transcript_alignment_worker.py",
-            ],
-            "finish": [
-                "full_video_transcript.py",
-                "transcript_playback_readiness.py",
-                "transcript_timing_report.py",
-                "contextual_transcript_timing.py",
-                "boundary_audio_review.py",
-                "paired_boundary_review.py",
-                "paragraph_audio_coherence.py",
-                "slide_reading_layout.py",
-                "transcript_seam_repair.py",
-                "transcript_audio_seams.py",
-                "transcript_seam_retention.py",
-            ],
-            "speakers": [
-                "transcript_speaker_batch.py",
-                "transcript_speaker_pilot.py",
-                "media_batch/speakers.py",
-            ],
-            "media": ["media_batch/stages.py"],
-            "handoff": [
-                "video_transcript_handoff.py",
-                "media_batch/stages.py",
-                "../api/sc_api/transcript_review.py",
-                "transcript_editorial_soft_deletions.py",
-            ],
-        }
-        cfg["stage_shas"] = {
-            stage: key({file: file_sha(base / file) for file in files})
-            for stage, files in stage_files.items()
-        }
-        batch = create(store, args.folder, cfg)
-        print(
-            json.dumps(
-                dict(batch=batch, progress_href="/admin/media-batches/" + batch),
-                ensure_ascii=False,
-            )
-        )
         return
     if args.command == "start":
         from .service import start

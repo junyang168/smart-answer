@@ -84,6 +84,8 @@ class Store:
                 """SELECT t.* FROM media_ingest.tasks t
               JOIN media_ingest.batch_tasks bt ON bt.task=t.id JOIN media_ingest.batches b ON b.id=bt.batch
               WHERE bt.batch=%s AND b.desired='running' AND t.state='pending' AND t.not_before<=now()
+                AND NOT EXISTS (SELECT 1 FROM media_ingest.pipeline_retirements x
+                  WHERE x.engine=COALESCE(b.config->>'pipeline','legacy-gpt'))
                 AND (COALESCE(b.config->>'pipeline','')<>'gemini-transcript-v1' OR EXISTS (
                   SELECT 1 FROM media_ingest.pipeline_heads h WHERE h.root=b.config->>'review_root'
                   AND h.item=t.payload->>'item' AND h.value->>'batch'=b.id))
@@ -141,6 +143,9 @@ class Store:
             ).fetchone()
             if not b:
                 raise KeyError(batch)
+            if action in ('resume', 'retry'):
+                from .retirement import require_supported
+                require_supported(b['config'])
             old = c.execute(
                 "SELECT * FROM media_ingest.controls WHERE batch=%s AND operation=%s",
                 (batch, operation),

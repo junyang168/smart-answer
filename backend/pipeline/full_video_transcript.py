@@ -861,6 +861,8 @@ def preview_app(root: Path):
     return Starlette(routes=[Mount('/',app=StaticFiles(directory=root,html=True,follow_symlink=True))])
 
 def main():
+    from backend.pipeline.media_batch.retirement import require_cli_retired
+    require_cli_retired()
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('stage',choices=['run','prepare','slides','visuals','speech','final-align','frame-audit','finish','handoff','preview'])
     p.add_argument('--out',type=Path,required=True);p.add_argument('--video',type=Path,required=True)

@@ -19,6 +19,11 @@ def start(store, batch, workers=4):
     if not 1 <= workers <= 4:
         raise ValueError("workers must be 1..4")
     from .gemini_plan import accept
+    from .retirement import require_supported
+    with store.connection() as c:
+        row = c.execute('SELECT config FROM media_ingest.batches WHERE id=%s', (batch,)).fetchone()
+    if not row: raise KeyError(batch)
+    require_supported(row['config'])
     accept(store, batch)
     name = label(batch)
     with store.connection() as c:

@@ -8,11 +8,13 @@ from .store import key
 from backend.pipeline.slide_change_pilot import read_json
 from backend.api.sc_api.transcript_review import ReviewStore, digest
 from backend.pipeline.gemini_review import initialize
-from .gemini_plan import PIPELINE
+from .gemini_plan import PIPELINE, implementation
 
 
 def execute(stage,payload):
     cfg=payload['config'];ensure_storage(cfg)
+    if cfg['implementation'] != implementation():
+        raise ValueError('Pipeline implementation changed after planning; saved results preserved')
     from .stages import resolve_source
     source=resolve_source(payload);out=Path(payload['out']);out.mkdir(parents=True,exist_ok=True)
     review=ReviewStore(Path(cfg['review_root']));actor=cfg['actor'];item=payload['item']

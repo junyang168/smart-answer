@@ -191,6 +191,8 @@ def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | No
 
 
 def main():
+    from backend.pipeline.media_batch.retirement import require_cli_retired
+    require_cli_retired()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage', choices=['prepare', 'transcribe', 'align', 'format', 'assemble', 'visual', 'run'])
     parser.add_argument('--out', type=Path, required=True)

@@ -29,8 +29,8 @@ export function SermonPipelineMonitor() {
   const [revision, setRevision] = useState<string>();
   const [refresh, setRefresh] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [budget, setBudget] = useState(25);
-  const [calls, setCalls] = useState(300);
+  const [budget, setBudget] = useState(100);
+  const [calls, setCalls] = useState(600);
   const [plan, setPlan] = useState<{ batch: string; items: string[]; budget_usd: number; max_calls: number } | null>(null);
   useEffect(() => { const timer = setTimeout(() => { setSearch(query); setOffset(0); setRevision(undefined); }, 250); return () => clearTimeout(timer); }, [query]);
   useEffect(() => {
@@ -67,14 +67,14 @@ export function SermonPipelineMonitor() {
   }
   const filter = (next: string) => { setState(next); setOffset(0); setRevision(undefined); };
   const groups = data?.series.filter(g => data.records.some(r => r.groups.some(m => m.id === g.id))) || [];
-  return <main className="mx-auto max-w-7xl space-y-6 px-5 py-8 text-stone-900">
+  return <section aria-labelledby="pipeline-title" className="mx-auto max-w-7xl space-y-6 px-5 py-8 text-stone-900">
     <header className="flex flex-wrap items-start justify-between gap-4">
-      <div><p className="text-xs font-semibold uppercase tracking-widest text-sky-800">講道來源工作台</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">影音處理進度</h1><p className="mt-2 text-sm text-stone-600">按熟悉的系列查看全部講道，從來源準備到圖文稿交付。</p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-widest text-sky-800">講道來源工作台</p><h1 id="pipeline-title" className="mt-2 text-3xl font-semibold tracking-tight">影音處理進度</h1><p className="mt-2 text-sm text-stone-600">按熟悉的系列查看全部講道，從來源準備到圖文稿交付。</p></div>
       <div className="flex gap-2"><Link href="/resources/series" className="rounded-lg border bg-white px-3 py-2 text-sm">系列校對頁</Link><Link href="/admin/media-batches?view=batches" className="rounded-lg border bg-white px-3 py-2 text-sm">按批次查看</Link><button disabled={!!busy} onClick={() => void action("sermons/sync")} className="rounded-lg bg-stone-900 px-3 py-2 text-sm text-white disabled:opacity-50">{busy === "sermons/sync" ? "同步中…" : "同步講道目錄"}</button></div>
     </header>
     {error && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{error}。保留上次資料；尚未確認最新狀態。</p>}
     {data && !data.initialized && <p className="rounded-xl border border-dashed p-8 text-center text-stone-600">尚未建立本環境的來源索引。設定管線後，按「同步講道目錄」；同步不啟動轉錄。</p>}
-    <section aria-label="管線總覽" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <section aria-label="管線總覽" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[{ label: "全部講道", n: data?.total, s: "all" }, { label: "待完成交付", n: data?.pending, s: "actionable" }, { label: "實際處理中", n: data?.live_count, s: "running" }, { label: "已完成技術交付", n: data?.counts.complete || 0, s: "complete" }].map(v => <button key={v.s} onClick={() => filter(v.s)} className={`rounded-xl border bg-white p-5 text-left shadow-sm ${state === v.s ? "border-sky-700 ring-1 ring-sky-700" : "border-stone-200"}`}><span className="text-sm text-stone-600">{v.label}</span><strong className="mt-1 block text-3xl font-semibold tabular-nums">{v.n ?? "—"}</strong></button>)}
     </section>
     <section aria-label="搜尋與篩選" className="flex flex-wrap gap-3 rounded-xl border bg-white p-4">
@@ -95,6 +95,6 @@ export function SermonPipelineMonitor() {
       </details>)}</div>
     </section>)}
     {data?.initialized && !data.records.length && <p className="rounded-xl border border-dashed py-10 text-center text-stone-500">此篩選條件沒有講道。</p>}
-    {data?.initialized && <footer className="flex items-center justify-between text-sm"><span>符合 {data.filtered_total} 講 · 本頁 {data.records.length} 講（系列重複歸屬只計一次）</span><div className="flex gap-3"><button disabled={offset === 0} onClick={() => { setOffset(Math.max(0,offset-30)); setRevision(data.snapshot_revision); }} className="rounded-lg border px-4 py-2 disabled:opacity-30">上一頁</button><button disabled={offset+30 >= data.filtered_total} onClick={() => { setOffset(offset+30); setRevision(data.snapshot_revision); }} className="rounded-lg border px-4 py-2 disabled:opacity-30">下一頁</button></div></footer>}
-  </main>;
+    {data?.initialized && <footer className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>符合 {data.filtered_total} 講 · 本頁 {data.records.length} 講（系列重複歸屬只計一次）</span><div className="flex gap-3"><button disabled={offset === 0} onClick={() => { setOffset(Math.max(0,offset-30)); setRevision(data.snapshot_revision); }} className="whitespace-nowrap rounded-lg border px-4 py-2 disabled:opacity-30">上一頁</button><button disabled={offset+30 >= data.filtered_total} onClick={() => { setOffset(offset+30); setRevision(data.snapshot_revision); }} className="whitespace-nowrap rounded-lg border px-4 py-2 disabled:opacity-30">下一頁</button></div></footer>}
+  </section>;
 }

@@ -12,6 +12,17 @@ PIPELINE='gemini-transcript-v1'
 STAGES=('audio','transcribe','flash','timing','speakers','repetitions','layout','media','editor','slides','delivery')
 
 
+def implementation():
+    code=Path(__file__).resolve().parents[1]
+    files=['transcript_gemini_audio.py','transcript_gemini_proofreading.py','transcript_punctuation.py',
+           'transcript_word_timing.py','gemini_review.py','media_operations.py','media_model_calls.py',
+           'slide_pilot_models.py','editor_slide_runner.py','slide_editor_alignment.py',
+           'media_batch/gemini_plan.py','media_batch/gemini_stages.py','media_batch/gemini_media.py',
+           'media_batch/runtime.py','media_batch/worker.py','media_batch/store.py',
+           '../api/sc_api/transcript_review.py','slide_visual_evidence.py','slide_model_response.py']
+    return key({name:file_sha(code/name) for name in files})
+
+
 def create(store, manifest, config, actor):
     if isinstance(manifest,(str,Path)):manifest=json.loads(Path(manifest).read_text())
     if manifest.get('schema_version')!='gemini-media-jobs.v1' or not manifest.get('jobs'):
@@ -22,12 +33,7 @@ def create(store, manifest, config, actor):
         cfg[k]=str(Path(cfg[k]).resolve())
     cfg['storage_guards']=storage_guards(cfg)
     cfg.setdefault('ssd_reserve_gib',0);cfg.setdefault('internal_reserve_gib',1);cfg.setdefault('working_set_gib',15)
-    code=Path(__file__).resolve().parents[1]
-    files=['transcript_gemini_audio.py','transcript_gemini_proofreading.py','transcript_punctuation.py',
-           'transcript_word_timing.py','gemini_review.py','media_operations.py','media_model_calls.py',
-           'slide_pilot_models.py','editor_slide_runner.py','slide_editor_alignment.py',
-           'media_batch/gemini_plan.py','media_batch/gemini_stages.py','media_batch/gemini_media.py']
-    cfg['implementation']=key({name:file_sha(code/name) for name in files})
+    cfg['implementation']=implementation()
     cfg['models']={'asr':'gemini-3.5-transcribe','audio_review':'gemini-3.8-flash','text':'gpt-6.1-sol'}
     review=ReviewStore(Path(cfg['review_root']));prepared=[];seen=set()
     for job in manifest['jobs']:

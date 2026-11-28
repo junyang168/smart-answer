@@ -217,7 +217,7 @@ def alignment_worker(aligner, clips):
         environment["MEDIA_BATCH_CONTEXT"] = json.dumps({"capacity_root": capacity})
     subprocess.run([str(aligner), "-m", "backend.pipeline.transcript_alignment_worker",
                     "--out", str(clips), "--decode-profile", "monotonic"],
-                   check=True, env=environment)
+                   check=True, env=environment, pass_fds=__import__("backend.pipeline.media_batch.runtime", fromlist=["inherited_fds"]).inherited_fds())
 
 
 def ordered_start_anchors(candidates, duration):
