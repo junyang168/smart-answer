@@ -24,6 +24,8 @@ def start(store, batch, workers=4):
         row = c.execute('SELECT config FROM media_ingest.batches WHERE id=%s', (batch,)).fetchone()
     if not row: raise KeyError(batch)
     require_supported(row['config'])
+    from .runtime_snapshot import runtime_root
+    root=runtime_root(row['config'],Path(__file__).resolve().parents[3])
     accept(store, batch)
     name = label(batch)
     with store.connection() as c:
@@ -33,7 +35,6 @@ def start(store, batch, workers=4):
             raise KeyError(batch)
     state = Path.home() / ".local/state/smart-answer-media-batches" / batch
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    root = Path(__file__).resolve().parents[3]
     job = dict(
         Label=name,
         ProgramArguments=[

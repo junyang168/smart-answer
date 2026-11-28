@@ -20,6 +20,7 @@ def implementation():
            'media_batch/gemini_plan.py','media_batch/gemini_stages.py','media_batch/gemini_media.py',
            'media_batch/runtime.py','media_batch/worker.py','media_batch/store.py','media_batch/engineering_recovery.py',
            'media_batch/costs.py','codex_subscription_client.py','subscription_process.py','media_flash_subscription.py','agy_subscription_client.py',
+           'media_batch/service.py','media_batch/runtime_snapshot.py',
            '../api/sc_api/transcript_review.py','slide_visual_evidence.py','slide_model_response.py']
     return key({name:file_sha(code/name) for name in files})
 

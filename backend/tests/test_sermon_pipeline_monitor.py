@@ -29,6 +29,9 @@ def test_catalog_series_order_zero_task_and_missing_metadata_survive_projection(
     # GETs leave persisted task/call counts unchanged, including filtered/global searches.
     assert snapshot(store,root,search='第二',status='all')['filtered_total']==1
     assert snapshot(store,root,series='another',status='all')['filtered_total']==1
+    assert snapshot(store,root,source='single',status='all')['filtered_total']==1
+    assert snapshot(store,root,source='missing',status='all')['filtered_total']==2
+    assert snapshot(store,root,source='multiple',status='all')['filtered_total']==0
     with store.connection() as c:
         assert c.execute('SELECT count(*) AS n FROM media_ingest.calls').fetchone()['n']==0
         assert c.execute('SELECT count(*) AS n FROM media_ingest.tasks').fetchone()['n']==0
@@ -85,6 +88,9 @@ def test_monitor_http_identity_plan_and_read_only_get(setup,monkeypatch):
     assert result.status_code==200,result.text
     assert result.json()['status']=='planned'
     assert request('POST','/media_batches/sermons/plan',body).json()['batch']==result.json()['batch']
+    changed={**body,'budget_usd':20}
+    assert request('POST','/media_batches/sermons/plan',changed).status_code==409
+    assert str(renamed) not in result.text
     with store.connection() as c:
         assert c.execute('SELECT count(*) AS n FROM media_ingest.calls').fetchone()['n']==0
         assert c.execute('SELECT count(*) AS n FROM media_ingest.pipeline_heads').fetchone()['n']==0

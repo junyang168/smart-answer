@@ -36,11 +36,12 @@ def create_media_batch_router(root, store_factory=Store):
 
     @router.get('/sermons')
     def sermons(response: Response, search: str = '', series: str = '', state: str = 'actionable',
+                source: str = Query('',pattern='^(|missing|single|multiple)$'),
                 offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), snapshot_revision: str | None = None):
         from backend.pipeline.media_batch.sermon_monitor import snapshot
         response.headers['Cache-Control'] = 'private, no-store'
         try:
-            return snapshot(store_factory(), root, search=search, series=series, status=state,
+            return snapshot(store_factory(), root, search=search, series=series, status=state,source=source,
                             offset=offset, limit=limit, expected=snapshot_revision)
         except Conflict as error:
             raise HTTPException(409, str(error)) from error

@@ -94,7 +94,7 @@ def state(value,head,tasks):
     return 'pending'
 
 
-def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit=30,expected=None):
+def snapshot(store,root,*,search='',series='',status='actionable',source='',offset=0,limit=30,expected=None):
     root=str(Path(root).resolve())
     with store.connection() as c:
         c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -144,7 +144,7 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
             asset_id=value['sources'][0]['id'] if len(value['sources'])==1 else None,
             batch=head['batch'] if head else None,head_revision=row['revision'],
             editor_href=f'/admin/surmons/{quote(row["item"],safe="")}' if value['editor'] or any(t['stage']=='editor' and t['state']=='complete' for t in tasks) else None,
-            tasks=[{k:t.get(k) for k in ('id','stage','state','live','progress','error','attempt','heartbeat')} for t in tasks])
+            tasks=[{k:t.get(k) for k in ('id','stage','state','live','progress','error','attempt','heartbeat','batch')} for t in tasks])
         for task in record['tasks']:
             task['model_calls']=call_counts.get(task['id'],{})
         candidate=next((t['result'] for t in tasks if t['stage']=='candidate' and t['state']=='complete'),None)
@@ -152,6 +152,9 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
         if (search and search.casefold() not in (value['title']+' '+row['item']+' '+' '.join(g['name'] for g in memberships)).casefold()
             or series and series not in {g['id'] for g in memberships}
             or status=='actionable' and current=='complete'
+            or source=='missing' and len(value['sources'])!=0
+            or source=='single' and len(value['sources'])!=1
+            or source=='multiple' and len(value['sources'])<=1
             or status not in ('all','actionable') and current!=status):continue
         records.append(record)
     revision=key([[(r['item'],r['generation'],r['revision'],r['updated_at'].isoformat()) for r in rows],

@@ -147,3 +147,27 @@ def test_sol_media_transport_is_subscription_only_and_durable(tmp_path,monkeypat
     assert calls[0]['model']=='gpt-6.1-sol' and calls[0]['reasoning_effort']=='medium'
     from backend.pipeline.media_batch.costs import estimate
     with pytest.raises(ValueError,match='Subscription usage'):estimate(request,raw)
+
+
+def test_flash_images_use_subscription_without_api_credentials(tmp_path,monkeypatch):
+    from backend.pipeline.slide_pilot_models import VisionReviewer
+    from backend.pipeline.media_model_calls import saved_call
+    from backend.pipeline import media_flash_subscription
+    from google.genai import types
+    calls=[]
+    class Flash:
+        def __init__(self,folder):self.folder=folder
+        def generate(self,model,parts,prompt,schema):
+            calls.append((model,parts,prompt,schema))
+            assert self.folder.name=='subscription'
+            assert parts==[{'type':'image','mimeType':'image/png','data':'aW1hZ2U='}]
+            return {'model':'gemini-3.8-flash','status':'completed','transport':'agy_subscription','answer':{'ok':True}}
+    monkeypatch.setattr(media_flash_subscription,'FlashSubscription',Flash)
+    adapter=VisionReviewer('gemini','原提示',{'type':'object'})
+    adapter.client=None
+    adapter.config['thinking_config']={'thinking_level':'LOW'}
+    request={'model':adapter.model,'config':adapter.config}
+    raw=saved_call(tmp_path,request,.1,lambda:adapter.generate([types.Part.from_bytes(data=b'image',mime_type='image/png')]))
+    assert json.loads(adapter.text(raw))=={'ok':True}
+    assert calls[0][0]=='gemini-3.8-flash-low'
+    assert adapter.count([types.Part.from_text(text='內容')])==len('內容'.encode())
