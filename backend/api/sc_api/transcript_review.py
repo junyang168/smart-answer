@@ -335,7 +335,8 @@ class ReviewStore:
         before_script_sha256 = context["script_sha256"]
         context = copy.deepcopy(context)
         context["revision"] += 1
-        context["script_sha256"] = digest(rows)
+        if kind != "import_slide_bindings":
+            context["script_sha256"] = digest(rows)
         revision = context["revision"]
         folder = self.folder(item)
         if (folder / "revisions" / f"{revision:08}.json").exists():
@@ -376,12 +377,14 @@ class ReviewStore:
         if any(op.get("kind") == "paragraph_timing" for op in request.get("operations", [])):
             result["paragraph_bindings"] = context["paragraph_bindings"]
             result["timing_quality"] = context.get("timing_quality")
-        files = {
-            self.root / "script_review" / f"{item}.json": rows,
+        files = {}
+        if kind != "import_slide_bindings":
+            files[self.root / "script_review" / f"{item}.json"] = rows
+        files.update({
             folder / "context.json": context,
             folder / "revisions" / f"{revision:08}.json": snapshot,
             **(extra or {}),
-        }
+        })
         op = {
             "state": "prepared",
             "actor": actor,
@@ -762,13 +765,21 @@ class ReviewStore:
                         )
                     ]
                     try:
-                        svg = render_svg(
-                            content,
-                            a["width"],
-                            a["height"],
-                            a["image_sha256"],
-                            allow_text_only=True,
-                        )
+                        if (a.get("display_renderer") == "source-glyphs.v1"
+                                and a.get("display_content_sha256") == digest(a["content"])):
+                            from backend.pipeline.slide_source_ink import source_ink_svg
+                            import cv2
+                            path = self.root / a["image"]
+                            if file_hash(path) != a["image_sha256"]:
+                                raise ValueError("Source image changed")
+                            svg = source_ink_svg(cv2.imread(str(path)), content, a["image_sha256"])
+                            if not svg or hashlib.sha256(svg.encode()).hexdigest() != a["svg_sha256"]:
+                                raise ValueError("Cannot reproduce reviewed source-colour SVG")
+                        else:
+                            svg = render_svg(
+                                content, a["width"], a["height"], a["image_sha256"],
+                                allow_text_only=True, white_background=bool(a.get("display_renderer")),
+                            )
                     except ValueError as exc:
                         raise ReviewError(
                             422,

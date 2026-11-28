@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.agy_subscription_client import AgySubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.slide_change_pilot import clock, file_sha, object_sha, read_json, save_json
@@ -283,6 +284,10 @@ def _apply_fidelity_repair(
     save_json(evidence_dir / "assets" / asset["asset_id"] / "evidence.json", asset)
 
 
+def parse_fidelity_result(text, expected_ids):
+    return parse_slide_answer(text, FIDELITY_SCHEMA, id_field="asset_id", expected_ids=expected_ids)
+
+
 def verify_visual_fidelity(
     evidence_dir: Path,
     *,
@@ -359,7 +364,7 @@ def verify_visual_fidelity(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            parsed = json.loads(adapter.text(raw))
+            parsed = parse_fidelity_result(adapter.text(raw), ids)
             usage = adapter.usage(raw)
         check_schema(parsed, FIDELITY_SCHEMA)
         if [r["asset_id"] for r in parsed["results"]] != ids:
@@ -421,9 +426,12 @@ def verify_visual_fidelity(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            repaired_parsed = json.loads(repair_adapter.text(repair_raw))
+            repaired_parsed = parse_slide_answer(repair_adapter.text(repair_raw), FIDELITY_REPAIR_SCHEMA,
+                                               id_field="asset_id", expected_ids=[asset["asset_id"]])
             repair_usage = repair_adapter.usage(repair_raw)
         check_schema(repaired_parsed, FIDELITY_REPAIR_SCHEMA)
+        if [row["asset_id"] for row in repaired_parsed["results"]] != [asset["asset_id"]]:
+            raise ValueError("Fidelity repair asset ID drifted")
         _apply_fidelity_repair(evidence_dir, asset, repaired_parsed["results"][0]["text_regions"], audit_row)
         calls.append({"request_sha256": object_sha(repair_req), **repair_usage})
         repaired_count += 1
@@ -551,7 +559,7 @@ def align_and_filter_important_slides(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            parsed = json.loads(adapter.text(raw))
+            parsed = parse_slide_answer(adapter.text(raw), ALIGNMENT_SCHEMA, id_field="event_id", expected_ids=ids)
             usage = adapter.usage(raw)
         check_schema(parsed, ALIGNMENT_SCHEMA)
         if [r["event_id"] for r in parsed["results"]] != ids:
@@ -616,6 +624,7 @@ def import_bindings_to_review(
     *,
     actor: str = "slide_editor_alignment",
     operation_id: str | None = None,
+    expected_version: str | None = None,
 ) -> dict[str, Any]:
     """Attach aligned white-background SVG slides to transcript_review via ReviewStore versioned commit."""
     import copy
@@ -635,13 +644,16 @@ def import_bindings_to_review(
     with store.lock(item):
         rows, context = store.load(item)
         request = {
-            "version": digest(store.document_value(rows, context)),
+            "version": expected_version if expected_version is not None else digest(store.document_value(rows, context)),
             "operation_id": op_id,
             "operations": [
                 {"kind": "attach_visual_slides", "id": f"g-{b['event_id']}"}
                 for b in bindings_doc["bindings"]
             ],
         }
+        if expected_version is not None:
+            request["bindings_sha256"] = file_sha(bindings_path)
+            request["evidence_sha256"] = file_sha(evidence_path)
         prior = store.receipt(item, op_id, actor, request)
         if prior:
             _, current_context = store.load(item)
@@ -654,6 +666,28 @@ def import_bindings_to_review(
                 "visible_groups": sum(1 for g in current_groups if not g["hidden"]),
                 "needs_review_groups": sum(1 for g in current_groups if g["needs_review"] and not g["hidden"]),
             }
+
+        if expected_version is not None:
+            store.version(rows, context, expected_version)
+
+        if expected_version is not None:
+            existing_group_ids = {g["id"] for g in context.get("groups", [])}
+            for b in bindings_doc["bindings"]:
+                if (b["event_id"] in context.get("occurrences", {})
+                        or f"g-{b['event_id']}" in existing_group_ids):
+                    raise ValueError(f"Attachment already occupies {b['event_id']}")
+            for a in evidence["assets"]:
+                aid = a["asset_id"]
+                target = review_dir / "assets" / aid
+                files = [("original.png", a["original_image"])]
+                if a.get("svg"):
+                    files.append(("reconstruction.svg", a["svg"]["path"]))
+                for name, source in files:
+                    dest = target / name
+                    if dest.exists() and file_sha(dest) != file_sha(evidence_dir / source):
+                        raise ValueError(f"Conflicting attachment file {aid}/{name}")
+                if aid in context.get("visual_assets", {}):
+                    raise ValueError(f"Existing Editor asset {aid} is already in use")
 
         assets_out = review_dir / "assets"
         assets_out.mkdir(parents=True, exist_ok=True)
@@ -679,6 +713,8 @@ def import_bindings_to_review(
                 "height": height,
                 "content": asset["content"],
                 "svg_review_status": "repaired_model_candidate" if asset.get("fidelity_review", {}).get("repaired") else "unreviewed_model_candidate",
+                **({"display_content_sha256": digest(asset["content"]),
+                    "display_renderer": asset["display_note"]} if asset.get("display_note") == "source-glyphs.v1" else {}),
                 **({"svg_path": svg_rel, "svg_sha256": svg_sha} if svg_rel else {}),
                 **({"fidelity_review": asset["fidelity_review"]} if asset.get("fidelity_review") else {}),
             }

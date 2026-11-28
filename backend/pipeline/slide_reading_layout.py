@@ -6,6 +6,7 @@ import html
 import json
 from pathlib import Path
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
 
 PROMPT = '''你是講道閱讀版的投影片編輯。只提出圖文排版，不改寫、補寫或刪除口述。
@@ -112,7 +113,7 @@ def infer(record: dict, out: Path) -> dict:
                'prompt_sha256': object_sha(prompt), 'model': reviewer.model, 'config': reviewer.config,
                'images_sha256': [file_sha(p) for p in images]}
     raw = saved_call(out, request, 1.0, lambda: reviewer.generate(parts), max_calls=1, budget_usd=1)
-    proposal = json.loads(reviewer.text(raw))
+    proposal = parse_slide_answer(reviewer.text(raw))
     layout = compile_layout(record, proposal)
     layout['model_call'] = {'request_sha256': object_sha(request), 'response_sha256': object_sha(raw),
                             'model': reviewer.model, 'usage': reviewer.usage(raw)}

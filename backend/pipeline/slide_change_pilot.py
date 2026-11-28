@@ -19,6 +19,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from backend.pipeline.slide_model_response import parse_slide_answer
+
 
 SCHEMA = "slide-change-pilot.v1"
 PROMPT_VERSION = "slide-pair-review.v3"
@@ -578,7 +580,7 @@ def review_candidates(out: Path, manifest: dict, candidates: dict, *, batch_size
             state.update(status="complete", response_sha256=file_sha(call_dir / "response.json"),
                          wall_seconds=time.perf_counter() - call_start)
             save_json(state_path, state)
-        results = validate_results(json.loads(adapter.text(raw)), ids)
+        results = validate_results(parse_slide_answer(adapter.text(raw), REVIEW_SCHEMA, id_field="candidate_id", expected_ids=ids), ids)
         save_json(call_dir / "validated.json", {"results": results})
         all_results.extend(results)
         calls.append({"id": call_dir.name, "usage": adapter.usage(raw),

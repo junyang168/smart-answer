@@ -1,12 +1,12 @@
 """Source-bound projected screen proposals; preserve full-frame context."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.slide_change_pilot import read_json,save_json,file_sha,object_sha
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.transcript_audio_pilot import saved_call
@@ -58,7 +58,7 @@ def calibrate(folder:Path):
     request={'stage':'projected_screen_proposals','prompt':PROMPT,'model':adapter.model,'config':adapter.config,
              'source_manifest_sha256':file_sha(path),'frames':[{'id':r['id'],'image_sha256':r['sha256']} for r in selected]}
     raw=saved_call(folder/'calibration',request,.06,lambda:adapter.generate(parts),max_calls=2,budget_usd=.15)
-    answer=json.loads(adapter.text(raw));rows=answer if isinstance(answer,list) else answer['results']
+    answer=parse_slide_answer(adapter.text(raw), id_field="frame_id", expected_ids=ids);rows=answer if isinstance(answer,list) else answer['results']
     if [r['frame_id'] for r in rows]!=ids:raise ValueError('Screen calibration IDs drifted')
     proposals=[]
     for r,f in zip(rows,selected):proposals.append({**r,'quad':validate_quad(r['quad']),'time_ms':f['time_ms']})

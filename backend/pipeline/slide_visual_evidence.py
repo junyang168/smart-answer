@@ -12,6 +12,7 @@ import json
 import math
 import statistics
 from pathlib import Path
+
 import re
 import shutil
 import unicodedata
@@ -19,6 +20,7 @@ import xml.etree.ElementTree as ET
 
 import cv2
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.slide_change_pilot import (
     compute_dhash,
@@ -370,29 +372,9 @@ def compare_sample(primary: Path, independent: Path) -> dict:
 
 
 
-def parse_visual_json(text: str) -> dict:
-    """Permit a verbatim schema echo before one data object; preserve raw reply."""
-    decoder = json.JSONDecoder()
-    value, end = decoder.raw_decode(text.lstrip())
-    rest = text.lstrip()[end:].strip()
-    if rest:
-        if value != SCHEMA:
-            raise ValueError('Unexpected extra visual response data')
-        # One observed provider response closes the exact echoed schema before
-        # appending its sole data member: SCHEMA, "results": [...]}. Recover
-        # only that literal outer-container defect. No source field, text,
-        # coordinate or value is edited; closed-schema validation still runs.
-        if re.match(r'^,\s*"results"\s*:', rest):
-            value = json.loads('{' + rest[1:].lstrip())
-            if set(value) != {'results'}:
-                raise ValueError('Unexpected extra visual response data')
-        else:
-            value = json.loads(rest)
-    if isinstance(value,dict) and 'results' in value and set(value)!={'results'}:
-        extras=set(value)-{'results'}
-        if extras <= set(SCHEMA) and all(value[k]==SCHEMA[k] for k in extras):
-            value={'results':value['results']}
-    return value
+def parse_visual_json(text: str, expected_ids=None) -> dict:
+    return parse_slide_answer(text, SCHEMA, id_field="asset_id", expected_ids=expected_ids)
+
 
 def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | None = None,
             batch_size: int = 2, budget_usd: float = 3.0, max_calls: int = 20,
@@ -460,12 +442,16 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
         raise ValueError('Output belongs to another source/image/model configuration')
     save_json(manifest_path, identity)
     rows, calls = list(assets.values()), []
-    for start in range(0, len(rows), batch_size):
-        batch = rows[start:start+batch_size]
+    pending = [(rows[start:start+batch_size], None) for start in range(0, len(rows), batch_size)]
+    completed = 0
+    while pending:
+        batch, rejected_batch = pending.pop(0)
         ids, paths = [a['asset_id'] for a in batch], [Path(a['path']) for a in batch]
         request = {'stage': 'slide_visual_extraction', 'manifest_sha256': file_sha(manifest_path),
                    'model': model_name, 'config': config_obj, 'prompt': prompt_text,
                    'asset_ids': ids, 'image_sha256s': [a['image_sha256'] for a in batch]}
+        if rejected_batch is not None:
+            request['parent_rejected_batch_sha256'] = rejected_batch
         def validated_obj(value):
             check_schema(value, SCHEMA)
             if [r['asset_id'] for r in value['results']] != ids:
@@ -491,7 +477,7 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
             raw = saved_call(out, request, reserved, lambda: adapter.generate(contents), max_calls=max_calls, budget_usd=budget_usd)
             repair_usage = None
             def validated(response):
-                return validated_obj(parse_visual_json(adapter.text(response)))
+                return validated_obj(parse_visual_json(adapter.text(response), ids))
             try:
                 answer = validated(raw)
             except (ValueError, KeyError) as error:
@@ -505,7 +491,15 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
                     '\nPrevious response: '+adapter.text(raw))]
                 repaired = saved_call(out, repair, reserved, lambda: adapter.generate(repair_parts),
                                      max_calls=max_calls, budget_usd=budget_usd)
-                answer = validated(repaired)
+                try:
+                    answer = validated(repaired)
+                except (ValueError, KeyError):
+                    if len(batch) == 1:
+                        raise
+                    calls.append({'request_sha256': object_sha(request), **adapter.usage(raw)})
+                    calls.append({'request_sha256': object_sha(repair), **adapter.usage(repaired)})
+                    pending[0:0] = [([asset], object_sha(repaired)) for asset in batch]
+                    continue
                 repair_usage = {'request_sha256': object_sha(repair), **adapter.usage(repaired)}
             call_usage = adapter.usage(raw)
         for asset, content in zip(batch, answer['results']):
@@ -541,7 +535,8 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
         calls.append({'request_sha256': object_sha(request), **call_usage})
         if repair_usage:
             calls.append(repair_usage)
-        print(f'Extracted {min(start+batch_size, len(rows))}/{len(rows)} slide images', flush=True)
+        completed += len(batch)
+        print(f'Extracted {completed}/{len(rows)} slide images', flush=True)
     results = [read_json(out / 'assets' / a['asset_id'] / 'evidence.json') for a in rows]
     record = {'schema_version': 'slide-visual-evidence-collection.v1', 'source_video_sha256': report['source_sha256'],
               'input_manifest_sha256': file_sha(manifest_path), 'assets': results, 'occurrences': occurrences,

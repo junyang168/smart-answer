@@ -3,6 +3,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from backend.pipeline.slide_change_pilot import file_sha, save_json
 import backend.pipeline.slide_editor_alignment as align
@@ -148,7 +149,8 @@ def test_alignment_supports_agy_subscription_with_zero_api_cost(tmp_path, monkey
     assert bindings["bindings"][0]["aligned_paragraph_id"] == "10"
 
 
-def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repair_id", ["a1", "wrong-asset"])
+def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, monkeypatch, repair_id):
     ev = _write_fake_evidence(tmp_path)
     ev_doc = json.loads((ev / "slide_evidence.json").read_text())
     ev_doc["assets"][0]["image_sha256"] = file_sha(ev / "assets" / "a1" / "original.png")
@@ -165,6 +167,7 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
         model, input_rate, output_rate = "fake-test", 0.75, 3.75
 
         def __init__(self, provider, prompt, schema):
+            self.schema = schema
             self.provider, self.prompt, self.config = provider, prompt, {"response_json_schema": schema}
 
         def contents(self, ids, paths):
@@ -175,7 +178,7 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
 
         def generate(self, contents):
             if "Fidelity issues to fix" in str(contents[-1]):
-                return {"results": [{"asset_id": "a1", "text_regions": [{"id": "tr_0", "text": "揀選以色"}]}]}
+                return {"results": [{"asset_id": repair_id, "text_regions": [{"id": "tr_0", "text": "揀選以色"}]}]}
             return {"results": [{
                 "asset_id": "a1",
                 "passed": False,
@@ -185,12 +188,17 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
             }]}
 
         def text(self, raw):
-            return json.dumps(raw, ensure_ascii=False)
+            return json.dumps(self.schema) + "\n" + json.dumps(raw, ensure_ascii=False)
 
         def usage(self, raw):
             return {"estimated_usd_upper": 0.005}
 
     monkeypatch.setattr(align, "VisionReviewer", FakeReviewer)
+    if repair_id != "a1":
+        with pytest.raises(ValueError, match="asset ID drifted"):
+            align.verify_visual_fidelity(ev, auto_repair=True)
+        assert json.loads((ev / "slide_evidence.json").read_text()) == collection
+        return
     audit = align.verify_visual_fidelity(ev, auto_repair=True)
     assert audit["repaired_count"] == 1
     updated = json.loads((ev / "slide_evidence.json").read_text())["assets"][0]
@@ -374,7 +382,8 @@ def test_load_transcript_paragraphs_reads_formal_editor_timings_and_narrows_cand
         align.candidate_paragraphs_for_time(untimed_rows, 2450000)
 
 
-def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_publishes_white_svg(tmp_path):
+@pytest.mark.parametrize("source_colour", [False, True])
+def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_publishes_white_svg(tmp_path, source_colour):
     from backend.api.sc_api.transcript_review import ReviewStore, digest
 
     data_root = tmp_path / "data"
@@ -431,6 +440,19 @@ def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_p
     ev = _write_fake_evidence(tmp_path)
     ev_doc = json.loads((ev / "slide_evidence.json").read_text())
     ev_doc["assets"][0]["image_sha256"] = file_sha(ev / "assets" / "a1" / "original.png")
+    if source_colour:
+        from backend.pipeline.slide_source_ink import source_ink_svg
+        asset=ev_doc["assets"][0]
+        image_path=ev/asset["original_image"]
+        frame=np.full((80,120,3),(90,25,8),np.uint8)
+        cv2.putText(frame,"ABC",(8,45),cv2.FONT_HERSHEY_SIMPLEX,.8,(0,235,235),2)
+        cv2.imwrite(str(image_path),frame)
+        asset["image_sha256"]=file_sha(image_path)
+        asset["content"]["text_regions"][0].update(text="ABC",bbox=[0,0,1000,1000])
+        source_svg=source_ink_svg(frame,asset["content"],asset["image_sha256"])
+        assert source_svg
+        (ev/asset["svg"]["path"]).write_text(source_svg)
+        asset["display_note"]="source-glyphs.v1"
     # Distinct appearance time (235000) vs capture time (236500)
     ev_doc["occurrences"][0]["time_ms"] = 235000
     ev_doc["occurrences"][0]["capture_ms"] = 236500
@@ -448,7 +470,15 @@ def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_p
         }]
     })
 
-    summary = align.import_bindings_to_review(ev, bindings_path, review_dir)
+    store = ReviewStore(data_root)
+    original = digest(store.document_value(*store.load("S 200607")))
+    summary = align.import_bindings_to_review(ev, bindings_path, review_dir, expected_version=original)
+    assert align.import_bindings_to_review(ev, bindings_path, review_dir, expected_version=original) == summary
+    from backend.api.sc_api.transcript_review import ReviewError
+    import pytest
+    with pytest.raises(ReviewError):
+        align.import_bindings_to_review(ev, bindings_path, review_dir,
+                                        expected_version=original, operation_id="another-import")
     assert summary["revision"] == 2
     assert (review_dir / "revisions" / "00000001.json").exists()
     assert (review_dir / "revisions" / "00000002.json").exists()
@@ -484,5 +514,7 @@ def test_import_bindings_uses_editor_versioning_preserves_times_dimensions_and_p
     assert pub_receipt["revision"] == 3
     published = json.loads((data_root / "script_published" / "S 200607.json").read_text(encoding="utf-8"))
     published_text = published["script"][0]["text"]
+    if source_colour:
+        assert source_svg in published_text
     assert "<svg " in published_text
     assert 'fill="#ffffff"' in published_text.lower()
