@@ -14,7 +14,7 @@ import tempfile
 import time
 
 from backend.pipeline import transcript_gemini_audio as audio
-from backend.pipeline.full_video_transcript import cleanup_generate
+from backend.pipeline.media_operations import cleanup_generate
 from backend.pipeline.media_batch.runtime import WaitingCapacity
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
 from backend.pipeline.slide_pilot_models import VisionReviewer
@@ -57,14 +57,22 @@ def batches(values, size):
 def saved_response(folder, name, model, payload, invoke):
     request = {"model": model.model, "prompt": model.prompt, "config": model.config, "input": payload}
     intent, result = folder / f"{name}.request.json", folder / f"{name}.response.json"
+    from backend.pipeline.media_model_calls import saved_call
+    from backend.pipeline.media_batch.runtime import atomic
     if result.exists():
         if read_json(intent) != request:
             raise ValueError(f"Saved {name} response belongs to different inputs")
     else:
-        if intent.exists():
+        cache = folder / "calls" / object_sha(request) / "state.json"
+        if intent.exists() and (read_json(intent) != request or not cache.exists()):
             raise ValueError(f"Previous {name} request has no saved outcome")
-        save_json(intent, request)
-        save_json(result, invoke())
+        # Capacity and budget admission happen before persisting a new intent.
+        def dispatch():
+            atomic(intent, request)
+            return invoke()
+        raw = saved_call(folder, request, .60, dispatch, max_calls=1000, budget_usd=100)
+        atomic(intent, request)
+        atomic(result, raw)
     raw = read_json(result)
     if (raw.get("model") or raw.get("model_version")) != model.model:
         raise ValueError(f"Unexpected model for {name}")
@@ -175,7 +183,7 @@ def editor_layout(blocks, roles, proposals, protected=None):
             for edit in by_id[cue["id"]]:
                 previous = cue["text"]
                 if "kind" in edit:
-                    from backend.pipeline.full_video_transcript import apply_exclusions
+                    from backend.pipeline.media_operations import apply_exclusions
 
                     try:
                         _, exclusions = apply_exclusions([{"id": cue["id"], "text": previous}], {
@@ -201,18 +209,20 @@ def editor_layout(blocks, roles, proposals, protected=None):
     return {"paragraphs": rows, "repetitions_marked": marked}
 
 
-def run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None):
+def run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None, through=None):
     out.mkdir(parents=True, exist_ok=True)
     with (out / "run.lock").open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return _run(cues, media, out, start=start, prior=prior, protected=protected, aligner=aligner,
-                    speaker_name=speaker_name)
+                    speaker_name=speaker_name, through=through)
 
 
-def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None):
+def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=None, speaker_name=None, through=None):
     first = "speakers" if cues is not None else "transcribe"
     stages = STAGES[STAGES.index(first):]
     start = start or first
+    if through is not None and (through not in stages or stages.index(through) < stages.index(start)):
+        raise ValueError("Invalid final stage")
     if start not in stages:
         raise ValueError("Imported cues can only start at speakers, repetitions or layout")
     if cues is not None and (not cues or len({cue["id"] for cue in cues}) != len(cues)):
@@ -238,6 +248,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
     outputs = {}
     imported_blocks = proofreading_blocks(cues) if cues is not None else None
     for ordinal, stage in enumerate(stages):
+        from backend.pipeline.media_batch.runtime import progress
+        progress(stage)
         checkpoint = out / f"{stage}.json"
         input_sha = object_sha({"identity": identity, "prior_stages": outputs})
         if checkpoint.exists():
@@ -299,6 +311,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             raise ValueError("Legacy timing checkpoint: restart at timing in a new output directory")
         save_json(checkpoint, saved)
         outputs[stage] = saved["value"]
+        if stage == through:
+            return outputs[stage]
     return outputs["layout"]
 
 

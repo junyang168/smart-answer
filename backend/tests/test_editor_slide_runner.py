@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from backend.pipeline import editor_slide_runner as runner
-from backend.pipeline import full_video_transcript, slide_visual_evidence as visuals
+from backend.pipeline import media_operations as full_video_transcript, slide_visual_evidence as visuals
 from backend.pipeline.slide_editor_alignment import parse_fidelity_result
 from backend.pipeline.slide_change_pilot import file_sha, read_json, save_json
 

@@ -17,7 +17,7 @@ from backend.api.sc_api.transcript_review import ReviewStore, digest
 from backend.pipeline import slide_editor_alignment as alignment
 from backend.pipeline.slide_source_ink import source_ink_svg
 from backend.pipeline.editor_slide_display import measure
-from backend.pipeline.full_video_transcript import classify_slides
+from backend.pipeline.media_operations import classify_slides
 from backend.pipeline.slide_change_pilot import (
     file_sha,
     object_sha,
