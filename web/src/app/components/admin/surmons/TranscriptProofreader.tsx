@@ -95,7 +95,7 @@ type Context = {
   media_mime_type?: string;
   timing_quality?: {
     status: string;
-    source_holds?: Record<string, unknown>;
+    source_holds?: Record<string, { reason?: string; [key: string]: unknown }>;
     paragraph_states?: Record<string, { status: string }>;
   } | null;
   legacy_timeline_sha256?: string;
@@ -2223,9 +2223,9 @@ function TranscriptProofreader({
                   {pendingTiming.includes(p.index) && (
                     <span
                       className="rounded bg-amber-50 px-2 py-1 text-amber-800"
-                      title={doc.context.timing_quality?.source_holds?.[p.index] ? "原音與粗稿保留；來源仍不清楚，不能確認或發佈。" : "本段的起點或結尾尚待確認；文字校對狀態保留。"}
+                      title={doc.context.timing_quality?.source_holds?.[p.index]?.reason === "asr_coverage_unverified" ? "此區間的轉錄覆蓋待核，請聽原聲確認；不能當作靜音或完整轉錄。" : doc.context.timing_quality?.source_holds?.[p.index] ? "原音與粗稿保留；來源仍不清楚，不能確認或發佈。" : "本段的起點或結尾尚待確認；文字校對狀態保留。"}
                     >
-                      {doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
+                      {doc.context.timing_quality?.source_holds?.[p.index]?.reason === "asr_coverage_unverified" ? "轉錄覆蓋待核" : doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
                     </span>
                   )}
                   {active && doc.can_edit && (

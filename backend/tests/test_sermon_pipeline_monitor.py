@@ -10,6 +10,7 @@ from backend.pipeline.media_batch.store import Conflict
 
 def test_catalog_series_order_zero_task_and_missing_metadata_survive_projection(setup):
     store,root,item,actor,source,cfg,manifest=setup
+    source.rename(source.with_name(item+'.wav'))
     atomic(root/'config/sermon.json',[{'item':item,'title':'第一講'},{'item':'other','title':'第二講'}])
     atomic(root/'config/sermon_series.json',[
         {'id':'2016 wrong year','title':'2014 corrected','sermons':[item,'other','missing']},
