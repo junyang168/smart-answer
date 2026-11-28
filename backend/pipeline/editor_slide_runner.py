@@ -127,6 +127,7 @@ def produce(video, out, source):
 def effective_alignment_requests(out):
     """Count one authorized answer, preserving its unknown parent as history."""
     from backend.pipeline.media_batch.timeout_recovery import covered
+    from backend.pipeline.media_batch.credit_recovery import setup_covered
     for path in (out/'calls').glob('*/request.json'):
         request=read_json(path)
         if request.get('stage')!='slide_editor_alignment':continue
@@ -134,6 +135,9 @@ def effective_alignment_requests(out):
         if state.exists() and read_json(state).get('status')=='sent_outcome_unknown':
             if covered(out,path.parent,None):continue
             raise ValueError('Unresolved alignment request remains quarantined')
+        if state.exists() and read_json(state).get("status")=="rejected":
+            if setup_covered(out,path.parent):continue
+            raise ValueError("Unresolved rejected alignment request remains quarantined")
         yield request
 
 
