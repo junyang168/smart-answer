@@ -120,7 +120,7 @@ def reconcile(store,batch,task_id,out,request,operation,revision):
         result={'action':'reconcile-authorized-timeout','proof':proof,'parent_call':parent,
                 'original_task_state':task['state'],'original_task_error':task['error'],'model_calls':0}
         c.execute('UPDATE media_ingest.calls SET info=%s WHERE id=%s',(Jsonb(augmented['info']),parent))
-        c.execute("UPDATE media_ingest.tasks SET state='failed',error='SSD interruption recovered with owner-authorized replacement; awaiting code-bound resume' WHERE id=%s",(task_id,))
+        c.execute("UPDATE media_ingest.tasks SET state='failed',error='Unknown request covered by owner-authorized replacement; awaiting code-bound resume' WHERE id=%s",(task_id,))
         c.execute('INSERT INTO media_ingest.controls VALUES(%s,%s,%s,%s)',(batch,operation,Jsonb(result),revision+1))
         c.execute('UPDATE media_ingest.batches SET revision=revision+1 WHERE id=%s',(batch,))
         return result
