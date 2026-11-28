@@ -12,6 +12,7 @@ import json
 import math
 import statistics
 from pathlib import Path
+
 import re
 import shutil
 import unicodedata
@@ -19,6 +20,7 @@ import xml.etree.ElementTree as ET
 
 import cv2
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.slide_change_pilot import (
     compute_dhash,
@@ -370,29 +372,9 @@ def compare_sample(primary: Path, independent: Path) -> dict:
 
 
 
-def parse_visual_json(text: str) -> dict:
-    """Permit a verbatim schema echo before one data object; preserve raw reply."""
-    decoder = json.JSONDecoder()
-    value, end = decoder.raw_decode(text.lstrip())
-    rest = text.lstrip()[end:].strip()
-    if rest:
-        if value != SCHEMA:
-            raise ValueError('Unexpected extra visual response data')
-        # One observed provider response closes the exact echoed schema before
-        # appending its sole data member: SCHEMA, "results": [...]}. Recover
-        # only that literal outer-container defect. No source field, text,
-        # coordinate or value is edited; closed-schema validation still runs.
-        if re.match(r'^,\s*"results"\s*:', rest):
-            value = json.loads('{' + rest[1:].lstrip())
-            if set(value) != {'results'}:
-                raise ValueError('Unexpected extra visual response data')
-        else:
-            value = json.loads(rest)
-    if isinstance(value,dict) and 'results' in value and set(value)!={'results'}:
-        extras=set(value)-{'results'}
-        if extras <= set(SCHEMA) and all(value[k]==SCHEMA[k] for k in extras):
-            value={'results':value['results']}
-    return value
+def parse_visual_json(text: str, expected_ids=None) -> dict:
+    return parse_slide_answer(text, SCHEMA, id_field="asset_id", expected_ids=expected_ids)
+
 
 def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | None = None,
             batch_size: int = 2, budget_usd: float = 3.0, max_calls: int = 20,
@@ -495,7 +477,7 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', model: str | N
             raw = saved_call(out, request, reserved, lambda: adapter.generate(contents), max_calls=max_calls, budget_usd=budget_usd)
             repair_usage = None
             def validated(response):
-                return validated_obj(parse_visual_json(adapter.text(response)))
+                return validated_obj(parse_visual_json(adapter.text(response), ids))
             try:
                 answer = validated(raw)
             except (ValueError, KeyError) as error:

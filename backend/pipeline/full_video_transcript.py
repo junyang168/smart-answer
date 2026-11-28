@@ -19,6 +19,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline import slide_change_pilot as slides
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.transcript_audio_pilot import read_audio, write_audio, quiet_boundaries, saved_call, transcribe
@@ -172,7 +173,7 @@ def classify_slides(out: Path) -> dict:
         raw = saved_call(folder, request, .08, lambda: adapter.generate(parts), max_calls=160, budget_usd=13)
         cost = adapter.usage(raw)['estimated_usd_upper']
         try:
-            validated = slides.validate_results(json.loads(adapter.text(raw)), ids)
+            validated = slides.validate_results(parse_slide_answer(adapter.text(raw), slides.REVIEW_SCHEMA, id_field="candidate_id", expected_ids=ids), ids)
         except (ValueError, KeyError) as error:
             from google.genai import types
             repair = {**request, 'stage': 'slide_json_repair_once',
@@ -180,7 +181,7 @@ def classify_slides(out: Path) -> dict:
             repair_parts = parts + [types.Part.from_text(text='Repair only the JSON structure and required IDs. '
                 'Return the same decisions as valid JSON. Error: '+str(error)+' Previous answer: '+adapter.text(raw))]
             raw = saved_call(folder, repair, .08, lambda: adapter.generate(repair_parts), max_calls=160, budget_usd=13)
-            validated = slides.validate_results(json.loads(adapter.text(raw)), ids)
+            validated = slides.validate_results(parse_slide_answer(adapter.text(raw), slides.REVIEW_SCHEMA, id_field="candidate_id", expected_ids=ids), ids)
             cost += adapter.usage(raw)['estimated_usd_upper']
         decisions += validated
         costs.append(cost)

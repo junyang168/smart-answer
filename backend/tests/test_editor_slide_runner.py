@@ -312,10 +312,11 @@ def test_fidelity_accepts_exact_schema_echo_but_never_two_answers():
 
 
 def test_alignment_and_fidelity_read_answer_after_echoed_schema():
-    from backend.pipeline.slide_editor_alignment import ALIGNMENT_SCHEMA, FIDELITY_SCHEMA, strip_result_schema_echo
+    from backend.pipeline.slide_editor_alignment import ALIGNMENT_SCHEMA, FIDELITY_SCHEMA
+    from backend.pipeline.slide_model_response import parse_slide_answer
     answer = {"results": [{"asset_id": "a", "passed": False}]}
     tail = json.dumps(answer)
     assert parse_fidelity_result(json.dumps(FIDELITY_SCHEMA) + ", " + tail[1:], ["a"]) == answer
-    assert json.loads(strip_result_schema_echo(json.dumps(ALIGNMENT_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA)) == answer
+    assert parse_slide_answer(json.dumps(ALIGNMENT_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA) == answer
     with pytest.raises(ValueError):
-        json.loads(strip_result_schema_echo(json.dumps(FIDELITY_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA))
+        parse_slide_answer(json.dumps(FIDELITY_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA)

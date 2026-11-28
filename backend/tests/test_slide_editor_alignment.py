@@ -149,7 +149,8 @@ def test_alignment_supports_agy_subscription_with_zero_api_cost(tmp_path, monkey
     assert bindings["bindings"][0]["aligned_paragraph_id"] == "10"
 
 
-def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repair_id", ["a1", "wrong-asset"])
+def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, monkeypatch, repair_id):
     ev = _write_fake_evidence(tmp_path)
     ev_doc = json.loads((ev / "slide_evidence.json").read_text())
     ev_doc["assets"][0]["image_sha256"] = file_sha(ev / "assets" / "a1" / "original.png")
@@ -166,6 +167,7 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
         model, input_rate, output_rate = "fake-test", 0.75, 3.75
 
         def __init__(self, provider, prompt, schema):
+            self.schema = schema
             self.provider, self.prompt, self.config = provider, prompt, {"response_json_schema": schema}
 
         def contents(self, ids, paths):
@@ -176,7 +178,7 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
 
         def generate(self, contents):
             if "Fidelity issues to fix" in str(contents[-1]):
-                return {"results": [{"asset_id": "a1", "text_regions": [{"id": "tr_0", "text": "揀選以色"}]}]}
+                return {"results": [{"asset_id": repair_id, "text_regions": [{"id": "tr_0", "text": "揀選以色"}]}]}
             return {"results": [{
                 "asset_id": "a1",
                 "passed": False,
@@ -186,12 +188,17 @@ def test_fidelity_auto_repair_updates_text_svg_and_annotates_review(tmp_path, mo
             }]}
 
         def text(self, raw):
-            return json.dumps(raw, ensure_ascii=False)
+            return json.dumps(self.schema) + "\n" + json.dumps(raw, ensure_ascii=False)
 
         def usage(self, raw):
             return {"estimated_usd_upper": 0.005}
 
     monkeypatch.setattr(align, "VisionReviewer", FakeReviewer)
+    if repair_id != "a1":
+        with pytest.raises(ValueError, match="asset ID drifted"):
+            align.verify_visual_fidelity(ev, auto_repair=True)
+        assert json.loads((ev / "slide_evidence.json").read_text()) == collection
+        return
     audit = align.verify_visual_fidelity(ev, auto_repair=True)
     assert audit["repaired_count"] == 1
     updated = json.loads((ev / "slide_evidence.json").read_text())["assets"][0]

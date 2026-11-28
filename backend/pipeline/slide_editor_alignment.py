@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.slide_model_response import parse_slide_answer
 from backend.pipeline.agy_subscription_client import AgySubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.slide_change_pilot import clock, file_sha, object_sha, read_json, save_json
@@ -284,48 +284,8 @@ def _apply_fidelity_repair(
     save_json(evidence_dir / "assets" / asset["asset_id"] / "evidence.json", asset)
 
 
-def strip_result_schema_echo(text, schema):
-    """Strip only the exact supplied schema before the single result payload."""
-    text = text.lstrip()
-    try:
-        first, end = json.JSONDecoder().raw_decode(text)
-    except json.JSONDecodeError:
-        return text
-    if first != schema:
-        return text
-    tail = text[end:].lstrip()
-    # The model occasionally returns the results member after the schema object.
-    if re.match(r'^,\s*"results"\s*:', tail):
-        return "{" + tail[1:]
-    return tail
-
-
 def parse_fidelity_result(text, expected_ids):
-    """Recover only the outer envelope after every expected row has decoded."""
-    text = strip_result_schema_echo(text, FIDELITY_SCHEMA)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        prefix = re.match(r'\s*\{\s*"results"\s*:\s*\[', text)
-        if not prefix:
-            raise
-        rest = text[prefix.end():].lstrip()
-        rows = []
-        decoder = json.JSONDecoder()
-        for index, aid in enumerate(expected_ids):
-            if index:
-                if not rest.startswith(","):
-                    raise
-                rest = rest[1:].lstrip()
-            row, end = decoder.raw_decode(rest)
-            if not isinstance(row, dict) or row.get("asset_id") != aid:
-                raise
-            rows.append(row)
-            rest = rest[end:].lstrip()
-        # Extra members, arrays or syntactically incomplete rows remain errors.
-        if not re.fullmatch(r'\]?\s*(?:[\w\s。]*"?|\w+\s*:\s*"none")\s*\]?\s*\}', rest):
-            raise
-        return {"results": rows}
+    return parse_slide_answer(text, FIDELITY_SCHEMA, id_field="asset_id", expected_ids=expected_ids)
 
 
 def verify_visual_fidelity(
@@ -466,9 +426,12 @@ def verify_visual_fidelity(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            repaired_parsed = json.loads(repair_adapter.text(repair_raw))
+            repaired_parsed = parse_slide_answer(repair_adapter.text(repair_raw), FIDELITY_REPAIR_SCHEMA,
+                                               id_field="asset_id", expected_ids=[asset["asset_id"]])
             repair_usage = repair_adapter.usage(repair_raw)
         check_schema(repaired_parsed, FIDELITY_REPAIR_SCHEMA)
+        if [row["asset_id"] for row in repaired_parsed["results"]] != [asset["asset_id"]]:
+            raise ValueError("Fidelity repair asset ID drifted")
         _apply_fidelity_repair(evidence_dir, asset, repaired_parsed["results"][0]["text_regions"], audit_row)
         calls.append({"request_sha256": object_sha(repair_req), **repair_usage})
         repaired_count += 1
@@ -596,7 +559,7 @@ def align_and_filter_important_slides(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            parsed = json.loads(strip_result_schema_echo(adapter.text(raw), ALIGNMENT_SCHEMA))
+            parsed = parse_slide_answer(adapter.text(raw), ALIGNMENT_SCHEMA, id_field="event_id", expected_ids=ids)
             usage = adapter.usage(raw)
         check_schema(parsed, ALIGNMENT_SCHEMA)
         if [r["event_id"] for r in parsed["results"]] != ids:
