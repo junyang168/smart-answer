@@ -8,6 +8,59 @@ from .models import ZONE
 from .store import dump, now_text
 
 PREFIX = '【主日請假查詢】'
+SUNDAY = r'(?:主日|周日|星期日|星期天|礼拜天|sunday)'
+
+
+def standalone_query_days(message):
+    """Resolve an explicit read-only request without consuming a model turn."""
+    from opencc import OpenCC
+    text = re.sub(r'\s+', '', OpenCC('t2s').convert(message.text).lower())
+    question = r'(?:谁|哪些|哪几位)(?:同工|弟兄姐妹|弟兄姊妹|人)?(?:不在|不能来|不能服事|请假|外出|缺席)'
+    match = re.fullmatch(r'(?:请问)?(?P<scope>[^，,。；;？！?!]+?)' + question + r'(?:呢|吗)?[？?。]?', text)
+    if not match:
+        return ()
+    raw_scope = match['scope']
+    local = (message.source_sent_at or message.sent_at).astimezone(ZONE).date()
+    scope = re.sub(r'(?:的)?(?:每个|各个|所有|任何|全部)?' + SUNDAY + r'$', '', raw_scope)
+    named_month = re.fullmatch(r'(?:(20\d{2})年)?(1[0-2]|0?[1-9])月', scope)
+    relative_month = {'这个月': 0, '本月': 0, '下个月': 1, '上个月': -1}
+    if named_month:
+        year_text, month_text = named_month.groups()
+        month = int(month_text)
+        year = int(year_text) if year_text else min(
+            (local.year, local.year - 1, local.year + 1),
+            key=lambda candidate: abs((candidate - local.year) * 12 + month - local.month),
+        )
+    elif scope in relative_month:
+        year, zero_month = divmod(local.year * 12 + local.month - 1 + relative_month[scope], 12)
+        month = zero_month + 1
+    elif scope in {'这两周', '未来两周', '接下来两周'} or (scope == '这两个' and scope != raw_scope):
+        first = local + timedelta(days=(6 - local.weekday()) % 7)
+        return first, first + timedelta(days=7)
+    else:
+        dates = re.split(r'和|及|与|、', scope)
+        if len(dates) < 2:
+            return ()
+        # An abbreviated day can inherit a month explicitly named in this list.
+        prefix = ''
+        resolved = set()
+        for value in dates:
+            explicit = re.fullmatch(r'((?:20\d{2}年)?\d{1,2}月|(?:20\d{2}[-/])?\d{1,2}[-/])(\d{1,2})(?:日|号)?', value)
+            if explicit:
+                prefix = explicit[1]
+            elif prefix and re.fullmatch(r'\d{1,2}(?:日|号)', value):
+                value = prefix + value
+            else:
+                return ()
+            try:
+                resolved.add(question_day(message.model_copy(update={'text': value + '谁不在'})))
+            except ValueError:
+                return ()
+        return tuple(sorted(resolved))
+    first = date(year, month, 1)
+    first += timedelta(days=(6 - first.weekday()) % 7)
+    return tuple(day for offset in range(0, 35, 7)
+                 if (day := first + timedelta(days=offset)).month == month)
 
 
 def question_day(message):
@@ -37,7 +90,7 @@ def question_day(message):
         if not valid:
             raise ValueError('查詢日期不存在')
         candidates.add(min(valid,key=lambda d:abs((d-local).days)))
-    sunday=r'(?:主日|周日|星期日|星期天|礼拜天|sunday)'
+    sunday=SUNDAY
     relative=[(r'(?:(?<![上下再])下(?:个)?(?:周|星期|礼拜)?'+sunday+r'|nextsunday)',7),
               (r'(?:(?<![上下再])上(?:个)?(?:周|星期|礼拜)?'+sunday+r'|lastsunday)',-7),
               (r'(?:(?:这|本)(?:个)?(?:周|星期|礼拜)?'+sunday+r'|thissunday)',0)]
@@ -61,22 +114,45 @@ def answer_snapshot(agent, day):
     return {'date':str(day),'workers':names,'text':text}
 
 
+def query_snapshot(agent, days):
+    if len(days) == 1:
+        return answer_snapshot(agent, days[0])
+    workers = agent.repository.list_sunday_workers()
+    by_date = {
+        day.isoformat(): sorted(worker.name for worker in workers if not worker.is_available_on(day.isoformat()))
+        for day in days
+    }
+    lines = [f"• {day}　{'、'.join(names) if names else '目前無請假登記'}" for day, names in by_date.items()]
+    text = '\n'.join([PREFIX, '各主日已登記不能服事的同工', *lines, '以上依網站已保存的請假資料；未登記請假不代表已確認會出席。'])
+    return {'dates': list(by_date), 'workers_by_date': by_date, 'text': text}
+
+
 def queue_answer(agent, message):
     settings=agent.store.settings()
     if (not settings.enabled or message.group_id!=settings.availability_group
             or message.group_id==settings.admin_group or message.initial_sync or message.revoked or message.unverified_edit):
         raise ValueError('只在已啟用的教會外出登記原群回答新查詢')
-    day=question_day(message)
+    days = standalone_query_days(message) or (question_day(message),)
     key='absence-query:'+message.message_id
     with sunday_data_lock(), agent.store.db() as db:
         existing=db.execute('SELECT text,status FROM outbox WHERE key=?',(key,)).fetchone()
         if not existing:
-            snapshot=answer_snapshot(agent,day)
+            snapshot=query_snapshot(agent, days)
             db.execute("INSERT INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'queued',?)",(key,message.group_id,snapshot['text'],now_text()))
             db.execute('INSERT OR REPLACE INTO kv VALUES (?,?)',('absence-query:'+message.message_id,dump(snapshot)))
         # This is a query receipt, not a form update or an absence registration.
         db.execute("UPDATE messages SET status='done',error=NULL WHERE id=?",(message.message_id,))
-    return {'status':'done','query':'sunday_absences','date':str(day)}
+    result = {'date': str(days[0])} if len(days) == 1 else {'dates': [str(day) for day in days]}
+    return {'status':'done','query':'sunday_absences',**result}
+
+
+def handle_standalone_query(agent, message, row, settings):
+    if (row['status'] != 'queued' or row['attempts'] or not settings.enabled
+            or message.group_id != settings.availability_group or message.group_id == settings.admin_group
+            or message.initial_sync or message.unsupported_media or not standalone_query_days(message)):
+        return False
+    queue_answer(agent, message)
+    return True
 
 
 def prepare_delivery(agent, row):
@@ -93,7 +169,7 @@ def prepare_delivery(agent, row):
     if message.group_id!=row['group_id'] or message.initial_sync or message.revoked or message.unverified_edit:
         return None
     with sunday_data_lock():
-        snapshot=answer_snapshot(agent,question_day(message))
+        snapshot=query_snapshot(agent, standalone_query_days(message) or (question_day(message),))
         with agent.store.db() as db:
             # Uncertain/submitted replies are never changed or blindly retried.
             db.execute("UPDATE outbox SET text=?,updated_at=? WHERE key=? AND status='queued'",(snapshot['text'],now_text(),row['key']))

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from backend.api.models import SundayWorker
-from backend.sunday_assistant.absence_query import question_day, queue_answer, PREFIX
+from backend.sunday_assistant.absence_query import question_day, queue_answer, standalone_query_days, PREFIX
 from backend.sunday_assistant.agent_graph import run_agent
 from backend.sunday_assistant.models import ChatMessage
 from backend.tests.test_sunday_assistant import agent
@@ -83,6 +83,42 @@ def test_changed_destination_cancels_unsent_answer(agent):
     agent.store.put('settings',settings.model_dump());agent.deliver_outbox()
     assert not agent.bridge.sent
     assert agent.store.outbox()[0]['status']=='cancelled'
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('12月哪些弟兄姐妹不在', ['2026-12-06', '2026-12-13', '2026-12-20', '2026-12-27']),
+    ('下個月每個主日哪些同工請假？', ['2026-12-06', '2026-12-13', '2026-12-20', '2026-12-27']),
+    ('這兩週主日誰不在？', ['2026-11-08', '2026-11-15']),
+    ('12月6號和20號誰不在？', ['2026-12-06', '2026-12-20']),
+    ('12/6和12/7誰不在？', []),
+    ('12月誰不在？我 12/6 請假。', []),
+])
+def test_standalone_multi_date_query(text, expected):
+    assert [str(day) for day in standalone_query_days(message(text))] == expected
+
+
+def test_month_query_replies_once_in_original_group_with_fresh_data(agent, monkeypatch):
+    import backend.sunday_assistant.agent_graph as graph
+    monkeypatch.setattr(graph, 'run_agent', lambda *_: pytest.fail('explicit monthly query invoked a model'))
+    msg = message('12月哪些弟兄姐妹不在')
+    agent.store.receive(msg)
+    with agent.store.db() as db:
+        row = db.execute('SELECT * FROM messages WHERE id=?', (msg.message_id,)).fetchone()
+    agent.process_message(row)
+    assert not agent.store.proposals()
+    assert len(agent.store.outbox()) == 1
+    agent.repository.workers['余克宇'] = SundayWorker(
+        name='余克宇', unavailableRanges=[{'startDate': '2026-12-13', 'endDate': '2026-12-20'}],
+    )
+    agent.deliver_outbox()
+    agent.deliver_outbox()
+    assert len(agent.bridge.sent) == 1
+    _, group, text = agent.bridge.sent[0]
+    assert group == msg.group_id
+    assert '2026-12-06　目前無請假登記' in text
+    assert '2026-12-13　余克宇' in text
+    assert '2026-12-20　余克宇' in text
+    assert '2026-12-27　目前無請假登記' in text
 
 
 @pytest.mark.parametrize('changes',[{'group_id':'222@g.us'},{'initial_sync':True},{'revoked':True},{'unverified_edit':True}])
