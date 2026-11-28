@@ -205,3 +205,29 @@ def test_flash_audio_probes_native_capability_before_choosing_transport(tmp_path
     else:
         assert raw['transport']=='gemini_api' and raw['transport_reason']=='subscription_audio_capability_false'
         assert raw['subscription_capabilities']['audio'] is False and 'subscription' not in seen
+
+
+def test_completed_model_answer_survives_ssd_write_failure_without_redispatch(tmp_path,monkeypatch):
+    from backend.pipeline import media_model_calls as calls
+    from backend.pipeline.media_batch.runtime import file_sha
+    monkeypatch.setattr(Path,'home',lambda:tmp_path/'internal')
+    monkeypatch.setenv('MEDIA_BATCH_CONTEXT',json.dumps({'batch':'B-'+'a'*24,'task':'b'*64}))
+    original_save=calls.save_json;sent=[]
+    def fail_response(path,value):
+        if path.name=='response.json':raise OSError('media SSD disappeared')
+        return original_save(path,value)
+    monkeypatch.setattr(calls,'save_json',fail_response)
+    out=tmp_path/'external';request={'model':'fixture','source_sha256':'source'}
+    def invoke():
+        sent.append(True)
+        assert calls.call_artifacts().is_relative_to(tmp_path/'internal')
+        return {'status':'completed','answer':{'ok':True}}
+    with pytest.raises(OSError,match='SSD'):calls._saved_call(out,request,.5,invoke)
+    mirror=next((tmp_path/'internal').rglob('response-proof.json'))
+    assert json.loads(mirror.read_text())['response_sha256']==file_sha(mirror.with_name('response.json'))
+    assert not list(out.glob('calls/*/response.json'))
+    with pytest.raises(ValueError,match='never resend'):calls._saved_call(out,request,.5,invoke)
+    import shutil
+    shutil.rmtree(out)
+    with pytest.raises(ValueError,match='internal saved answer'):calls._saved_call(out,request,.5,invoke)
+    assert len(sent)==1

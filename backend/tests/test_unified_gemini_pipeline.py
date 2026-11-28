@@ -318,3 +318,25 @@ def test_recovery_bound_is_per_original_task_without_new_call_budget(setup,monke
     assert result['original_task_recovery_ordinal']==1 and len(result['prior_receipts'])==3
     verify(second['payload'],'fixed-next-stage')
     after=store.snapshot(batch);after.pop('generated_at');assert after==before
+
+
+def test_ssd_reattachment_is_audited_without_changing_original_configuration(setup,monkeypatch):
+    from backend.pipeline.media_batch import runtime_storage,runtime
+    store,root,item,actor,source,cfg,manifest=setup
+    batch=create(store,manifest,cfg,actor)
+    with store.connection() as c:before=c.execute('select * from media_ingest.batches where id=%s',(batch,)).fetchone()
+    revision=store.control(batch,'pause-for-storage',before['revision'],'pause')
+    saved=before['config']['storage_guards'];changed=[{**g,'device':g['device']+1} for g in saved]
+    monkeypatch.setattr(runtime,'storage_guards',lambda cfg:changed)
+    receipt=runtime_storage.reattach(store,batch,'same-storage-reattach',revision,'same paths and exact original source after disconnect')
+    assert receipt['guards']==changed and receipt['model_calls']==0
+    assert runtime_storage.reattach(store,batch,'same-storage-reattach',revision,'same paths and exact original source after disconnect')==receipt
+    monkeypatch.setenv('MEDIA_BATCH_DATABASE_URL',store.dsn)
+    assert runtime_storage.effective_guards(before['config'])==changed
+    with store.connection() as c:
+        after=c.execute('select * from media_ingest.batches where id=%s',(batch,)).fetchone()
+        assert after['config']==before['config'] and after['calls']==before['calls']==0
+        assert after['reserved_usd']==before['reserved_usd']
+    source.write_bytes(b'changed recording')
+    with pytest.raises(Conflict,match='Source SHA'):
+        runtime_storage.reattach(store,batch,'another-reattach',after['revision'],'source must still match')

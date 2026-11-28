@@ -208,7 +208,8 @@ def storage_guards(config):
 
 
 def ensure_storage(config):
-    for guard in config.get("storage_guards", []):
+    from .runtime_storage import effective_guards
+    for guard in effective_guards(config):
         path = Path(guard["path"])
         if (
             not path.exists()

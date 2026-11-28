@@ -13,6 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { remarkEditorialSoftDeletion } from "./editorial-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
 import {
@@ -1113,7 +1114,7 @@ function TranscriptProofreader({
   const pendingSource = timingPending.some(
     (p) => p.index in (doc.context.timing_quality?.source_holds || {}),
   );
-  const timingLabel = pendingSource ? "音源不清・未確認" : "時間待核對";
+  const timingLabel = pendingSource ? "來源／轉錄待核" : "時間待核對";
   const pendingGroups = doc.context.groups.length - groupsConfirmed;
   const publishIssues = [
     blocked.current ? "同步已暫停，請先處理本機修改" : !ready ? "正在載入編輯狀態" : "",
@@ -2487,7 +2488,7 @@ const TranscriptText = memo(function TranscriptText({
 }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkEditorialSoftDeletion]}
       urlTransform={(url, key) => {
         if (key === "src" && url.startsWith("data%2F")) {
           try {

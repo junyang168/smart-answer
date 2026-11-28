@@ -35,13 +35,15 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
             raise ValueError('Previous call outcome unknown; reconcile before another model call')
     if len(states) >= max_calls or sum(s['reserved_usd'] for s in states) + reserved_usd > budget_usd:
         raise ValueError('Pilot call or cost reservation limit exhausted')
+    from backend.pipeline import media_call_mirror
+    mirror=media_call_mirror.prepare(out,request)
     admit()
     save_json(folder / 'request.json', request)
     state = {'status': 'sent_outcome_unknown', 'reserved_usd': reserved_usd}
     save_json(state_path, state)
     started = time.perf_counter()
     try:
-        with dispatch_artifacts(folder):
+        with dispatch_artifacts(mirror or folder):
             result = invoke()
     except Exception as error:
         status = getattr(error, 'status_code', None) or getattr(error, 'code', None)
@@ -52,6 +54,7 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
             state['status'] = 'rejected'
         save_json(state_path, state)
         raise
+    media_call_mirror.response(mirror,result)
     save_json(folder / 'response.json', result)
     state.update(status='complete', response_sha256=file_sha(folder / 'response.json'),
                  wall_seconds=time.perf_counter() - started)
