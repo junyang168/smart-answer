@@ -60,7 +60,7 @@ def reserve(store, batch, task_id, *, defect, validation, patch):
             raise Conflict('Task worker is still live')
         # Bind the original saved request/answer tree, including empty replies.
         files = sorted(set(out.rglob('*.request.json')) | set(out.rglob('*.response.json')) |
-                       set(out.glob('calls/*/request.json')) | set(out.glob('calls/*/response.json')) |
+                       set(out.glob('**/calls/*/request.json')) | set(out.glob('**/calls/*/response.json')) |
                        {p for p in (out/name for name in ('run.json','transcribe.json','flash.json','timing.json',
                            'speakers.json','repetitions.json','layout.json','media-receipt.json')) if p.exists()})
         if not files:
