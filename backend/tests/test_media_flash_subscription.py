@@ -3,6 +3,10 @@ from pathlib import Path
 import pytest
 from backend.pipeline.media_flash_subscription import FlashSubscription,SubscriptionSetupError
 
+def test_generation_deadline_allows_long_streams_and_remains_bounded(tmp_path):
+    assert FlashSubscription(tmp_path).timeout==900
+    assert FlashSubscription(tmp_path,timeout=20).timeout==20
+
 @pytest.fixture
 def cli(tmp_path):
     path=tmp_path/'fake-agy'

@@ -10,7 +10,7 @@ class SubscriptionSetupError(RuntimeError):
 
 
 class FlashSubscription:
-    def __init__(self,folder,*,executable=None,timeout=240):
+    def __init__(self,folder,*,executable=None,timeout=900):
         self.folder=Path(folder);self.executable=executable or _resolve_executable();self.timeout=timeout
         self.serial=0;self.started=False;self.events=[];self.messages=queue.Queue();self.process=None
 
@@ -42,7 +42,9 @@ class FlashSubscription:
     def rpc(self,method,params):
         self.serial+=1;identity=self.serial
         self.write({'jsonrpc':'2.0','id':identity,'method':method,'params':params})
-        deadline=time.monotonic()+self.timeout
+        # Model turns may stream useful work for several minutes; setup must
+        # still fail promptly when authentication or the CLI is unavailable.
+        deadline=time.monotonic()+(self.timeout if self.started else min(self.timeout,30))
         while True:
             if time.monotonic()>=deadline:raise TimeoutError('Subscription ACP response timed out')
             try:line=self.messages.get(timeout=max(.001,deadline-time.monotonic()))
