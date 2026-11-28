@@ -66,3 +66,32 @@ def test_one_stage_checkpoints_can_resume_through_all_remaining_stages(tmp_path,
     result=flow.run(cues,media,out,through='layout')
     assert calls==['speakers','repetitions']
     assert result['paragraphs'][0]['text']=='問題。'
+
+
+def test_completed_empty_asr_answer_preserves_uncovered_leaf(tmp_path, monkeypatch):
+    calls=asr_fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr(audio,'asr_call',lambda path: {'model':audio.ASR_MODEL,
+        'status':'completed','usage':{'total_output_tokens':0}})
+    assert audio.words({'model':audio.ASR_MODEL,'status':'completed',
+        'usage':{'total_output_tokens':0}},'0',0,45,0,45)==[]
+    with pytest.raises(ValueError,match='empty-output proof'):
+        audio.words({'model':audio.ASR_MODEL,'status':'completed'},'0',0,45,0,45)
+    # Empty speech cannot become a completed whole-sermon transcript.
+    with pytest.raises(ValueError,match='No word-timed transcript'):
+        audio.transcribe(tmp_path/'source.mp4',tmp_path)
+    assert json.loads((tmp_path/'node-0aa.json').read_text())['children']==[]
+
+
+def test_engineering_recovery_binds_exact_plan_code_and_saved_answers(tmp_path):
+    from backend.pipeline.media_batch.engineering_recovery import verify
+    from backend.pipeline.media_batch.store import key
+    from backend.pipeline.media_batch.runtime import atomic,file_sha
+    payload={'out':str(tmp_path),'config':{'implementation':'original'}}
+    with pytest.raises(ValueError,match='changed after planning'):verify(payload,'corrected')
+    proof=tmp_path/'saved.json';proof.write_text('{}')
+    atomic(tmp_path/'engineering-recovery.json',dict(original_implementation='original',
+        corrected_implementation='corrected',payload_sha256=key(payload),proof={'saved.json':file_sha(proof)}))
+    verify(payload,'corrected')
+    with pytest.raises(ValueError,match='exact plan'):verify(payload,'another change')
+    proof.write_text('{"changed":true}')
+    with pytest.raises(ValueError,match='proof changed'):verify(payload,'corrected')

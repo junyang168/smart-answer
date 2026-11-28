@@ -14,7 +14,8 @@ from .gemini_plan import PIPELINE, implementation
 def execute(stage,payload):
     cfg=payload['config'];ensure_storage(cfg)
     if cfg['implementation'] != implementation():
-        raise ValueError('Pipeline implementation changed after planning; saved results preserved')
+        from .engineering_recovery import verify
+        verify(payload, implementation())
     from .stages import resolve_source
     source=resolve_source(payload);out=Path(payload['out']);out.mkdir(parents=True,exist_ok=True)
     review=ReviewStore(Path(cfg['review_root']));actor=cfg['actor'];item=payload['item']

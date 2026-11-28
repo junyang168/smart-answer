@@ -18,7 +18,7 @@ def implementation():
            'transcript_word_timing.py','gemini_review.py','media_operations.py','media_model_calls.py',
            'slide_pilot_models.py','editor_slide_runner.py','slide_editor_alignment.py',
            'media_batch/gemini_plan.py','media_batch/gemini_stages.py','media_batch/gemini_media.py',
-           'media_batch/runtime.py','media_batch/worker.py','media_batch/store.py',
+           'media_batch/runtime.py','media_batch/worker.py','media_batch/store.py','media_batch/engineering_recovery.py',
            '../api/sc_api/transcript_review.py','slide_visual_evidence.py','slide_model_response.py']
     return key({name:file_sha(code/name) for name in files})
 

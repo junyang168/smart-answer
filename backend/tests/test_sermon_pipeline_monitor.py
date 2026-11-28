@@ -53,3 +53,38 @@ def test_current_plan_not_latest_updated_task_and_snapshots_are_pinned(setup):
     with pytest.raises(Conflict,match='snapshot_changed'):
         snapshot(store,root,status='all',expected=before['snapshot_revision'])
     assert snapshot(store,root,status='all')['records'][0]['state']=='failed'
+
+
+def test_monitor_http_identity_plan_and_read_only_get(setup,monkeypatch):
+    import hashlib,hmac,time
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend.api.sc_api.media_batch_router import create_media_batch_router
+    from backend.pipeline.media_batch.runtime import file_sha
+    store,root,item,actor,source,cfg,manifest=setup
+    renamed=source.with_name(item+'.wav');source.rename(renamed)
+    atomic(root/'config/sermon_series.json',[{'id':'series','sermons':[item]}])
+    cfg['source_roots']=[str(renamed.parent)]
+    atomic(root/'config/media_pipeline.json',cfg)
+    refresh(store,root,cfg)
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET','test-secret')
+    app=FastAPI();app.include_router(create_media_batch_router(root,lambda:store));client=TestClient(app)
+    def request(method,path,body=None):
+        raw=json.dumps(body).encode() if body is not None else b''
+        timestamp=str(int(time.time()))
+        signed='\n'.join((method,path,actor,timestamp,hashlib.sha256(raw).hexdigest()))
+        return client.request(method,path,content=raw,headers={'Content-Type':'application/json',
+            'x-review-actor':actor,'x-review-time':timestamp,
+            'x-review-signature':hmac.new(b'test-secret',signed.encode(),hashlib.sha256).hexdigest()})
+    assert client.get('/media_batches/sermons').status_code==401
+    page=request('GET','/media_batches/sermons')
+    assert page.status_code==200 and page.json()['records'][0]['item']==item
+    with store.connection() as c:assert c.execute('SELECT count(*) AS n FROM media_ingest.tasks').fetchone()['n']==0
+    body={'items':[item],'budget_usd':10,'max_calls':40,'operation_id':'plan-operation-1'}
+    result=request('POST','/media_batches/sermons/plan',body)
+    assert result.status_code==200,result.text
+    assert result.json()['status']=='planned'
+    assert request('POST','/media_batches/sermons/plan',body).json()['batch']==result.json()['batch']
+    with store.connection() as c:
+        assert c.execute('SELECT count(*) AS n FROM media_ingest.calls').fetchone()['n']==0
+        assert c.execute('SELECT count(*) AS n FROM media_ingest.pipeline_heads').fetchone()['n']==0

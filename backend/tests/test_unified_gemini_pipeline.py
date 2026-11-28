@@ -96,3 +96,28 @@ def test_plan_to_import_cas_rejects_new_human_rough(setup):
     with pytest.raises(ReviewError):
         initialize(ReviewStore(root),item,actor,source,out,media,task['payload']['empty'],'test-import')
     assert json.loads((root/'script_review'/f'{item}.json').read_text())[0]['text']=='new human draft'
+
+
+def test_recovery_reservation_preserves_caps_and_refuses_second_or_unknown(setup):
+    from backend.pipeline.media_batch.engineering_recovery import reserve,verify
+    store,root,item,actor,source,cfg,manifest=setup
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    task=store.claim(batch,'failed-worker');store.update(task,state='failed',error="KeyError: 'steps'")
+    out=Path(task['payload']['out']);out.mkdir(parents=True)
+    atomic(out/'asr-0.request.json',{'source_sha256':file_sha(source)})
+    atomic(out/'asr-0.response.json',{'status':'completed','usage':{'total_output_tokens':0}})
+    before=store.snapshot(batch)
+    receipt=reserve(store,batch,task['id'],defect='Empty completed reply omitted steps',
+                    validation='regression test passes',patch='exact diff fixture')
+    verify(task['payload'],receipt['corrected_implementation'])
+    after=store.snapshot(batch)
+    before.pop('generated_at');after.pop('generated_at')
+    assert after==before
+    with pytest.raises(FileExistsError):
+        reserve(store,batch,task['id'],defect='same',validation='same',patch='same')
+    (out/'engineering-recovery.json').unlink()
+    with store.connection() as c:
+        c.execute('INSERT INTO media_ingest.calls(id,batch,task,model,reserved_usd,state) VALUES(%s,%s,%s,%s,%s,%s)',
+                  ('unknown',batch,task['id'],'fixture',.5,'unknown'))
+    with pytest.raises(Conflict,match='Unresolved'):
+        reserve(store,batch,task['id'],defect='same',validation='same',patch='same')

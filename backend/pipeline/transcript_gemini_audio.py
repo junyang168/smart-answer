@@ -81,6 +81,12 @@ def asr_call(audio):
 def words(raw, ordinal, start, end, origin, clip_end):
     if raw.get("model") != ASR_MODEL or raw.get("status") != "completed":
         raise ValueError("Gemini 3.5 transcription did not complete")
+    # The provider omits steps for a completed empty answer. Keep that as an
+    # uncovered interval, never as evidence that the recording was silent.
+    if "steps" not in raw:
+        if raw.get("usage", {}).get("total_output_tokens") == 0:
+            return []
+        raise ValueError("Completed transcription has no steps or empty-output proof")
     annotations = [word for step in raw["steps"] for content in step.get("content", [])
                    for word in content.get("annotations", []) if word.get("type") == "word_info"]
     if not annotations:
