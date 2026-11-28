@@ -88,3 +88,23 @@ def test_monitor_http_identity_plan_and_read_only_get(setup,monkeypatch):
     with store.connection() as c:
         assert c.execute('SELECT count(*) AS n FROM media_ingest.calls').fetchone()['n']==0
         assert c.execute('SELECT count(*) AS n FROM media_ingest.pipeline_heads').fetchone()['n']==0
+
+
+def test_human_edit_after_delivery_never_restored_to_complete_by_sync(setup):
+    store,root,item,actor,source,cfg,manifest=setup
+    atomic(root/'config/sermon_series.json',[{'id':'series','sermons':[item]}])
+    refresh(store,root,cfg)
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    marker=root/'transcript_review'/item/'pipeline-document-version.json'
+    atomic(marker,{'script_sha256':'original','timings_sha256':'original'})
+    from psycopg.types.json import Jsonb
+    with store.connection() as c:
+        c.execute("UPDATE media_ingest.tasks SET state='complete'")
+        c.execute("UPDATE media_ingest.pipeline_heads SET value=value || %s",
+            (Jsonb({'delivered_document_marker':{'script_sha256':'original','timings_sha256':'original'}}),))
+    reconcile_item(store,root,item)
+    assert snapshot(store,root,status='all')['records'][0]['state']=='complete'
+    atomic(marker,{'script_sha256':'human edit','timings_sha256':'original'})
+    assert snapshot(store,root,status='all')['records'][0]['state']=='needs_resolution'
+    refresh(store,root,cfg);reconcile_item(store,root,item)
+    assert snapshot(store,root,status='all')['records'][0]['state']=='needs_resolution'

@@ -62,6 +62,9 @@ def refresh(store,root,cfg):
         for row in values:
             c.execute('INSERT INTO media_ingest.sermon_index(root,item,value,generation) VALUES(%s,%s,%s,%s) ON CONFLICT(root,item) DO UPDATE SET value=EXCLUDED.value,generation=EXCLUDED.generation,updated_at=now()',row)
         c.execute('DELETE FROM media_ingest.sermon_index WHERE root=%s AND generation<>%s',(root,generation))
+        heads=list(c.execute('SELECT item FROM media_ingest.pipeline_heads WHERE root=%s',(root,)))
+    for head in heads:
+        reconcile_item(store,root,head['item'])
     return {'items':len(values),'generation':generation,'synced_at':now}
 
 
@@ -91,6 +94,10 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
         if not rows:return {'initialized':False,'records':[],'series':[],'counts':{},'total':0,'filtered_total':0,'generated_at':datetime.now(timezone.utc).isoformat()}
         heads={r['head']['batch'] for r in rows if r['head']}
         jobs=list(c.execute('SELECT t.*,bt.batch,b.desired FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id JOIN media_ingest.batches b ON b.id=bt.batch WHERE bt.batch=ANY(%s)',(list(heads),))) if heads else []
+        calls=list(c.execute('SELECT task,state,count(*) AS n FROM media_ingest.calls WHERE batch=ANY(%s) GROUP BY task,state ORDER BY task,state',(list(heads),))) if heads else []
+    call_counts={}
+    for call in calls:
+        call_counts.setdefault(call['task'],{})[call['state']]=call['n']
     grouped={}
     for t in jobs:
         payload=t['payload'];lease=Path(payload['out'])/'leases'/t['id']
@@ -102,7 +109,11 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
         if head and tasks:head={**head,'desired':tasks[0]['desired']}
         current=state(value,head,tasks)
         marker=Path(root)/'transcript_review'/row['item']/'pipeline-document-version.json'
-        if head and marker.exists() and value.get('document_marker')!=json.loads(marker.read_text()):
+        current_marker=json.loads(marker.read_text()) if marker.exists() else None
+        if head and current=='complete' and 'editor_draft' in head.get('wanted',[]):
+            if 'delivered_document_marker' not in head:current='needs_sync'
+            elif head['delivered_document_marker']!=current_marker:current='needs_resolution'
+        elif head and marker.exists() and value.get('document_marker')!=current_marker:
             # Own current delivery may have committed since explicit inventory refresh.
             # Until incremental reconciliation observes that version do not claim completion.
             if current=='complete':current='needs_sync'
@@ -118,13 +129,16 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
             batch=head['batch'] if head else None,head_revision=row['revision'],
             editor_href=f'/admin/surmons/{quote(row["item"],safe="")}' if value['editor'] or any(t['stage']=='editor' and t['state']=='complete' for t in tasks) else None,
             tasks=[{k:t.get(k) for k in ('id','stage','state','live','progress','error','attempt','heartbeat')} for t in tasks])
+        for task in record['tasks']:
+            task['model_calls']=call_counts.get(task['id'],{})
         if (search and search.casefold() not in (value['title']+' '+row['item']+' '+' '.join(g['name'] for g in memberships)).casefold()
             or series and series not in {g['id'] for g in memberships}
             or status=='actionable' and current=='complete'
             or status not in ('all','actionable') and current!=status):continue
         records.append(record)
     revision=key([[(r['item'],r['generation'],r['revision'],r['updated_at'].isoformat()) for r in rows],
-                  [(t['id'],t['state'],str(t['updated_at'])) for t in jobs]])
+                  [(t['id'],t['state'],str(t['updated_at']),t['live']) for t in jobs],
+                  [(r['item'],r['state']) for r in records],calls])
     if expected and expected!=revision:raise Conflict('snapshot_changed')
     records.sort(key=lambda r:(min(g['series_order'] for g in r['groups']),min(g['order'] for g in r['groups']),r['item']))
     return {'initialized':True,'records':records[offset:offset+limit], 'series':sorted(series_map.values(),key=lambda s:s['series_order']),
@@ -149,3 +163,27 @@ def reconcile_item(store,root,item):
             published=value['published'] or (root/'script_published'/f'{item}.json').is_file())
         c.execute('UPDATE media_ingest.sermon_index SET value=%s,updated_at=now() WHERE root=%s AND item=%s',
                   (Jsonb(value),str(root.resolve()),item))
+        head=c.execute('SELECT value FROM media_ingest.pipeline_heads WHERE root=%s AND item=%s FOR UPDATE',
+                       (str(root.resolve()),item)).fetchone()
+        if head and 'delivered_document_marker' not in head['value']:
+            unfinished=c.execute("SELECT 1 FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.state<>'complete' LIMIT 1",
+                                 (head['value']['batch'],item)).fetchone()
+            if not unfinished:
+                editor=c.execute("SELECT t.result FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.stage='editor' AND t.state='complete'",
+                                 (head['value']['batch'],item)).fetchone()
+                if editor and editor['result']:
+                    import re
+                    from backend.api.sc_api.transcript_review import digest
+                    opid=editor['result']['operation_id']
+                    if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}',opid):raise ValueError('Invalid Editor receipt identity')
+                    op=json.loads((folder/'operations'/f'{opid}.json').read_text())
+                    result=op['result']
+                    revision=json.loads((folder/'revisions'/f"{result['revision']:08}.json").read_text())
+                    if (op['state']!='committed' or result['version']!=editor['result']['version']
+                            or digest(revision)!=result['revision_sha256']):raise ValueError('Editor delivery proof changed')
+                    context=revision['context']
+                    baseline={'script_sha256':context['script_sha256'],
+                              'timings_sha256':digest(context.get('paragraph_bindings',{}))}
+                    saved={**head['value'],'delivered_document_marker':baseline}
+                    c.execute('UPDATE media_ingest.pipeline_heads SET value=%s,revision=revision+1,updated_at=now() WHERE root=%s AND item=%s',
+                              (Jsonb(saved),str(root.resolve()),item))

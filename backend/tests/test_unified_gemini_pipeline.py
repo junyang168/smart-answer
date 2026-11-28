@@ -121,3 +121,56 @@ def test_recovery_reservation_preserves_caps_and_refuses_second_or_unknown(setup
                   ('unknown',batch,task['id'],'fixture',.5,'unknown'))
     with pytest.raises(Conflict,match='Unresolved'):
         reserve(store,batch,task['id'],defect='same',validation='same',patch='same')
+
+
+def test_projection_recovers_original_delivery_after_crash_and_later_human_edit(setup,monkeypatch):
+    from backend.pipeline import transcript_gemini_proofreading as flow
+    from backend.pipeline.media_batch.sermon_monitor import refresh,snapshot
+    monkeypatch.setattr(flow,'run',fake_flow)
+    store,root,item,actor,source,cfg,manifest=setup
+    atomic(root/'config/sermon_series.json',[{'id':'series','sermons':[item]}])
+    refresh(store,root,cfg)
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    while task:=store.claim(batch,'test-worker'):
+        result=execute(task['stage'],task['payload']);store.update(task,state='complete',result=result)
+    # Simulate a crash before incremental indexing, then an authorized human edit.
+    assert snapshot(store,root,status='all')['records'][0]['state']=='needs_sync'
+    review=ReviewStore(root)
+    with review.lock(item):
+        rows,ctx=review.load(item);rows[0]['text']='人工修改。'
+        review.commit(item,actor,'human-edit-after-delivery',{},rows,ctx,'edit')
+    refresh(store,root,cfg)
+    page=snapshot(store,root,status='all')
+    assert page['records'][0]['state']=='needs_resolution'
+    assert review.load(item)[0][0]['text']=='人工修改。'
+    refresh(store,root,cfg)
+    assert snapshot(store,root,status='all')['records'][0]['state']=='needs_resolution'
+
+
+@pytest.mark.parametrize('faststart',[True,False])
+def test_video_reuse_or_versioned_compression_and_receipt_drift(setup,faststart):
+    from backend.pipeline.media_batch.gemini_media import playback,compatible
+    store,root,item,actor,source,cfg,manifest=setup
+    video=source.with_suffix('.mp4')
+    command=['ffmpeg','-nostdin','-v','error','-f','lavfi','-i','color=blue:s=96x64:r=10:d=3',
+             '-i',str(source),'-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest']
+    if faststart:command+=['-movflags','+faststart']
+    subprocess.run(command+[str(video)],check=True)
+    sha=file_sha(video)
+    manifest['jobs'][0].update(source=str(video),source_sha256=sha)
+    batch=create(store,manifest,cfg,actor)
+    with store.connection() as c:
+        payload=c.execute("SELECT t.payload FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.stage='media'",(batch,)).fetchone()['payload']
+    result=playback(payload)
+    assert file_sha(video)==sha
+    assert compatible(Path(result['path']),True)
+    assert playback(payload)==result
+    if faststart:
+        assert result['origin']=='verified_existing' and Path(result['path'])==video
+    else:
+        target=Path(result['path'])
+        assert target.is_relative_to(Path(cfg['media_root'])/'playback'/item)
+        assert target!=video and result['source_sha256']==sha
+        with target.open('ab') as f:f.write(b'drift')
+        with pytest.raises(ValueError,match='drift'):playback(payload)
+        assert file_sha(video)==sha
