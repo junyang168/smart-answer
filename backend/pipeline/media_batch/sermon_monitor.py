@@ -103,7 +103,8 @@ def snapshot(store,root,*,search='',series='',status='actionable',source='',offs
         heads={batch for r in rows if r['head'] for batch in
                [r['head']['batch'],*(v['batch'] for v in r['head'].get('deliveries',{}).values())]}
         jobs=list(c.execute('SELECT t.*,bt.batch,b.desired FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id JOIN media_ingest.batches b ON b.id=bt.batch WHERE bt.batch=ANY(%s)',(list(heads),))) if heads else []
-        calls=list(c.execute('SELECT task,state,count(*) AS n FROM media_ingest.calls WHERE batch=ANY(%s) GROUP BY task,state ORDER BY task,state',(list(heads),))) if heads else []
+        from .timeout_recovery import uncovered_sql
+        calls=list(c.execute(f"SELECT task,state,count(*) AS n FROM (SELECT m.task,CASE WHEN m.state='unknown' AND NOT {uncovered_sql('m')} THEN 'covered_unknown' ELSE m.state END AS state FROM media_ingest.calls m WHERE m.batch=ANY(%s)) counted GROUP BY task,state ORDER BY task,state",(list(heads),))) if heads else []
     call_counts={}
     for call in calls:
         call_counts.setdefault(call['task'],{})[call['state']]=call['n']

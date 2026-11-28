@@ -320,3 +320,25 @@ def test_alignment_and_fidelity_read_answer_after_echoed_schema():
     assert parse_slide_answer(json.dumps(ALIGNMENT_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA) == answer
     with pytest.raises(ValueError):
         parse_slide_answer(json.dumps(FIDELITY_SCHEMA) + "\n" + tail, ALIGNMENT_SCHEMA)
+
+
+def test_alignment_collection_keeps_unknown_parent_and_counts_only_verified_replacement(tmp_path,monkeypatch):
+    from backend.pipeline.editor_slide_runner import effective_alignment_requests
+    from backend.pipeline.media_batch.timeout_recovery import effective
+    from backend.pipeline.media_batch.runtime import file_sha
+    from backend.pipeline.slide_change_pilot import object_sha,save_json
+    import json
+    request={'stage':'slide_editor_alignment','event_ids':['event-a'],'context_sha256':'unchanged'}
+    original=tmp_path/'calls'/object_sha(request)
+    save_json(original/'request.json',request);save_json(original/'state.json',{'status':'sent_outcome_unknown'})
+    with pytest.raises(ValueError,match='quarantined'):list(effective_alignment_requests(tmp_path))
+    save_json(original/'timeout-recovery.json',{'schema_version':'media-timeout-recovery.v1','batch':'original','task':'same',
+        'max_attempts':1,'original_request_sha256':object_sha(request),'unknown_state_sha256':file_sha(original/'state.json')})
+    monkeypatch.setenv('MEDIA_BATCH_CONTEXT',json.dumps({'batch':'original','task':'same'}))
+    retry=effective(tmp_path,request);target=tmp_path/'calls'/object_sha(retry)
+    save_json(target/'request.json',retry);save_json(target/'response.json',{'results':[]})
+    save_json(target/'state.json',{'status':'complete','response_sha256':file_sha(target/'response.json')})
+    assert list(effective_alignment_requests(tmp_path))==[retry]
+    assert json.loads((original/'state.json').read_text())['status']=='sent_outcome_unknown'
+    save_json(target/'response.json',{'changed':'answer'})
+    with pytest.raises(ValueError,match='quarantined'):list(effective_alignment_requests(tmp_path))
