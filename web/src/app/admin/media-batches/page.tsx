@@ -1,8 +1,6 @@
 import { MediaBatchProgress } from "./progress";
-export const metadata = {
-  title: "批次影音轉錄",
-  robots: { index: false, follow: false },
-};
-export default function Page() {
-  return <MediaBatchProgress />;
+import { SermonPipelineMonitor } from "./sermons";
+export const metadata = { title: "影音處理進度", robots: { index: false, follow: false } };
+export default async function Page({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
+  return (await searchParams).view === "batches" ? <MediaBatchProgress /> : <SermonPipelineMonitor />;
 }

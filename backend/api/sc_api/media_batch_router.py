@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from backend.pipeline.media_batch.store import Store, Conflict
 from backend.pipeline.media_batch.runtime import capacity_status
+from .transcript_review import ReviewError
 from .transcript_review_router import authenticated_actor
 from .roles import user_roles
 
@@ -32,6 +33,71 @@ def create_media_batch_router(root, store_factory=Store):
         return actor
 
     router = APIRouter(prefix="/media_batches", dependencies=[Depends(editor)])
+
+    @router.get('/sermons')
+    def sermons(response: Response, search: str = '', series: str = '', state: str = 'actionable',
+                offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), snapshot_revision: str | None = None):
+        from backend.pipeline.media_batch.sermon_monitor import snapshot
+        response.headers['Cache-Control'] = 'private, no-store'
+        try:
+            return snapshot(store_factory(), root, search=search, series=series, status=state,
+                            offset=offset, limit=limit, expected=snapshot_revision)
+        except Conflict as error:
+            raise HTTPException(409, str(error)) from error
+        except Exception as error:
+            import logging
+            logging.getLogger(__name__).exception('Sermon pipeline projection unavailable')
+            raise HTTPException(503, '管線索引尚未建立或暫時不可讀，請明確同步目錄') from error
+
+    @router.post('/sermons/sync')
+    def sync_sermons():
+        from backend.pipeline.media_batch.sermon_monitor import refresh, settings
+        try:
+            return refresh(store_factory(), root, settings(root))
+        except (ValueError, OSError, Conflict) as error:
+            raise HTTPException(409, str(error)) from error
+
+    class PlanRequest(BaseModel):
+        items: list[str] = Field(min_length=1, max_length=20)
+        budget_usd: float = Field(gt=0, le=1000)
+        max_calls: int = Field(gt=0, le=10000)
+        operation_id: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9_-]+$')
+
+    @router.post('/sermons/plan')
+    def plan_sermons(body: PlanRequest, actor: str = Depends(editor)):
+        from backend.pipeline.media_batch.sermon_monitor import settings
+        from backend.pipeline.media_batch.gemini_plan import create
+        from backend.pipeline.media_batch.runtime import file_sha
+        try:
+            cfg=settings(root);store=store_factory();jobs=[]
+            with store.connection() as c:
+                rows=list(c.execute('SELECT item,value FROM media_ingest.sermon_index WHERE root=%s AND item=ANY(%s)',
+                                    (str(Path(root).resolve()),body.items)))
+            if len(rows)!=len(set(body.items)):raise ValueError('Selected sermons are missing from the index')
+            for row in rows:
+                sources=row['value']['sources']
+                if len(sources)!=1:raise ValueError('來源缺失或多版本待核實：'+row['item'])
+                path=Path(sources[0]['path'])
+                jobs.append({'item':row['item'],'source':str(path),'source_sha256':file_sha(path)})
+            cfg.update(budget_usd=body.budget_usd,max_calls=body.max_calls,operation_id=body.operation_id)
+            batch=create(store,{'schema_version':'gemini-media-jobs.v1','jobs':jobs},cfg,actor)
+            return {'batch':batch,'items':body.items,'budget_usd':body.budget_usd,'max_calls':body.max_calls,
+                    'status':'planned','message':'計畫已建立，尚未啟動模型或安裝媒體'}
+        except ReviewError as error:
+            raise HTTPException(error.status,error.message) from error
+        except (ValueError, OSError, Conflict) as error:
+            raise HTTPException(409, str(error)) from error
+
+    @router.post('/sermons/start/{batch}')
+    def start_sermons(batch: str, actor: str = Depends(editor)):
+        from backend.pipeline.media_batch.service import start
+        store=store_factory()
+        with store.connection() as c:
+            row=c.execute('SELECT config FROM media_ingest.batches WHERE id=%s',(batch,)).fetchone()
+        if not row:raise HTTPException(404,'找不到計畫')
+        if row['config'].get('actor')!=actor:raise HTTPException(403,'請由此計畫建立者啟動')
+        try:return start(store,batch)
+        except (ValueError, Conflict) as error:raise HTTPException(409,str(error)) from error
 
     def timing_artifacts(batch,recording):
         from backend.pipeline.slide_change_pilot import read_json,file_sha

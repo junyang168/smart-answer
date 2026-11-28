@@ -71,4 +71,20 @@ INSERT INTO media_ingest.batch_files(batch,path,sha,bytes,recording,state,reason
  FROM media_ingest.batches b CROSS JOIN LATERAL jsonb_array_elements(COALESCE(b.config->'scope','[]')) f
  JOIN media_ingest.recordings r ON r.id=f->>'recording'
  LEFT JOIN media_ingest.assets a ON a.sha=f->>'sha'
+ WHERE f ? 'path' AND f ? 'sha'
  ON CONFLICT DO NOTHING;
+
+-- Unified pipeline projections contain references and receipts, never model text.
+CREATE TABLE IF NOT EXISTS media_ingest.sermon_index (
+ root text NOT NULL, item text NOT NULL, value jsonb NOT NULL,
+ generation text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(root,item)
+);
+CREATE TABLE IF NOT EXISTS media_ingest.pipeline_heads (
+ root text NOT NULL, item text NOT NULL, revision bigint NOT NULL DEFAULT 1,
+ value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(root,item)
+);
+CREATE TABLE IF NOT EXISTS media_ingest.pipeline_retirements (
+ engine text PRIMARY KEY, reason text NOT NULL, retired_at timestamptz NOT NULL DEFAULT now()
+);

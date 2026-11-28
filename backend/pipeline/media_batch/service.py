@@ -18,6 +18,8 @@ def label(batch):
 def start(store, batch, workers=4):
     if not 1 <= workers <= 4:
         raise ValueError("workers must be 1..4")
+    from .gemini_plan import accept
+    accept(store, batch)
     name = label(batch)
     with store.connection() as c:
         if not c.execute(

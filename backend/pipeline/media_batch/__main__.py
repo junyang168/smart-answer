@@ -24,7 +24,12 @@ def main():
     for name in ("report", "assembly", "source-root", "config"):
         rough.add_argument("--" + name, type=Path, required=True)
     plan = sub.add_parser("plan")
-    plan.add_argument("--folder", type=Path, required=True)
+    inputs = plan.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--folder", type=Path)
+    inputs.add_argument("--manifest", type=Path)
+    plan.add_argument("--actor", required=True)
+    plan.add_argument("--pipeline", choices=["gemini-transcript-v1"], default="gemini-transcript-v1")
+    plan.add_argument("--speaker-name", default="王守仁（王教授）")
     plan.add_argument("--title")
     plan.add_argument("--editor-origin", help="Optional editor host for an isolated review destination")
     plan.add_argument('--playback-timing-policy',choices=['complete-paragraph-playback.v1','strict'],default='complete-paragraph-playback.v1',help='Complete paragraph playback with brief context warnings; strict preserves exact-boundary review')
@@ -132,6 +137,23 @@ def main():
         print(index_existing(store, args.review_root, args.media_root))
         return
     if args.command == "plan":
+        from .gemini_plan import create
+        cfg = {k: str(v) if isinstance(v, Path) else v for k,v in vars(args).items()
+               if k not in ('command','manifest','folder','actor')}
+        cfg['aligner_python'] = str(args.aligner_python.absolute())
+        if args.manifest:
+            manifest = json.loads(args.manifest.read_text())
+        else:
+            from .planner import EXTENSIONS
+            from .runtime import file_sha
+            # Folder mode uses exact registered filenames only; no inferred sermon identity.
+            manifest = {'schema_version':'gemini-media-jobs.v1','jobs':[
+                {'item':f.stem,'source':str(f.resolve()),'source_sha256':file_sha(f)}
+                for f in sorted(args.folder.rglob('*')) if f.is_file() and not f.is_symlink()
+                and f.suffix.lower() in EXTENSIONS]}
+        batch = create(store,manifest,cfg,args.actor)
+        print(json.dumps({'batch':batch,'progress_href':'/admin/media-batches/'+batch},ensure_ascii=False))
+        return
         from .planner import plan as create
 
         if args.budget_usd <= 0 or args.max_calls <= 0:

@@ -180,6 +180,9 @@ def _run_task(store, batch, task, resources):
             else "pending" if result.get("waiting") else "needs_resolution" if result.get('needs_resolution') else "failed"
         )
     )
+    if result["ok"] and p["config"].get("pipeline") == "gemini-transcript-v1":
+        from .sermon_monitor import reconcile_item
+        reconcile_item(store, p["config"]["review_root"], p["item"])
     store.update(
         task, state=state, result=result.get("result"), error=result.get("error")
     )
@@ -189,6 +192,8 @@ def _run_task(store, batch, task, resources):
 def run(store, batch, workers=4, drain=False):
     if not 1 <= workers <= 4:
         raise ValueError("workers must be 1..4")
+    from .gemini_plan import accept
+    accept(store, batch)
     worker_id = uuid.uuid4().hex
     # PG advisory session lock prevents duplicate controllers for this batch, without locking other batches.
     with store.connection() as connection:
