@@ -286,7 +286,7 @@ def test_no_repeat_readers_when_enough_available_across_three_sundays(agent):
         agent.repository.workers[name]=SundayWorker(name=name,preferredRoles=['讀經經文'])
     days=['2026-11-08','2026-11-15','2026-11-22']
     for day in days:
-        agent.repository.services[day]=SundayServiceEntry(date=day,scripture=['gen-1-1','mat-20-28'])
+        agent.repository.services[day]=SundayServiceEntry(date=day,scripture=['gen-1-1-8','mat-20-28'])
     assign_readers(agent.repository,agent.store,days)
     groups=[set(agent.repository.services[day].scripture_readers) for day in days]
     assert groups[0].isdisjoint(groups[1]) and groups[1].isdisjoint(groups[2])
@@ -375,6 +375,27 @@ def test_video_slots_ready_without_catalog_or_lyrics_and_url_changes_version(rea
     entry.response_hymn_youtube_url=None
     ppt.tick(now)
     assert len(calls)==2 and agent.store.get('ppt_readiness')['missing']
+
+
+def test_short_reading_reduces_existing_automatic_assignments_to_one_reader(agent):
+    day = '2026-11-29'
+    scripture = ['heb-12-28', 'luk-1-74-75', 'rev-22-3']
+    previous_assignment = ['甲', '乙', '丙']
+    for name in previous_assignment:
+        agent.repository.workers[name] = SundayWorker(name=name, preferredRoles=['讀經經文'])
+    agent.repository.services[day] = SundayServiceEntry(
+        date=day, scripture=scripture, scriptureReaders=previous_assignment, presider='甲',
+    )
+    key = 'auto_scriptureReaders:' + day
+    agent.store.put(key, {'after': previous_assignment, 'scripture': scripture, 'status': 'applied'})
+
+    assign_readers(agent.repository, agent.store, [day])
+
+    saved = agent.repository.services[day]
+    assert saved.scripture == scripture
+    assert len(saved.scripture_readers) == 1
+    assert saved.scripture_readers[0] in ['乙', '丙']
+    assert agent.store.get(key)['after'] == saved.scripture_readers
 
 
 def test_long_passage_repairs_legacy_single_reader_with_bounded_reader_groups(agent):

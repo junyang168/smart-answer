@@ -22,6 +22,45 @@ def _readers_by_slide(sections, readers):
     return [(d["label"], d["reader"]) for d in data], [s["reader"] for s in summary], assigned
 
 
+def test_one_reader_can_cover_four_verses_from_three_books():
+    from backend.sunday_assistant.role_assignment import required_reader_count
+
+    refs = ["heb-12-28", "luk-1-74-75", "rev-22-3"]
+    sections = [
+        _section("希伯來書", 12, 28, 28),
+        _section("路加福音", 1, 74, 75),
+        _section("啟示錄", 22, 3, 3),
+    ]
+    assert required_reader_count(refs) == 1
+    slides, summary, assigned = _readers_by_slide(sections, ["甲"])
+    assert slides == [("希伯來書 12:28", "甲"), ("路加福音 1:74-75", "甲"), ("啟示錄 22:3", "甲")]
+    assert summary == ["甲", "甲", "甲"]
+    assert assigned == ["甲"]
+
+
+@pytest.mark.parametrize("refs, expected", [
+    (["heb-12-28", "luk-1-74-77"], 1),
+    (["heb-12-28", "luk-1-74-78"], 2),
+    (["luk-1-74-78"], 1),
+    (["luk-1-74-79"], 2),
+])
+def test_single_reader_cutoff_at_five_verses(refs, expected):
+    from backend.api.scripture import parse_reference
+    from backend.sunday_assistant.role_assignment import required_reader_count
+
+    assert required_reader_count(refs) == expected
+    sections = []
+    for ref in refs:
+        info = parse_reference(ref)
+        sections.append(_section(info["osis_book"], info["chapter"], info["start"], info["end"]))
+
+    _, _, assigned = _readers_by_slide(sections, ["甲", "乙"][:expected])
+    assert len(assigned) == expected
+    if expected == 2:
+        with pytest.raises(ValueError, match="至少需要 2 位"):
+            _readers_by_slide(sections, ["甲"])
+
+
 def test_nine_verse_passage_requires_two_readers_even_if_text_is_short():
     with pytest.raises(ValueError,match='至少需要 4 位'):
         _readers_by_slide(OCT_4,['甲','乙','丙'])

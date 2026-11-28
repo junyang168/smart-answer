@@ -6,12 +6,12 @@ from backend.sunday_data_lock import sunday_data_lock
 
 def required_reader_count(references):
     from backend.api.scripture import parse_reference
-    from backend.sunday_scripture_layout import reader_counts
+    from backend.sunday_scripture_layout import minimum_readers
     lengths=[]
     for reference in references:
         info=parse_reference(reference)
         lengths.append(info['end']-info['start']+1)
-    return sum(reader_counts(lengths))
+    return minimum_readers(lengths)
 
 
 def assign_readers(repository, store, days):
