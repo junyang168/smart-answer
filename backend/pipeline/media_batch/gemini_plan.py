@@ -23,6 +23,7 @@ def implementation():
            'media_batch/service.py','media_batch/runtime_snapshot.py',
            'media_batch/runtime_storage.py',
            'media_call_mirror.py',
+           'media_batch/timeout_recovery.py','media_batch/credit_recovery.py',
            '../api/sc_api/transcript_review.py','slide_visual_evidence.py','slide_model_response.py']
     return key({name:file_sha(code/name) for name in files})
 

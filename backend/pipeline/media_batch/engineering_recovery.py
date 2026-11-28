@@ -48,8 +48,13 @@ def reserve(store, batch, task_id, *, defect, validation, patch):
         task = c.execute('SELECT t.* FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.id=%s', (batch, task_id)).fetchone()
         if not task or task['state'] != 'failed':
             raise Conflict('A saved failed task is required')
-        if c.execute("SELECT 1 FROM media_ingest.calls WHERE batch=%s AND state<>'complete' LIMIT 1", (batch,)).fetchone():
-            raise Conflict('Unresolved calls prevent engineering recovery')
+        unresolved=c.execute("SELECT * FROM media_ingest.calls WHERE batch=%s AND state<>'complete'", (batch,)).fetchall()
+        for call in unresolved:
+            try:
+                from .timeout_recovery import verify_coverage
+                verify_coverage(store,call,task['payload'])
+            except (ValueError,KeyError,OSError):
+                raise Conflict('Unresolved calls prevent engineering recovery') from None
         payload = task['payload']; out = Path(payload['out'])
         if lock_held(out / 'leases' / task_id):
             raise Conflict('Task worker is still live')

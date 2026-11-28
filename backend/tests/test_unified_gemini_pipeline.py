@@ -340,3 +340,41 @@ def test_ssd_reattachment_is_audited_without_changing_original_configuration(set
     source.write_bytes(b'changed recording')
     with pytest.raises(Conflict,match='Source SHA'):
         runtime_storage.reattach(store,batch,'another-reattach',after['revision'],'source must still match')
+
+
+def test_authorized_timeout_coverage_keeps_original_unknown_and_original_budget(setup,monkeypatch):
+    from backend.pipeline.media_batch.timeout_recovery import effective,reconcile,verify_coverage
+    from backend.pipeline.media_batch.store import key
+    from backend.pipeline.media_batch.engineering_recovery import reserve
+    from backend.pipeline.media_batch import gemini_plan
+    store,root,item,actor,source,cfg,manifest=setup
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    task=store.claim(batch,'interrupted');out=Path(task['payload']['out']);out.mkdir(parents=True)
+    request={'model':'fixture','source_sha256':file_sha(source)}
+    original=out/'calls'/object_sha(request);atomic(original/'request.json',request)
+    atomic(original/'state.json',{'status':'sent_outcome_unknown','reserved_usd':.08})
+    parent=key([task['id'],str(out.resolve()),request]);store.reserve(batch,task['id'],parent,'fixture',.08)
+    atomic(original/'timeout-recovery.json',{'schema_version':'media-timeout-recovery.v1','batch':batch,'task':task['id'],
+        'max_attempts':1,'original_request_sha256':object_sha(request),'unknown_state_sha256':file_sha(original/'state.json')})
+    monkeypatch.setenv('MEDIA_BATCH_CONTEXT',json.dumps({'batch':batch,'task':task['id']}))
+    retry=effective(out,request);target=out/'calls'/object_sha(retry);atomic(target/'request.json',retry)
+    atomic(target/'response.json',{'status':'completed','answer':'saved'})
+    state={'status':'complete','response_sha256':file_sha(target/'response.json'),'reserved_usd':.08}
+    atomic(target/'state.json',state)
+    child=key([task['id'],str(out.resolve()),retry]);store.reserve(batch,task['id'],child,'fixture',.08);store.call_complete(child,state)
+    store.update(task,state='unknown_outcome',error='SSD disconnected')
+    revision=store.control(batch,'pause-for-reconcile',1,'pause')
+    result=reconcile(store,batch,task['id'],out,request,'reconcile-approved-one-attempt',revision)
+    assert result['model_calls']==0 and result['proof']['original_unknown_preserved']
+    with store.connection() as c:
+        header=c.execute('select * from media_ingest.batches where id=%s',(batch,)).fetchone()
+        parentrow=c.execute('select * from media_ingest.calls where id=%s',(parent,)).fetchone()
+    assert parentrow['state']=='unknown' and header['calls']==2
+    assert header['config']['budget_usd']==10 and header['config']['max_calls']==40
+    verify_coverage(store,parentrow,task['payload'])
+    monkeypatch.setattr(gemini_plan,'implementation',lambda:'fixed-local-recovery')
+    reserve(store,batch,task['id'],defect='local SSD recovery fix',validation='test passed',patch='exact fixed code')
+    store.control(batch,'resume-covered-only',header['revision'],'retry')
+    with store.connection() as c:assert c.execute('select state from media_ingest.tasks where id=%s',(task['id'],)).fetchone()['state']=='pending'
+    atomic(target/'response.json',{'changed':'answer'})
+    with pytest.raises(ValueError,match='proof drift'):verify_coverage(store,parentrow,task['payload'])

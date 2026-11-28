@@ -158,11 +158,12 @@ class Store:
                 from .retirement import require_supported
                 require_supported(b['config'])
             if action == "retry":
+                from .timeout_recovery import uncovered_sql
                 # Unknown model dispatches require reconciliation; a UI click cannot clear them.
                 c.execute(
-                    """UPDATE media_ingest.tasks SET state='pending',error=NULL WHERE state IN ('failed','interrupted')
+                    f"""UPDATE media_ingest.tasks SET state='pending',error=NULL WHERE state IN ('failed','interrupted')
                   AND id IN (SELECT task FROM media_ingest.batch_tasks WHERE batch=%s)
-                  AND NOT EXISTS (SELECT 1 FROM media_ingest.calls m WHERE m.task=tasks.id AND m.state='unknown')""",
+                  AND NOT EXISTS (SELECT 1 FROM media_ingest.calls m WHERE m.task=tasks.id AND {uncovered_sql('m')})""",
                     (batch,),
                 )
             desired = "paused" if action == "pause" else "running"
