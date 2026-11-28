@@ -3,7 +3,7 @@
 > **讀者**：Developer、Solution architect
 > **類型**：規範
 > **狀態**：設計已確認，實作與隔離端到端驗收進行中；未部署，生產舊排程尚未切換
-> **與代碼對齊**：2026-11-27，核對到 `e749b33c` 的入口、串聯、候選、補件、訂閱傳輸及系列監控；本文件仍含待驗收的目標契約
+> **與代碼對齊**：2026-11-28，核對到 `18bfb814` 的入口、串聯、候選、補件、訂閱傳輸、會話初始化恢復及系列監控；本文件仍含待驗收的目標契約
 > **權威範圍**：#886 的入口、階段串聯、批次、播放媒體、Editor 交付及舊管線退役；不重定轉錄模型的內容品質規則
 
 ## 目錄
@@ -30,6 +30,8 @@
 
 ## 2 已確認的現況
 
+下表保留改造前的整合基線；新版接點已實作，實際交付仍須按第 9 節驗收。
+
 | 能力 | 現有實作 | 整合缺口 |
 |---|---|---|
 | 批次、來源與播放媒體 | `media_batch` 的 planner、store、worker、runtime、stages.media | 階段表仍指向舊 `full_video_transcript`；尚無新版階段適配 |
@@ -43,7 +45,7 @@
 
 ## 3 一個計畫接口
 
-保留 `python -m backend.pipeline.media_batch`，擴展 `plan`；`start/status/pause/resume/retry/stop` 沿用現有控制方式。以下是目標接口，尚不能直接執行：
+保留 `python -m backend.pipeline.media_batch`，擴展 `plan`；`start/status/pause/resume/retry/stop` 沿用現有控制方式。以下為已實作的 CLI 形式，路徑與限額須依環境提供：
 
 ```bash
 backend/.venv/bin/python -m backend.pipeline.media_batch plan \
@@ -168,6 +170,8 @@ Editor 可先供人校對，幻燈階段對它取快照；公開發布仍依全�
 階段回執共用 envelope：`schema_version`、`recording`、`item`、`pipeline_release`、`stage`、`input_sha256`、`dependencies`（上游回執 SHA）、`artifacts`（相對路徑／schema／SHA）、`call_ids`、`outcome`。領域產物仍保留原 schema，不讓外層強迫模型抄出這些機械欄位。outcome 的 complete 只證明該階段契約成立；內容待核、時間待核及 fidelity 暫留另列，完成總結按要求的交付逐項計算。
 
 新版的 `transcribe/flash/timing/speakers/repetitions/layout` 可分階段派工，但沿用目前先前輸出計算 input_sha 的契約；新增內部單階段接點，既有 standalone CLI 改委派同一實作。暫停只阻止下一次派工，在途工作安全收尾。觀察者讀進度與真實鎖／租約，不以 metadata 的 processing 或排程 ACTIVE 推斷正在轉錄。
+
+原生訂閱在 `session/new` 明確拒絕、尚未寫 prompt intent，且完整 RPC 日誌可證明沒有發出 prompt 時，允許同一原始 task 在原限額內進行一次工程恢復。回執綁定原 request、拒絕 state 和 RPC 的 SHA；保留原拒絕記錄，以明確子請求接續。子請求若未知或再次失敗，不再套一層恢復。已有有效答案只讀復用，不能把這個分支用於 quota、未知請求或已派出的模型回答。
 
 重送前先查保存 request、response 和調用台帳。已保存且驗證相符的回答離線復用；request 已存在而結果未知，保留占用與預算，不自動新建目錄重送。新版 ASR 的 upload／request／response／delete 分別記錄，清理失敗不得抹掉已保存成功回答或使轉錄重送。這是執行記錄修復，不更動轉錄內容。
 

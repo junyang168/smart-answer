@@ -14,13 +14,15 @@ export const AuthButton = () => {
   if (session) {
     return (
       <div className="flex items-center gap-3">
-        <Image
-          src={session.user?.image || ''}
+        {session.user?.image ? <Image
+          src={session.user.image}
           alt={session.user?.name || 'User Avatar'}
           width={32}
           height={32}
           className="rounded-full"
-        />
+        /> : <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-sm">
+          {(session.user?.name || "U").slice(0, 1)}
+        </span>}
         {/* ✅ 新增：顯示用戶姓名 */}
         <span className="text-sm font-semibold text-gray-700 hidden sm:block">
           {/* 

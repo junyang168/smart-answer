@@ -115,6 +115,7 @@ function Pill({ state }: { state: string }) {
 function Work({ task }: { task: Task }) {
   const p = task.progress;
   const measurable =
+    task.state !== "complete" &&
     typeof p.completed === "number" &&
     typeof p.total === "number" &&
     p.total > 0;
