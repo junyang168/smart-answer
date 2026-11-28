@@ -107,3 +107,43 @@ def test_missing_word_end_preserves_text_and_marks_timing_for_review():
     # Incomplete tail in the overlap remains outside this window's owned range.
     raw['steps'][0]['content'][0]['annotations']=[{'type':'word_info','text':'尾端','start_offset':'183.4s'}]
     assert audio.words(raw,'0',0,180,0,184)==[]
+
+
+def test_fresh_stage_worker_loads_backend_and_root_model_environment(monkeypatch):
+    from backend.pipeline.media_batch.worker import load_model_environment
+    import dotenv
+    paths=[]
+    monkeypatch.setattr(dotenv,'load_dotenv',lambda path:paths.append(path))
+    load_model_environment()
+    assert paths[0]==paths[1].parent/'backend/.env' and paths[1].name=='.env'
+
+
+def test_sol_media_transport_is_subscription_only_and_durable(tmp_path,monkeypatch):
+    import openai
+    from backend.pipeline.slide_pilot_models import VisionReviewer
+    from backend.pipeline.media_model_calls import saved_call
+    from backend.pipeline import codex_subscription_client as transport
+    monkeypatch.setattr(openai,'OpenAI',lambda *a,**k:pytest.fail('API client forbidden'))
+    monkeypatch.setenv('OPENAI_API_KEY','must-not-use-api')
+    calls=[]
+    class Client:
+        def __init__(self,**options):
+            calls.append(options);self.last_usage={'input_tokens':4,'output_tokens':3};self.cli_identity={'model':'gpt-6.1-sol'}
+        def generate_json(self,prompt,content,schema,**kw):
+            assert prompt=='原提示' and content=='原輸入' and schema=={'type':'object'}
+            assert self.call_artifacts==tmp_path/'calls'/request_hash/'subscription'
+            assert self.capture_usage_events
+            return {'o':['原結果']}
+    monkeypatch.setattr(transport,'CodexSubscriptionClient',Client)
+    model=VisionReviewer('openai','原提示',{'type':'object'})
+    model.config['reasoning']={'effort':'medium'}
+    request={'model':model.model,'input':'原輸入','config':model.config}
+    from backend.pipeline.slide_change_pilot import object_sha
+    request_hash=object_sha(request)
+    def invoke():return model.generate([{'role':'user','content':'原輸入'}])
+    raw=saved_call(tmp_path,request,.6,invoke)
+    assert raw['transport']=='codex_subscription' and json.loads(model.text(raw))=={'o':['原結果']}
+    assert saved_call(tmp_path,request,.6,invoke)==raw and len(calls)==1
+    assert calls[0]['model']=='gpt-6.1-sol' and calls[0]['reasoning_effort']=='medium'
+    from backend.pipeline.media_batch.costs import estimate
+    with pytest.raises(ValueError,match='Subscription usage'):estimate(request,raw)

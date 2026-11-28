@@ -1,7 +1,19 @@
 """Source-bound durable model calls shared by media stages."""
 from pathlib import Path
 import time
+from contextvars import ContextVar
+from contextlib import contextmanager
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
+_ARTIFACTS=ContextVar('media_call_artifacts',default=None)
+
+def call_artifacts():
+    return _ARTIFACTS.get()
+
+@contextmanager
+def dispatch_artifacts(folder):
+    token=_ARTIFACTS.set(folder)
+    try:yield
+    finally:_ARTIFACTS.reset(token)
 
 def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
                budget_usd: float = 3.0, admit=lambda: None) -> dict:
@@ -29,7 +41,8 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
     save_json(state_path, state)
     started = time.perf_counter()
     try:
-        result = invoke()
+        with dispatch_artifacts(folder):
+            result = invoke()
     except Exception as error:
         status = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         state.update(http_status=status, error_type=type(error).__name__)

@@ -382,6 +382,7 @@ class ReviewStore:
             files[self.root / "script_review" / f"{item}.json"] = rows
         files.update({
             folder / "pipeline-document-version.json": {
+                "version": result["version"],
                 "script_sha256": context["script_sha256"],
                 "timings_sha256": digest(context.get("paragraph_bindings", {})),
             },

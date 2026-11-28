@@ -88,7 +88,8 @@ class Store:
                   WHERE x.engine=COALESCE(b.config->>'pipeline','legacy-gpt'))
                 AND (COALESCE(b.config->>'pipeline','')<>'gemini-transcript-v1' OR EXISTS (
                   SELECT 1 FROM media_ingest.pipeline_heads h WHERE h.root=b.config->>'review_root'
-                  AND h.item=t.payload->>'item' AND h.value->>'batch'=b.id))
+                  AND h.item=t.payload->>'item' AND (h.value->'task_ids' ? t.id
+                    OR NOT h.value ? 'task_ids' AND h.value->>'batch'=b.id)))
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks d WHERE d.id=ANY(t.dependencies) AND d.state<>'complete')
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks a WHERE a.recording=t.recording AND a.state='running')
               ORDER BY COALESCE((t.payload->>'queue_order')::int,2147483647),t.updated_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1""",

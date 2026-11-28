@@ -54,6 +54,13 @@ def refresh(store,root,cfg):
             'sources':[{'id':key(path),'path':path} for path in paths],
             'manual':manual,'rough':rough,'editor':editor,'published':published,'document_marker':marker,
             'metadata_missing':meta.get('metadata_missing',False),'synced_at':now}
+        value['local_editor']=(Path(root)/'transcript_review'/item/'context.json').is_file()
+        if value['local_editor']:
+            from backend.api.sc_api.transcript_review import ReviewStore,digest
+            review=ReviewStore(Path(root))
+            with review.lock(item):
+                rows,context=review.load(item)
+                value['document_version']=digest(review.document_value(rows,context))
         values.append((root,item,Jsonb(value),generation))
     if (catalog/'config/sermon.json').read_bytes()!=raw or (catalog/'config/sermon_series.json').read_bytes()!=series_raw:
         raise Conflict('Catalog changed during synchronization')
@@ -80,8 +87,9 @@ def state(value,head,tasks):
     if states & {'failed','needs_resolution'}:return 'failed'
     if any(t['state']=='running' and not t['live'] for t in active):return 'unverified'
     if any(t['live'] for t in active):return 'running'
-    if active and all(t['state']=='complete' for t in active):return 'complete'
-    if head.get('desired')=='paused':return 'paused'
+    if active and all(t['state']=='complete' for t in active):
+        return 'candidate_ready' if 'candidate' in head.get('wanted',[]) and 'editor_draft' not in head.get('wanted',[]) else 'complete'
+    if head.get('desired')=='paused' or any(t['desired']=='paused' and t['state']=='pending' for t in active):return 'paused'
     if 'interrupted' in states:return 'interrupted'
     return 'pending'
 
@@ -92,7 +100,8 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
         c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         rows=list(c.execute('SELECT i.*,h.value AS head,h.revision FROM media_ingest.sermon_index i LEFT JOIN media_ingest.pipeline_heads h ON h.root=i.root AND h.item=i.item WHERE i.root=%s ORDER BY i.item',(root,)))
         if not rows:return {'initialized':False,'records':[],'series':[],'counts':{},'total':0,'filtered_total':0,'generated_at':datetime.now(timezone.utc).isoformat()}
-        heads={r['head']['batch'] for r in rows if r['head']}
+        heads={batch for r in rows if r['head'] for batch in
+               [r['head']['batch'],*(v['batch'] for v in r['head'].get('deliveries',{}).values())]}
         jobs=list(c.execute('SELECT t.*,bt.batch,b.desired FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id JOIN media_ingest.batches b ON b.id=bt.batch WHERE bt.batch=ANY(%s)',(list(heads),))) if heads else []
         calls=list(c.execute('SELECT task,state,count(*) AS n FROM media_ingest.calls WHERE batch=ANY(%s) GROUP BY task,state ORDER BY task,state',(list(heads),))) if heads else []
     call_counts={}
@@ -102,17 +111,23 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
     for t in jobs:
         payload=t['payload'];lease=Path(payload['out'])/'leases'/t['id']
         t['live']=t['state']=='running' and lock_held(lease)
-        grouped.setdefault((t['batch'],payload['item']),[]).append(t)
+        grouped.setdefault(payload['item'],[]).append(t)
     records=[];series_map={};counts=Counter();live_count=0
     for row in rows:
-        value=row['value'];head=row['head'];tasks=grouped.get((head['batch'],row['item']),[]) if head else []
-        if head and tasks:head={**head,'desired':tasks[0]['desired']}
+        value=row['value'];head=row['head'];tasks=grouped.get(row['item'],[]) if head else []
+        if head:
+            selected={t['id']:t for t in tasks if t['id'] in head.get('task_ids',[]) or
+                      'task_ids' not in head and t['batch']==head['batch']}
+            tasks=list(selected.values())
+            current=next((t for t in tasks if t['batch']==head['batch']),None)
+            if current:head={**head,'desired':current['desired']}
         current=state(value,head,tasks)
         marker=Path(root)/'transcript_review'/row['item']/'pipeline-document-version.json'
         current_marker=json.loads(marker.read_text()) if marker.exists() else None
+        semantic_marker={k:current_marker.get(k) for k in ('script_sha256','timings_sha256')} if current_marker else None
         if head and current=='complete' and 'editor_draft' in head.get('wanted',[]):
             if 'delivered_document_marker' not in head:current='needs_sync'
-            elif head['delivered_document_marker']!=current_marker:current='needs_resolution'
+            elif head['delivered_document_marker']!=semantic_marker:current='needs_resolution'
         elif head and marker.exists() and value.get('document_marker')!=current_marker:
             # Own current delivery may have committed since explicit inventory refresh.
             # Until incremental reconciliation observes that version do not claim completion.
@@ -124,6 +139,7 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
             summary=series_map.setdefault(g['id'],{**g,'total':0,'pending':0})
             summary['total']+=1;summary['pending']+=current!='complete'
         record={k:value[k] for k in ('item','title','manual','editor','published','synced_at')}
+        record.update(local_editor=value.get('local_editor',False),document_version=(current_marker or {}).get('version') or value.get('document_version'))
         record.update(state=current,groups=memberships,source_count=len(value['sources']),
             asset_id=value['sources'][0]['id'] if len(value['sources'])==1 else None,
             batch=head['batch'] if head else None,head_revision=row['revision'],
@@ -131,6 +147,8 @@ def snapshot(store,root,*,search='',series='',status='actionable',offset=0,limit
             tasks=[{k:t.get(k) for k in ('id','stage','state','live','progress','error','attempt','heartbeat')} for t in tasks])
         for task in record['tasks']:
             task['model_calls']=call_counts.get(task['id'],{})
+        candidate=next((t['result'] for t in tasks if t['stage']=='candidate' and t['state']=='complete'),None)
+        record['candidate_href']=(f'/api/sc_api/media_batches/sermons/{quote(row["item"],safe="")}/candidates/{candidate["candidate_id"]}' if candidate else None)
         if (search and search.casefold() not in (value['title']+' '+row['item']+' '+' '.join(g['name'] for g in memberships)).casefold()
             or series and series not in {g['id'] for g in memberships}
             or status=='actionable' and current=='complete'
@@ -158,6 +176,7 @@ def reconcile_item(store,root,item):
         if not row:return
         value=row['value']
         value.update(document_marker=json.loads(marker.read_text()) if marker.exists() else None,
+            local_editor=(folder/'context.json').is_file(),
             editor=(folder/'context.json').is_file(),
             manual=value['manual'] or (folder/'context.json').is_file(),
             published=value['published'] or (root/'script_published'/f'{item}.json').is_file())
@@ -166,11 +185,13 @@ def reconcile_item(store,root,item):
         head=c.execute('SELECT value FROM media_ingest.pipeline_heads WHERE root=%s AND item=%s FOR UPDATE',
                        (str(root.resolve()),item)).fetchone()
         if head and 'delivered_document_marker' not in head['value']:
-            unfinished=c.execute("SELECT 1 FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.state<>'complete' LIMIT 1",
-                                 (head['value']['batch'],item)).fetchone()
+            ids=head['value'].get('task_ids')
+            unfinished=(c.execute("SELECT 1 FROM media_ingest.tasks WHERE id=ANY(%s) AND state<>'complete' LIMIT 1",(ids,)).fetchone() if ids is not None else
+                c.execute("SELECT 1 FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.state<>'complete' LIMIT 1",(head['value']['batch'],item)).fetchone())
             if not unfinished:
+                editor_batch=head['value'].get('deliveries',{}).get('editor_draft',{}).get('batch',head['value']['batch'])
                 editor=c.execute("SELECT t.result FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.stage='editor' AND t.state='complete'",
-                                 (head['value']['batch'],item)).fetchone()
+                                 (editor_batch,item)).fetchone()
                 if editor and editor['result']:
                     import re
                     from backend.api.sc_api.transcript_review import digest

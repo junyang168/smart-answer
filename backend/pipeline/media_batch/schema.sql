@@ -1,4 +1,9 @@
 CREATE SCHEMA IF NOT EXISTS media_ingest;
+CREATE TABLE IF NOT EXISTS media_ingest.plan_requests (
+ root text NOT NULL, actor text NOT NULL, operation text NOT NULL,
+ request_sha text NOT NULL, response jsonb NOT NULL,
+ PRIMARY KEY(root,actor,operation)
+);
 CREATE TABLE IF NOT EXISTS media_ingest.batches (
  id text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(),
  revision integer NOT NULL DEFAULT 1, desired text NOT NULL DEFAULT 'running',

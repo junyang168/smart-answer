@@ -48,7 +48,18 @@ def execute(stage,payload):
         return {'artifact':str(out/f'{stage}.json'),'sha256':file_sha(out/f'{stage}.json')}
     if stage=='media':
         from .gemini_media import playback
-        return playback(payload)
+        result=playback(payload)
+        if payload.get('expected_version') and payload['wanted']==['playback']:
+            from backend.pipeline.gemini_review import install_playback
+            installed=install_playback(review,item,actor,result,payload['expected_version'],
+                                       'media-'+key([item,payload['expected_version'],result])[:36])
+            atomic(out/'media-install-receipt.json',installed)
+        return result
+    if stage=='candidate':
+        from backend.pipeline.gemini_review import register_only
+        result=register_only(review,item,actor,source,out,read_json(out/'media-receipt.json'))
+        atomic(out/'candidate-receipt.json',result)
+        return result
     if stage=='editor':
         result=initialize(review,item,actor,source,out,read_json(out/'media-receipt.json'),
                           payload['empty'],'gemini-'+key([item,payload['empty'],payload['info']['source_sha']])[:36])
@@ -84,7 +95,7 @@ def execute(stage,payload):
     if stage=='delivery':
         receipts={}
         for want in payload['wanted']:
-            name={'editor_draft':'editor','playback':'media','slides':'slides','rough':'transcribe'}[want]
+            name={'editor_draft':'editor','playback':'media','slides':'slides','rough':'transcribe','candidate':'candidate'}[want]
             path=out/f'{name}-receipt.json' if want!='rough' else out/'transcribe.json'
             receipts[want]={'path':str(path),'sha256':file_sha(path)}
         if 'slides' in payload['wanted'] and read_json(out/'slides-receipt.json').get('held'):

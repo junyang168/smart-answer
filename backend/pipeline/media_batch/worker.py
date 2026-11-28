@@ -18,6 +18,7 @@ from .runtime import atomic, WaitingCapacity
 
 
 def child():
+    load_model_environment()
     ctx = json.loads(os.environ["MEDIA_BATCH_CONTEXT"])
     payload = json.loads(Path(ctx["payload_path"]).read_text())
     from .stages import execute
@@ -47,6 +48,13 @@ def child():
             dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,(SeamCoverageError,TimingReviewRequired)),result=diagnostic),
         )
         sys.exit(1)
+
+
+def load_model_environment():
+    from dotenv import load_dotenv
+    root=Path(__file__).resolve().parents[3]
+    load_dotenv(root/'backend/.env')
+    load_dotenv(root/'.env')
 
 
 def run_task(store, batch, task):

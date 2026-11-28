@@ -51,6 +51,15 @@ def playback(payload):
         return result
     version=key([info['source_sha'],'h264-aac-720p-crf23-v1'])[:24]
     root=Path(cfg['media_root'])/'playback'/payload['item']/version
+    shared=root/'verified-playback.json'
+    if shared.exists():
+        saved=json.loads(shared.read_text())
+        target=root/(payload['item']+('.mp4' if info['video'] else '.mp3'))
+        if (saved['path']!=str(target.resolve()) or saved['source_sha256']!=info['source_sha']
+                or file_sha(target)!=saved['sha256']):raise ValueError('Versioned playback proof drift')
+        atomic(receipt,saved)
+        return saved
     # Reuse the established encode, decode, anchor, disk and no-clobber protocol.
     result=media({**payload,'config':{**cfg,'media_root':str(root)}})
+    atomic(shared,result)
     return result

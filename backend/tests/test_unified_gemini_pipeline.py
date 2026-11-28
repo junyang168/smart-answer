@@ -195,3 +195,90 @@ def test_recovery_chain_is_bounded_and_preserves_prior_receipts(setup,monkeypatc
         reserve(store,batch,task['id'],defect='fourth',validation='test',patch='diff')
     (out/'engineering-recovery.json').write_text('{}')
     with pytest.raises(ValueError,match='history changed'):verify(task['payload'],'fixed-2')
+
+
+def test_candidate_only_preserves_existing_text_and_never_initializes_editor(setup,monkeypatch):
+    from backend.pipeline import transcript_gemini_proofreading as flow
+    monkeypatch.setattr(flow,'run',fake_flow)
+    store,root,item,actor,source,cfg,manifest=setup
+    original=[{'index':'1','text':'人工原稿。'}]
+    atomic(root/'script_patched'/f'{item}.json',original)
+    manifest['jobs'][0].update(deliverables=['candidate','playback'],adoption='register_candidate')
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    while task:=store.claim(batch,'test-worker'):
+        store.update(task,state='complete',result=execute(task['stage'],task['payload']))
+    assert json.loads((root/'script_patched'/f'{item}.json').read_text())==original
+    assert not (root/'transcript_review'/item/'context.json').exists()
+    candidates=list((root/'gemini_transcript_candidates'/item).glob('*.json'))
+    assert len(candidates)==1
+    assert not ReviewStore(root).candidate_path(item).exists()
+    with store.connection() as c:
+        stages=[r['stage'] for r in c.execute('select stage from media_ingest.tasks')]
+    assert 'candidate' in stages and 'editor' not in stages and 'slides' not in stages
+    wrong=json.loads(json.dumps(manifest));wrong['jobs'][0]['adoption']='initialize_empty_draft'
+    with pytest.raises(ValueError,match='contradicts'):create(store,wrong,cfg,actor)
+
+
+def test_failed_slides_supplement_keeps_completed_transcript_and_other_requirements(setup,monkeypatch):
+    from backend.pipeline import transcript_gemini_proofreading as flow
+    from backend.pipeline.media_batch.sermon_monitor import refresh,snapshot,reconcile_item
+    monkeypatch.setattr(flow,'run',fake_flow)
+    store,root,item,actor,source,cfg,manifest=setup
+    atomic(root/'config/sermon_series.json',[{'id':'series','sermons':[item]}]);refresh(store,root,cfg)
+    first=create(store,manifest,cfg,actor);accept(store,first)
+    while task:=store.claim(first,'first'):
+        store.update(task,state='complete',result=execute(task['stage'],task['payload']))
+    reconcile_item(store,root,item)
+    with store.connection() as c:
+        c.execute("UPDATE media_ingest.tasks SET state='failed',error='slide failure' WHERE stage='slides'")
+        before=c.execute("SELECT id,result,attempt FROM media_ingest.tasks WHERE stage='transcribe'").fetchone()
+    supplement=json.loads(json.dumps(manifest));supplement['jobs'][0]['deliverables']=['slides']
+    second=create(store,supplement,{**cfg,'operation_id':'supplement'},actor);accept(store,second)
+    page=snapshot(store,root,status='all')
+    assert page['records'][0]['state']=='pending'
+    assert any(t['id']==before['id'] and t['state']=='complete' for t in page['records'][0]['tasks'])
+    monkeypatch.setattr(flow,'run',lambda *a,**k:pytest.fail('supplement must not retranscribe'))
+    while task:=store.claim(second,'supplement'):
+        store.update(task,state='complete',result=execute(task['stage'],task['payload']))
+    reconcile_item(store,root,item)
+    assert snapshot(store,root,status='all')['records'][0]['state']=='complete'
+    with store.connection() as c:
+        after=c.execute("SELECT id,result,attempt FROM media_ingest.tasks WHERE stage='transcribe'").fetchone()
+    assert after==before
+
+
+def test_playback_only_requires_version_and_does_not_change_editor_text(setup,monkeypatch):
+    from backend.pipeline import transcript_gemini_proofreading as flow
+    monkeypatch.setattr(flow,'run',fake_flow)
+    store,root,item,actor,source,cfg,manifest=setup
+    atomic(root/'config/sermon.json',[{'item':item,'title':'講道','status':'processing',
+                                     'assigned_to':actor,'assignment_epoch':1}])
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    while task:=store.claim(batch,'first'):
+        store.update(task,state='complete',result=execute(task['stage'],task['payload']))
+    review=ReviewStore(root);rows,ctx=review.load(item)
+    only=json.loads(json.dumps(manifest));only['jobs'][0]['deliverables']=['playback']
+    with pytest.raises(Conflict,match='version'):create(store,only,cfg,actor)
+    only['jobs'][0]['expected_version']=digest(review.document_value(rows,ctx))
+    second=create(store,only,{**cfg,'operation_id':'media-supplement'},actor);accept(store,second)
+    monkeypatch.setattr(flow,'run',lambda *a,**k:pytest.fail('no transcription'))
+    while task:=store.claim(second,'supplement'):
+        store.update(task,state='complete',result=execute(task['stage'],task['payload']))
+    assert review.load(item)[0]==rows
+    assert review.load(item)[1]['revision']==ctx['revision']+1
+
+
+def test_asr_coverage_gap_is_withheld_in_editor_without_changing_text(setup):
+    store,root,item,actor,source,cfg,manifest=setup
+    review=ReviewStore(root);expected=empty_snapshot(review,item,actor)
+    out=Path(cfg['artifact_root']);fake_flow(None,source,out)
+    layout=json.loads((out/'layout.json').read_text())['value']
+    layout['coverage']=[{'start':0,'end':3,'word_count':0,'coverage_review':True}]
+    atomic(out/'layout.json',{'value':layout,'output_sha256':object_sha(layout)})
+    playback={'path':str(source),'source_sha256':file_sha(source),'sha256':file_sha(source),
+              'mime':'audio/mpeg','duration':3}
+    initialize(review,item,actor,source,out,playback,expected,'coverage-gap-import')
+    rows,ctx=review.load(item)
+    assert rows[0]['text']=='原文~~重複~~。'
+    assert ctx['timing_quality']['status']=='editor_draft_only'
+    assert ctx['timing_quality']['source_holds']['1']['reason']=='asr_coverage_unverified'

@@ -10,6 +10,44 @@ from backend.pipeline.slide_change_pilot import file_sha, object_sha
 SCHEMA = 'gemini-editor-candidate.v1'
 
 
+def register_only(store,item,actor,source,out,playback):
+    """Versioned side candidate; never occupies the legacy adoption pointer."""
+    record=candidate(source,out,playback)
+    with store.lock(item):
+        store.require(actor,item)
+        _,meta=store.meta(item)
+        if not store.permissions(actor).intersection({'write_owned_item','write_any_item'}):
+            raise ReviewError(403,'沒有登記候選的權限')
+        if meta.get('assigned_to') and meta['assigned_to']!=actor:
+            raise ReviewError(403,'講道已由其他人認領')
+        identity=digest(record)
+        path=store.root/'gemini_transcript_candidates'/item/f'{identity}.json'
+        if path.exists() and read(path)!=record:raise ReviewError(409,'候選版本不符')
+        if not path.exists():atomic(path,record)
+        return {'candidate_id':identity,'candidate_sha256':file_sha(path),
+                'source_sha256':record['source_sha256'],'adopted':False}
+
+
+def install_playback(store,item,actor,playback,expected,operation_id):
+    """Supplement an Editor's playback mapping without changing its text."""
+    request={'playback':playback,'expected_version':expected}
+    with store.lock(item):
+        store.require(actor,item)
+        prior=store.receipt(item,operation_id,actor,request)
+        if prior:return prior
+        rows,context=store.load(item)
+        _,meta=store.meta(item)
+        store.require(actor,item,write=True,epoch=meta.get('assignment_epoch'))
+        store.version(rows,context,expected)
+        if context['source_video_sha256']!=playback['source_sha256']:
+            raise ReviewError(409,'播放媒體與既有稿件來源不同')
+        name='playback.mp4' if playback['mime']=='video/mp4' else 'playback.mp3'
+        preserve_media(Path(playback['path']),store.folder(item)/name,playback['sha256'])
+        context={**context,'playback_media':{'file':name,'sha256':playback['sha256'],
+                 'source_sha256':playback['source_sha256'],'receipt_sha256':digest(playback)}}
+        return store.commit(item,actor,operation_id,request,rows,context,'playback_media')
+
+
 def empty_snapshot(store, item, actor):
     store.folder(item)
     _, meta = store.meta(item)
@@ -113,6 +151,11 @@ def initialize(store,item,actor,source,out,playback,expected,operation_id):
             for p in paragraphs:
                 if p['start'] < omission['end'] and omission['start'] < p['end']:
                     holds[str(p['index'])]={'reason':'possible_omission','evidence':omission}
+        for interval in record['layout'].get('coverage',[]):
+            if not interval.get('coverage_review'):continue
+            for p in paragraphs:
+                if p['start'] < interval['end'] and interval['start'] < p['end']:
+                    holds[str(p['index'])]={'reason':'asr_coverage_unverified','evidence':interval}
         for key in holds:states[key]['status']='withheld'
         quality={'policy':'gemini-paragraph-start.v1',
                  'status':'qualified' if all(v['status']=='qualified' for v in states.values()) else 'editor_draft_only',

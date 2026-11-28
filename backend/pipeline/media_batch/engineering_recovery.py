@@ -48,7 +48,9 @@ def reserve(store, batch, task_id, *, defect, validation, patch):
         if lock_held(out / 'leases' / task_id):
             raise Conflict('Task worker is still live')
         # Bind the original saved request/answer tree, including empty replies.
-        files = sorted(set(out.glob('asr-*.request.json')) | set(out.glob('asr-*.response.json')))
+        files = sorted(set(out.rglob('*.request.json')) | set(out.rglob('*.response.json')) |
+                       set(out.glob('calls/*/request.json')) | set(out.glob('calls/*/response.json')) |
+                       {p for p in (out/'run.json',out/'transcribe.json',out/'flash.json') if p.exists()})
         if not files:
             raise Conflict('Saved source requests and answers required')
         previous=receipts(out)

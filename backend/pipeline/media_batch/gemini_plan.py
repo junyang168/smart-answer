@@ -19,6 +19,7 @@ def implementation():
            'slide_pilot_models.py','editor_slide_runner.py','slide_editor_alignment.py',
            'media_batch/gemini_plan.py','media_batch/gemini_stages.py','media_batch/gemini_media.py',
            'media_batch/runtime.py','media_batch/worker.py','media_batch/store.py','media_batch/engineering_recovery.py',
+           'media_batch/costs.py','codex_subscription_client.py','subscription_process.py','media_flash_subscription.py','agy_subscription_client.py',
            '../api/sc_api/transcript_review.py','slide_visual_evidence.py','slide_model_response.py']
     return key({name:file_sha(code/name) for name in files})
 
@@ -49,15 +50,29 @@ def create(store, manifest, config, actor):
         if video and abs(float(pr['format'].get('start_time',0)))>.001:
             raise ValueError('Nonzero video origin requires a verified mapping')
         wanted=job.get('deliverables',['editor_draft','playback','slides'])
-        if not wanted or set(wanted)-{'rough','editor_draft','playback','slides'}:
+        if not wanted or set(wanted)-{'rough','editor_draft','playback','slides','candidate'}:
             raise ValueError('Unsupported deliverables')
+        if len(wanted)!=len(set(wanted)):raise ValueError('Duplicate deliverables')
+        if not set(wanted)&{'rough','editor_draft','candidate'} and len(wanted)>1:
+            raise ValueError('Plan existing-Editor supplements one deliverable at a time')
+        adoption=job.get('adoption','initialize_empty_draft' if 'editor_draft' in wanted else 'register_candidate' if 'candidate' in wanted else 'none')
+        expected_adoption='initialize_empty_draft' if 'editor_draft' in wanted else 'register_candidate' if 'candidate' in wanted else 'none'
+        if adoption!=expected_adoption:raise ValueError('Adoption mode contradicts requested deliverables')
+        if 'candidate' in wanted and set(wanted)!={'candidate','playback'}:
+            raise ValueError('Candidate registration requires playback and cannot promise Editor/slides')
         if 'rough' in wanted and len(wanted)>1:raise ValueError('Rough-only cannot promise Editor delivery')
         if 'editor_draft' in wanted and 'playback' not in wanted:raise ValueError('Editor requires verified playback')
         _,meta=review.meta(item)
         with review.lock(item):
+            review.require(actor,item)
+            if not review.permissions(actor).intersection({'write_owned_item','write_any_item'}):
+                raise PermissionError('Pipeline actor needs write permission')
+            if meta.get('assigned_to') and meta['assigned_to']!=actor:
+                raise PermissionError('Item belongs to another actor')
             empty=empty_snapshot(review,item,actor) if 'editor_draft' in wanted else None
             expected_version=None
-            if 'slides' in wanted and 'editor_draft' not in wanted and video:
+            if 'editor_draft' not in wanted and ('slides' in wanted and video or
+                wanted==['playback'] and (review.folder(item)/'context.json').exists()):
                 review.require(actor,item,write=True,epoch=meta.get('assignment_epoch'))
                 rows,ctx=review.load(item);expected_version=digest(review.document_value(rows,ctx))
                 if job.get('expected_version')!=expected_version:raise Conflict('Expected Editor version required')
@@ -73,6 +88,12 @@ def create(store, manifest, config, actor):
         binding=key([PIPELINE,cfg['implementation'],cfg.get('speaker_name'),cfg['models'],cfg['aligner_python'],item,sha,wanted,empty,expected_version,cfg['review_root'],cfg['media_root']])
         prepared.append(dict(item=item,info=info,binding=binding,wanted=wanted,empty=empty,
                              expected_version=expected_version,recording='R-'+key([item,sha])[:24]))
+    with store.connection() as c:
+        for entry in prepared:
+            known=c.execute('SELECT id,source_sha FROM media_ingest.recordings WHERE item=%s',(entry['item'],)).fetchone()
+            if known:
+                if known['source_sha']!=entry['info']['source_sha']:raise Conflict('Existing recording source differs; explicit source reconciliation required')
+                entry['recording']=known['id']
     cfg['scope']=prepared
     batch=store.batch(cfg)
     with store.connection() as c:
@@ -91,7 +112,7 @@ def create(store, manifest, config, actor):
             payload=dict(recording=rid,item=entry['item'],info=info,out=str(out),config=cfg,
                          wanted=entry['wanted'],empty=entry['empty'],expected_version=entry['expected_version'])
             ids={}
-            if 'editor_draft' in entry['wanted'] or 'rough' in entry['wanted']:
+            if set(entry['wanted']) & {'editor_draft','rough','candidate'}:
                 phases=STAGES[:2] if 'rough' in entry['wanted'] else STAGES[:7]
                 for stage in phases:
                     deps=[] if stage=='audio' else [ids[phases[phases.index(stage)-1]]]
@@ -100,6 +121,8 @@ def create(store, manifest, config, actor):
                 ids['media']=store.task(c,batch,rid,'media','all',key([entry['binding'],'media']),payload)
             if 'editor_draft' in entry['wanted']:
                 ids['editor']=store.task(c,batch,rid,'editor','all',key([entry['binding'],'editor']),payload,[ids['layout'],ids['media']])
+            if 'candidate' in entry['wanted']:
+                ids['candidate']=store.task(c,batch,rid,'candidate','all',key([entry['binding'],'candidate']),payload,[ids['layout'],ids['media']])
             if 'slides' in entry['wanted']:
                 ids['slides']=store.task(c,batch,rid,'slides','all',key([entry['binding'],'slides']),payload,[ids['editor']] if 'editor' in ids else [])
             store.task(c,batch,rid,'delivery','all',key([entry['binding'],'delivery']),payload,list(ids.values()))
@@ -121,8 +144,35 @@ def accept(store,batch):
             if prior:
                 # Do not steal another accepted plan, even if this batch is newer.
                 unfinished=c.execute("SELECT 1 FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.state<>'complete' LIMIT 1",(prior['value']['batch'],)).fetchone()
-                if unfinished:raise Conflict('Another current plan still has unmet requirements')
+                if unfinished and not set(e['wanted'])<={'playback','slides'}:
+                    raise Conflict('Another current plan still has unmet requirements')
                 if prior['value']['source_sha256']!=e['info']['source_sha']:raise Conflict('Source switch requires reconciliation')
+            def references(owner, wanted):
+                refs={}
+                names={'editor_draft':'editor','playback':'media','slides':'slides','rough':'transcribe','candidate':'candidate'}
+                for want in wanted:
+                    root=c.execute("SELECT t.id FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.stage=%s",
+                                   (owner,e['item'],names[want])).fetchone()
+                    if not root:raise Conflict('Plan is missing a required delivery task')
+                    tasks=c.execute('WITH RECURSIVE needed(id) AS (SELECT %s::text UNION SELECT unnest(t.dependencies) FROM media_ingest.tasks t JOIN needed n ON n.id=t.id) SELECT id FROM needed',
+                                    (root['id'],)).fetchall()
+                    refs[want]={'batch':owner,'task':root['id'],'tasks':sorted(t['id'] for t in tasks)}
+                return refs
+            deliveries={}
+            if prior:
+                deliveries=prior['value'].get('deliveries') or references(prior['value']['batch'],prior['value']['wanted'])
+                replacing=set(deliveries)&set(e['wanted'])
+                replacing_tasks=[deliveries[w]['task'] for w in replacing]
+                if replacing_tasks and c.execute("SELECT 1 FROM media_ingest.tasks WHERE id=ANY(%s) AND state IN ('running','unknown_outcome') LIMIT 1",(replacing_tasks,)).fetchone():
+                    raise Conflict('Current delivery has a live or unresolved worker')
+                if replacing_tasks and c.execute("SELECT 1 FROM media_ingest.calls WHERE task=ANY(%s) AND state='unknown' LIMIT 1",(replacing_tasks,)).fetchone():
+                    raise Conflict('Current delivery has an unresolved model call')
+            deliveries.update(references(batch,e['wanted']))
+            final=c.execute("SELECT t.id FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.payload->>'item'=%s AND t.stage='delivery'",
+                            (batch,e['item'])).fetchone()['id']
             value={'batch':batch,'pipeline':PIPELINE,'source_sha256':e['info']['source_sha'],
-                   'wanted':e['wanted'],'recording':e['recording']}
+                   'wanted':sorted(deliveries),'recording':e['recording'],'deliveries':deliveries,
+                   'task_ids':sorted({final}|{task for ref in deliveries.values() for task in ref['tasks']})}
+            if prior and 'editor_draft' not in e['wanted'] and 'delivered_document_marker' in prior['value']:
+                value['delivered_document_marker']=prior['value']['delivered_document_marker']
             c.execute('INSERT INTO media_ingest.pipeline_heads(root,item,value) VALUES(%s,%s,%s) ON CONFLICT(root,item) DO UPDATE SET value=EXCLUDED.value,revision=media_ingest.pipeline_heads.revision+1,updated_at=now()',(*identity,Jsonb(value)))

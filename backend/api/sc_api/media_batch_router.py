@@ -62,6 +62,8 @@ def create_media_batch_router(root, store_factory=Store):
         budget_usd: float = Field(gt=0, le=1000)
         max_calls: int = Field(gt=0, le=10000)
         operation_id: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9_-]+$')
+        mode: str = Field(default='editor_draft',pattern=r'^(editor_draft|candidate|playback|slides|rough)$')
+        expected_versions: dict[str,str] = Field(default_factory=dict)
 
     @router.post('/sermons/plan')
     def plan_sermons(body: PlanRequest, actor: str = Depends(editor)):
@@ -70,6 +72,15 @@ def create_media_batch_router(root, store_factory=Store):
         from backend.pipeline.media_batch.runtime import file_sha
         try:
             cfg=settings(root);store=store_factory();jobs=[]
+            from backend.pipeline.media_batch.store import key
+            from psycopg.types.json import Jsonb
+            identity=(str(Path(root).resolve()),actor,body.operation_id)
+            request_sha=key(body.model_dump())
+            with store.connection() as c:
+                saved=c.execute('SELECT request_sha,response FROM media_ingest.plan_requests WHERE root=%s AND actor=%s AND operation=%s',identity).fetchone()
+            if saved:
+                if saved['request_sha']!=request_sha:raise Conflict('Operation ID reused with different plan input')
+                return saved['response']
             with store.connection() as c:
                 rows=list(c.execute('SELECT item,value FROM media_ingest.sermon_index WHERE root=%s AND item=ANY(%s)',
                                     (str(Path(root).resolve()),body.items)))
@@ -78,11 +89,27 @@ def create_media_batch_router(root, store_factory=Store):
                 sources=row['value']['sources']
                 if len(sources)!=1:raise ValueError('來源缺失或多版本待核實：'+row['item'])
                 path=Path(sources[0]['path'])
-                jobs.append({'item':row['item'],'source':str(path),'source_sha256':file_sha(path)})
+                wanted={'editor_draft':['editor_draft','playback','slides'],'candidate':['candidate','playback'],
+                        'playback':['playback'],'slides':['slides'],'rough':['rough']}[body.mode]
+                jobs.append({'item':row['item'],'source':str(path),'source_sha256':file_sha(path),
+                             'deliverables':wanted,'expected_version':body.expected_versions.get(row['item'])})
             cfg.update(budget_usd=body.budget_usd,max_calls=body.max_calls,operation_id=body.operation_id)
             batch=create(store,{'schema_version':'gemini-media-jobs.v1','jobs':jobs},cfg,actor)
-            return {'batch':batch,'items':body.items,'budget_usd':body.budget_usd,'max_calls':body.max_calls,
-                    'status':'planned','message':'計畫已建立，尚未啟動模型或安裝媒體'}
+            response={'batch':batch,'items':body.items,'budget_usd':body.budget_usd,'max_calls':body.max_calls,
+                    'mode':body.mode,'status':'planned','message':'計畫已建立，尚未啟動模型或安裝媒體',
+                    'jobs':[{'item':j['item'],'source_sha256':j['source_sha256'],'deliverables':j['deliverables'],
+                             'adoption':'initialize_empty_draft' if body.mode=='editor_draft' else 'register_candidate' if body.mode=='candidate' else 'none',
+                             'media_destination':'核實後沿用來源，或另存版本化播放檔' if 'playback' in j['deliverables'] else '沿用既有稿件版本' if body.mode=='slides' else '未校對粗稿，尚無 Editor 交付'} for j in jobs]}
+            with store.connection() as c:
+                c.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(key(identity),))
+                saved=c.execute('SELECT request_sha,response FROM media_ingest.plan_requests WHERE root=%s AND actor=%s AND operation=%s',identity).fetchone()
+                if saved:
+                    if saved['request_sha']!=request_sha:raise Conflict('Operation ID reused with different plan input')
+                    return saved['response']
+                c.execute('INSERT INTO media_ingest.plan_requests VALUES(%s,%s,%s,%s,%s)',(*identity,request_sha,Jsonb(response)))
+            return response
+        except PermissionError as error:
+            raise HTTPException(403,str(error)) from error
         except ReviewError as error:
             raise HTTPException(error.status,error.message) from error
         except (ValueError, OSError, Conflict) as error:
@@ -98,6 +125,21 @@ def create_media_batch_router(root, store_factory=Store):
         if row['config'].get('actor')!=actor:raise HTTPException(403,'請由此計畫建立者啟動')
         try:return start(store,batch)
         except (ValueError, Conflict) as error:raise HTTPException(409,str(error)) from error
+
+    @router.get('/sermons/{item}/candidates/{candidate_id}')
+    def gemini_candidate(item: str,candidate_id: str,response: Response,actor: str=Depends(editor)):
+        import re
+        from .transcript_review import ReviewStore,read,digest
+        review=ReviewStore(Path(root))
+        try:
+            review.require(actor,item)
+            if not re.fullmatch('[0-9a-f]{64}',candidate_id):raise HTTPException(404,'找不到候選')
+            value=read(Path(root)/'gemini_transcript_candidates'/item/f'{candidate_id}.json')
+            if not value:raise HTTPException(404,'找不到候選')
+            if digest(value)!=candidate_id:raise HTTPException(409,'候選版本不同')
+            response.headers['Cache-Control']='private, no-store'
+            return {k:value[k] for k in ('schema_version','source_sha256','duration_ms','layout')}
+        except ReviewError as error:raise HTTPException(error.status,error.message) from error
 
     def timing_artifacts(batch,recording):
         from backend.pipeline.slide_change_pilot import read_json,file_sha
