@@ -92,11 +92,12 @@ def words(raw, ordinal, start, end, origin, clip_end):
     if not annotations:
         return []
     times = [(origin + float(x["start_offset"].rstrip("s")),
-              origin + float(x["end_offset"].rstrip("s"))) for x in annotations]
+              origin + float(x["end_offset"].rstrip("s")) if "end_offset" in x else None)
+             for x in annotations]
     result = []
     for i, (item, (a, b)) in enumerate(zip(annotations, times)):
         following = times[i + 1][0] if i + 1 < len(times) else clip_end
-        suspect = b < a or b > following + 4 or b > clip_end + .12
+        suspect = b is None or b < a or b > following + 4 or b > clip_end + .12
         if suspect:
             # Keep verbatim text. An invalid word clock is a local alignment hint.
             a = min(a, following)

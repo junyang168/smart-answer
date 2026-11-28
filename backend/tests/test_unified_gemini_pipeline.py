@@ -113,7 +113,7 @@ def test_recovery_reservation_preserves_caps_and_refuses_second_or_unknown(setup
     after=store.snapshot(batch)
     before.pop('generated_at');after.pop('generated_at')
     assert after==before
-    with pytest.raises(FileExistsError):
+    with pytest.raises(Conflict,match='already has a recovery'):
         reserve(store,batch,task['id'],defect='same',validation='same',patch='same')
     (out/'engineering-recovery.json').unlink()
     with store.connection() as c:
@@ -174,3 +174,24 @@ def test_video_reuse_or_versioned_compression_and_receipt_drift(setup,faststart)
         with target.open('ab') as f:f.write(b'drift')
         with pytest.raises(ValueError,match='drift'):playback(payload)
         assert file_sha(video)==sha
+
+
+def test_recovery_chain_is_bounded_and_preserves_prior_receipts(setup,monkeypatch):
+    from backend.pipeline.media_batch.engineering_recovery import reserve,verify
+    from backend.pipeline.media_batch import gemini_plan
+    store,root,item,actor,source,cfg,manifest=setup
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    task=store.claim(batch,'failed-worker');store.update(task,state='failed',error='parser defect')
+    out=Path(task['payload']['out']);out.mkdir(parents=True)
+    atomic(out/'asr-0.request.json',{'source_sha256':file_sha(source)})
+    atomic(out/'asr-0.response.json',{'status':'completed'})
+    for i in range(3):
+        monkeypatch.setattr(gemini_plan,'implementation',lambda i=i:f'fixed-{i}')
+        receipt=reserve(store,batch,task['id'],defect=f'defect-{i}',validation='test passed',patch=f'diff-{i}')
+        verify(task['payload'],f'fixed-{i}')
+        assert len(receipt['prior_receipts'])==i
+    monkeypatch.setattr(gemini_plan,'implementation',lambda:'fourth')
+    with pytest.raises(Conflict,match='exhausted'):
+        reserve(store,batch,task['id'],defect='fourth',validation='test',patch='diff')
+    (out/'engineering-recovery.json').write_text('{}')
+    with pytest.raises(ValueError,match='history changed'):verify(task['payload'],'fixed-2')

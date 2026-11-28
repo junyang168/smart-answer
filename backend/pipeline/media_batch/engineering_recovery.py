@@ -1,4 +1,4 @@
-"""One explicit code-defect recovery, preserving the original plan and budget.
+"""Bounded explicit code-defect recovery, preserving the original plan and budget.
 
 This is an engineering receipt, never a model verdict or permission to retry an
 unknown dispatch. An operator must bind a concrete defect and regression result.
@@ -10,11 +10,16 @@ from .runtime import file_sha, lock_held
 from .store import key, Conflict
 
 
+def receipts(out):
+    return [p for p in [out/'engineering-recovery.json',
+                       out/'engineering-recovery-2.json',out/'engineering-recovery-3.json'] if p.exists()]
+
+
 def verify(payload, current):
-    path = Path(payload['out']) / 'engineering-recovery.json'
-    if not path.exists():
+    paths = receipts(Path(payload['out']))
+    if not paths:
         raise ValueError('Pipeline implementation changed after planning; saved results preserved')
-    receipt = json.loads(path.read_text())
+    receipt = json.loads(paths[-1].read_text())
     if (receipt['original_implementation'] != payload['config']['implementation']
             or receipt['corrected_implementation'] != current
             or receipt['payload_sha256'] != key(payload)):
@@ -22,6 +27,9 @@ def verify(payload, current):
     for name, sha in receipt['proof'].items():
         if file_sha(Path(payload['out']) / name) != sha:
             raise ValueError('Engineering recovery saved proof changed')
+    if receipt.get('prior_receipts') != {p.name:file_sha(p) for p in paths[:-1]}:
+        if paths[:-1] or receipt.get('prior_receipts'):
+            raise ValueError('Engineering recovery history changed')
 
 
 def reserve(store, batch, task_id, *, defect, validation, patch):
@@ -43,14 +51,18 @@ def reserve(store, batch, task_id, *, defect, validation, patch):
         files = sorted(set(out.glob('asr-*.request.json')) | set(out.glob('asr-*.response.json')))
         if not files:
             raise Conflict('Saved source requests and answers required')
+        previous=receipts(out)
+        if len(previous)>=3:raise Conflict('Bounded engineering recovery reservations exhausted')
+        if previous and json.loads(previous[-1].read_text())['corrected_implementation']==implementation():
+            raise Conflict('This corrected implementation already has a recovery reservation')
         receipt = dict(schema_version='media-engineering-recovery.v1', batch=batch,
                        failed_task=task_id, original_error=task['error'], defect=defect,
                        validation=validation, program_delta=patch,
                        original_implementation=payload['config']['implementation'],
                        corrected_implementation=implementation(), payload_sha256=key(payload),
+                       prior_receipts={p.name:file_sha(p) for p in previous},
                        proof={str(p.relative_to(out)):file_sha(p) for p in files})
-        # One reservation per recording workspace: no chain of code retries.
-        path = out / 'engineering-recovery.json'
+        path = out / ('engineering-recovery.json' if not previous else f'engineering-recovery-{len(previous)+1}.json')
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, 'w') as f:
             json.dump(receipt, f, ensure_ascii=False); f.flush(); os.fsync(f.fileno())

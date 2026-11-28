@@ -95,3 +95,15 @@ def test_engineering_recovery_binds_exact_plan_code_and_saved_answers(tmp_path):
     with pytest.raises(ValueError,match='exact plan'):verify(payload,'another change')
     proof.write_text('{"changed":true}')
     with pytest.raises(ValueError,match='proof changed'):verify(payload,'corrected')
+
+
+def test_missing_word_end_preserves_text_and_marks_timing_for_review():
+    raw={'model':audio.ASR_MODEL,'status':'completed','steps':[{'content':[{'annotations':[
+        {'type':'word_info','text':'原文','start_offset':'2s'},
+        {'type':'word_info','text':'後文','start_offset':'3s','end_offset':'4s'}]}]}]}
+    found=audio.words(raw,'0',0,45,0,45)
+    assert found[0]=={'text':'原文','speaker':'w0:unknown','start':2.0,'end':3.0,'timing_review':True}
+    assert found[1]['timing_review'] is False
+    # Incomplete tail in the overlap remains outside this window's owned range.
+    raw['steps'][0]['content'][0]['annotations']=[{'type':'word_info','text':'尾端','start_offset':'183.4s'}]
+    assert audio.words(raw,'0',0,180,0,184)==[]
