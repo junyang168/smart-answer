@@ -75,6 +75,9 @@ type Snapshot = {
   >;
 };
 const names: Record<string, string> = {
+  audio: "抽取音頻", transcribe: "Gemini 粗轉錄", flash: "原聲精修",
+  timing: "分段與時間定位", repetitions: "重複軟刪除", layout: "整理稿件",
+  editor: "Editor 交接", slides: "投影片核對與綁定", delivery: "交付核驗",
   rough_prepare: "準備粗轉錄音訊",
   rough_asr: "粗轉錄",
   rough_summary: "整理內容概要",

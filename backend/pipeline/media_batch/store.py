@@ -143,9 +143,6 @@ class Store:
             ).fetchone()
             if not b:
                 raise KeyError(batch)
-            if action in ('resume', 'retry'):
-                from .retirement import require_supported
-                require_supported(b['config'])
             old = c.execute(
                 "SELECT * FROM media_ingest.controls WHERE batch=%s AND operation=%s",
                 (batch, operation),
@@ -156,6 +153,9 @@ class Store:
                 return old["revision"]
             if b["revision"] != revision:
                 raise Conflict("Batch version changed; reload")
+            if action in ('resume', 'retry'):
+                from .retirement import require_supported
+                require_supported(b['config'])
             if action == "retry":
                 # Unknown model dispatches require reconciliation; a UI click cannot clear them.
                 c.execute(
@@ -427,7 +427,7 @@ class Store:
               extract(epoch FROM (now()-t.heartbeat)) AS heartbeat_age
               FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id
               JOIN media_ingest.recordings r ON r.id=t.recording WHERE bt.batch=%s AND t.recording=ANY(%s)
-              ORDER BY r.item,array_position(ARRAY['existing','prepare','visuals','speech','final-align','finish','speakers','media','handoff'],t.stage),t.unit,t.id""",
+              ORDER BY r.item,array_position(ARRAY['existing','audio','transcribe','flash','timing','speakers','repetitions','layout','media','editor','slides','delivery','prepare','visuals','speech','final-align','finish','handoff'],t.stage),t.unit,t.id""",
                     (batch, ids),
                 ).fetchall()
                 if batch

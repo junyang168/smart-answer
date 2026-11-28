@@ -168,16 +168,16 @@ def test_delayed_audio_keeps_its_movie_offset(tmp_path):
     assert next(s for s in manifest['streams'] if s['codec_type'] == 'audio')['start_time'] != '0.000000'
 
 
-def test_cli_keeps_the_isolated_venv_interpreter_symlink(tmp_path, monkeypatch):
+def test_current_aligner_keeps_the_isolated_venv_interpreter_symlink(tmp_path, monkeypatch):
     import sys
-    from backend.pipeline import transcript_audio_pilot as audio_pilot
+    from backend.pipeline import transcript_gemini_audio as audio_pilot
     python = tmp_path / 'venv/bin/python'
     python.parent.mkdir(parents=True)
     python.symlink_to(sys.executable)
     calls = []
     monkeypatch.setattr(audio_pilot.subprocess, 'run', lambda command, **kwargs: calls.append(command))
     monkeypatch.setattr(sys, 'argv', ['pilot', 'align', '--out', str(tmp_path), '--aligner-python', str(python)])
-    audio_pilot.main()
+    audio_pilot.alignment_worker(python, tmp_path)
     assert calls[0][0] == str(python.absolute())
     assert calls[0][0] != str(python.resolve())
 
