@@ -237,6 +237,7 @@ class Store:
 
     def reconcile(self, batch):
         from .runtime import lock_held
+        from .timeout_recovery import uncovered_sql
 
         changed = []
         with self.connection() as c:
@@ -258,7 +259,7 @@ class Store:
                 ):
                     continue
                 unknown = c.execute(
-                    "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown'",
+                    f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')}",
                     (row["id"],),
                 ).fetchone()
                 state = "unknown_outcome" if unknown else "interrupted"

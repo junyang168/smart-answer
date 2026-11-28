@@ -15,6 +15,7 @@ import uuid
 from psycopg.types.json import Jsonb
 from .store import Store
 from .runtime import atomic, WaitingCapacity
+from .timeout_recovery import uncovered_sql
 
 
 def child():
@@ -72,7 +73,7 @@ def run_task(store, batch, task):
             raise
         with store.connection() as c:
             unknown = c.execute(
-                "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
+                f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')} LIMIT 1",
                 (task["id"],),
             ).fetchone()
         state = (
@@ -176,7 +177,7 @@ def _run_task(store, batch, task, resources):
     )
     with store.connection() as c:
         unknown = c.execute(
-            "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
+            f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')} LIMIT 1",
             (task["id"],),
         ).fetchone()
     state = (
