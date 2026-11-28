@@ -284,16 +284,28 @@ def _apply_fidelity_repair(
     save_json(evidence_dir / "assets" / asset["asset_id"] / "evidence.json", asset)
 
 
+def strip_result_schema_echo(text, schema):
+    """Strip only the exact supplied schema before the single result payload."""
+    text = text.lstrip()
+    try:
+        first, end = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError:
+        return text
+    if first != schema:
+        return text
+    tail = text[end:].lstrip()
+    # The model occasionally returns the results member after the schema object.
+    if re.match(r'^,\s*"results"\s*:', tail):
+        return "{" + tail[1:]
+    return tail
+
+
 def parse_fidelity_result(text, expected_ids):
     """Recover only the outer envelope after every expected row has decoded."""
+    text = strip_result_schema_echo(text, FIDELITY_SCHEMA)
     try:
         return json.loads(text)
-    except json.JSONDecodeError as error:
-        if error.msg == "Extra data":
-            # Some completed replies echo our exact schema ahead of the answer.
-            # Two verdicts are ambiguous and must still fail.
-            if json.loads(text[:error.pos]) == FIDELITY_SCHEMA:
-                return json.loads(text[error.pos:])
+    except json.JSONDecodeError:
         prefix = re.match(r'\s*\{\s*"results"\s*:\s*\[', text)
         if not prefix:
             raise
@@ -584,7 +596,7 @@ def align_and_filter_important_slides(
                 max_calls=max_calls,
                 budget_usd=budget_usd,
             )
-            parsed = json.loads(adapter.text(raw))
+            parsed = json.loads(strip_result_schema_echo(adapter.text(raw), ALIGNMENT_SCHEMA))
             usage = adapter.usage(raw)
         check_schema(parsed, ALIGNMENT_SCHEMA)
         if [r["event_id"] for r in parsed["results"]] != ids:
