@@ -11,6 +11,8 @@ from psycopg.types.json import Jsonb
 
 
 def estimate(request, raw, *, at=None):
+    if raw.get('transport') in ('codex_subscription','agy_subscription'):
+        raise ValueError('Subscription usage has no API invoice estimate; retain conservative admission reserve')
     at = at or datetime.now(timezone.utc).date()
     model = request.get("model") or request.get("config", {}).get("model") or "gemini"
     result = dict(

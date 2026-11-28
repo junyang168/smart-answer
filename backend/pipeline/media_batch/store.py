@@ -84,6 +84,12 @@ class Store:
                 """SELECT t.* FROM media_ingest.tasks t
               JOIN media_ingest.batch_tasks bt ON bt.task=t.id JOIN media_ingest.batches b ON b.id=bt.batch
               WHERE bt.batch=%s AND b.desired='running' AND t.state='pending' AND t.not_before<=now()
+                AND NOT EXISTS (SELECT 1 FROM media_ingest.pipeline_retirements x
+                  WHERE x.engine=COALESCE(b.config->>'pipeline','legacy-gpt'))
+                AND (COALESCE(b.config->>'pipeline','')<>'gemini-transcript-v1' OR EXISTS (
+                  SELECT 1 FROM media_ingest.pipeline_heads h WHERE h.root=b.config->>'review_root'
+                  AND h.item=t.payload->>'item' AND (h.value->'task_ids' ? t.id
+                    OR NOT h.value ? 'task_ids' AND h.value->>'batch'=b.id)))
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks d WHERE d.id=ANY(t.dependencies) AND d.state<>'complete')
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks a WHERE a.recording=t.recording AND a.state='running')
               ORDER BY COALESCE((t.payload->>'queue_order')::int,2147483647),t.updated_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1""",
@@ -148,12 +154,16 @@ class Store:
                 return old["revision"]
             if b["revision"] != revision:
                 raise Conflict("Batch version changed; reload")
+            if action in ('resume', 'retry'):
+                from .retirement import require_supported
+                require_supported(b['config'])
             if action == "retry":
+                from .timeout_recovery import uncovered_sql
                 # Unknown model dispatches require reconciliation; a UI click cannot clear them.
                 c.execute(
-                    """UPDATE media_ingest.tasks SET state='pending',error=NULL WHERE state IN ('failed','interrupted')
+                    f"""UPDATE media_ingest.tasks SET state='pending',error=NULL WHERE state IN ('failed','interrupted')
                   AND id IN (SELECT task FROM media_ingest.batch_tasks WHERE batch=%s)
-                  AND NOT EXISTS (SELECT 1 FROM media_ingest.calls m WHERE m.task=tasks.id AND m.state='unknown')""",
+                  AND NOT EXISTS (SELECT 1 FROM media_ingest.calls m WHERE m.task=tasks.id AND {uncovered_sql('m')})""",
                     (batch,),
                 )
             desired = "paused" if action == "pause" else "running"
@@ -227,6 +237,7 @@ class Store:
 
     def reconcile(self, batch):
         from .runtime import lock_held
+        from .timeout_recovery import uncovered_sql
 
         changed = []
         with self.connection() as c:
@@ -248,7 +259,7 @@ class Store:
                 ):
                     continue
                 unknown = c.execute(
-                    "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown'",
+                    f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')}",
                     (row["id"],),
                 ).fetchone()
                 state = "unknown_outcome" if unknown else "interrupted"
@@ -419,7 +430,7 @@ class Store:
               extract(epoch FROM (now()-t.heartbeat)) AS heartbeat_age
               FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id
               JOIN media_ingest.recordings r ON r.id=t.recording WHERE bt.batch=%s AND t.recording=ANY(%s)
-              ORDER BY r.item,array_position(ARRAY['existing','prepare','visuals','speech','final-align','finish','speakers','media','handoff'],t.stage),t.unit,t.id""",
+              ORDER BY r.item,array_position(ARRAY['existing','audio','transcribe','flash','timing','speakers','repetitions','layout','media','editor','slides','delivery','prepare','visuals','speech','final-align','finish','handoff'],t.stage),t.unit,t.id""",
                     (batch, ids),
                 ).fetchall()
                 if batch

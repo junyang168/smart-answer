@@ -15,9 +15,11 @@ import uuid
 from psycopg.types.json import Jsonb
 from .store import Store
 from .runtime import atomic, WaitingCapacity
+from .timeout_recovery import uncovered_sql
 
 
 def child():
+    load_model_environment()
     ctx = json.loads(os.environ["MEDIA_BATCH_CONTEXT"])
     payload = json.loads(Path(ctx["payload_path"]).read_text())
     from .stages import execute
@@ -49,6 +51,13 @@ def child():
         sys.exit(1)
 
 
+def load_model_environment():
+    from dotenv import load_dotenv
+    root=Path(__file__).resolve().parents[3]
+    load_dotenv(root/'backend/.env')
+    load_dotenv(root/'.env')
+
+
 def run_task(store, batch, task):
     from .runtime import lock_held
     from .disk import release
@@ -64,7 +73,7 @@ def run_task(store, batch, task):
             raise
         with store.connection() as c:
             unknown = c.execute(
-                "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
+                f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')} LIMIT 1",
                 (task["id"],),
             ).fetchone()
         state = (
@@ -168,7 +177,7 @@ def _run_task(store, batch, task, resources):
     )
     with store.connection() as c:
         unknown = c.execute(
-            "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
+            f"SELECT 1 FROM media_ingest.calls m WHERE task=%s AND {uncovered_sql('m')} LIMIT 1",
             (task["id"],),
         ).fetchone()
     state = (
@@ -180,6 +189,9 @@ def _run_task(store, batch, task, resources):
             else "pending" if result.get("waiting") else "needs_resolution" if result.get('needs_resolution') else "failed"
         )
     )
+    if result["ok"] and p["config"].get("pipeline") == "gemini-transcript-v1":
+        from .sermon_monitor import reconcile_item
+        reconcile_item(store, p["config"]["review_root"], p["item"])
     store.update(
         task, state=state, result=result.get("result"), error=result.get("error")
     )
@@ -189,6 +201,13 @@ def _run_task(store, batch, task, resources):
 def run(store, batch, workers=4, drain=False):
     if not 1 <= workers <= 4:
         raise ValueError("workers must be 1..4")
+    from .gemini_plan import accept
+    from .retirement import require_supported
+    with store.connection() as c:
+        row = c.execute('SELECT config FROM media_ingest.batches WHERE id=%s', (batch,)).fetchone()
+    if not row: raise KeyError(batch)
+    require_supported(row['config'])
+    accept(store, batch)
     worker_id = uuid.uuid4().hex
     # PG advisory session lock prevents duplicate controllers for this batch, without locking other batches.
     with store.connection() as connection:

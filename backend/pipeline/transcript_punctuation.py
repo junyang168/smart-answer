@@ -3,7 +3,7 @@
 import json
 import re
 
-from backend.pipeline.full_video_transcript import cleanup_generate
+from backend.pipeline.media_operations import cleanup_generate
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import check_schema, obj
 from backend.pipeline.transcript_gemini_proofreading import saved_response

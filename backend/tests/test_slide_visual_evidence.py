@@ -228,14 +228,14 @@ def test_independent_sample_disagreement_is_disclosed_without_rewriting_source(t
         build(transcript, evidence, out)
 
 
-def test_visual_stage_rejects_different_video_before_any_paid_call(tmp_path, monkeypatch):
+def test_retired_visual_cli_refuses_before_any_paid_call(tmp_path, monkeypatch):
     import sys
     from backend.pipeline import transcript_audio_pilot as audio
     save_json(tmp_path / 'speech/illustrated_transcript.json', {'source_sha256': 'a'})
     save_json(tmp_path / 'slides/report.json', {'source_sha256': 'b'})
     monkeypatch.setattr(sys, 'argv', ['pilot', 'visual', '--out', str(tmp_path / 'speech'), '--slides', str(tmp_path / 'slides')])
     monkeypatch.setattr(visual, 'extract', lambda *a, **kw: pytest.fail('must not send a paid call'))
-    with pytest.raises(ValueError, match='no visual calls sent'):
+    with pytest.raises(ValueError, match='已退役'):
         audio.main()
 
 

@@ -111,7 +111,7 @@ def batch_call(out, request, reserved):
     resource = (
         "sol"
         if model == "gpt-6.1-sol"
-        else "asr" if model == "gpt-transcribe" else "gemini"
+        else "asr" if model in ("gpt-transcribe", "gemini-3.5-transcribe") else "gemini"
     )
     from .store import Store, key
 
@@ -208,7 +208,8 @@ def storage_guards(config):
 
 
 def ensure_storage(config):
-    for guard in config.get("storage_guards", []):
+    from .runtime_storage import effective_guards
+    for guard in effective_guards(config):
         path = Path(guard["path"])
         if (
             not path.exists()

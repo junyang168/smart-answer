@@ -58,7 +58,8 @@ def run(command, *, input, env, timeout, directory, cwd=None, replay_only=False)
             protected = inherited_fds()
             inherited = tuple(int(fd) for fd in env.get('WKP_CLAIM_BATCH_LOCK_FDS', '').split(',') if fd)
             sources = tuple(int(fd) for fd in env.get('WKP_CLAIM_SOURCE_LOCK_FDS', '').split(',') if fd)
-            descriptors = tuple(dict.fromkeys(protected + inherited + sources))
+            media = tuple(json.loads(env.get('MEDIA_BATCH_CONTEXT','{}')).get('inherited_fds',[]))
+            descriptors = tuple(dict.fromkeys(protected + inherited + sources + media))
             options = {'pass_fds': descriptors} if descriptors else {}
             completed = subprocess.run(command, input=input, text=True, env=env, cwd=cwd,
                                        stdout=stdout, stderr=stderr, timeout=timeout, check=False, **options)

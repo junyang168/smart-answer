@@ -13,6 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { remarkEditorialSoftDeletion } from "./editorial-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
 import {
@@ -95,7 +96,7 @@ type Context = {
   media_mime_type?: string;
   timing_quality?: {
     status: string;
-    source_holds?: Record<string, unknown>;
+    source_holds?: Record<string, { reason?: string; [key: string]: unknown }>;
     paragraph_states?: Record<string, { status: string }>;
   } | null;
   legacy_timeline_sha256?: string;
@@ -1113,7 +1114,7 @@ function TranscriptProofreader({
   const pendingSource = timingPending.some(
     (p) => p.index in (doc.context.timing_quality?.source_holds || {}),
   );
-  const timingLabel = pendingSource ? "音源不清・未確認" : "時間待核對";
+  const timingLabel = pendingSource ? "來源／轉錄待核" : "時間待核對";
   const pendingGroups = doc.context.groups.length - groupsConfirmed;
   const publishIssues = [
     blocked.current ? "同步已暫停，請先處理本機修改" : !ready ? "正在載入編輯狀態" : "",
@@ -2223,9 +2224,9 @@ function TranscriptProofreader({
                   {pendingTiming.includes(p.index) && (
                     <span
                       className="rounded bg-amber-50 px-2 py-1 text-amber-800"
-                      title={doc.context.timing_quality?.source_holds?.[p.index] ? "原音與粗稿保留；來源仍不清楚，不能確認或發佈。" : "本段的起點或結尾尚待確認；文字校對狀態保留。"}
+                      title={doc.context.timing_quality?.source_holds?.[p.index]?.reason === "asr_coverage_unverified" ? "此區間的轉錄覆蓋待核，請聽原聲確認；不能當作靜音或完整轉錄。" : doc.context.timing_quality?.source_holds?.[p.index] ? "原音與粗稿保留；來源仍不清楚，不能確認或發佈。" : "本段的起點或結尾尚待確認；文字校對狀態保留。"}
                     >
-                      {doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
+                      {doc.context.timing_quality?.source_holds?.[p.index]?.reason === "asr_coverage_unverified" ? "轉錄覆蓋待核" : doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
                     </span>
                   )}
                   {active && doc.can_edit && (
@@ -2487,7 +2488,7 @@ const TranscriptText = memo(function TranscriptText({
 }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkEditorialSoftDeletion]}
       urlTransform={(url, key) => {
         if (key === "src" && url.startsWith("data%2F")) {
           try {

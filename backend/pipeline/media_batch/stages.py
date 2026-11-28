@@ -215,6 +215,8 @@ def media(payload):
 
 
 def register_catalog(payload):
+    if payload["config"].get("pipeline") == "gemini-transcript-v1":
+        return
     from backend.api.sc_api.transcript_review import atomic as save, read
 
     root = Path(payload["config"]["review_root"])
@@ -347,6 +349,9 @@ def resolve_source(payload, store=None):
 def execute(stage, payload):
     out = Path(payload["out"])
     cfg = payload["config"]
+    if cfg.get("pipeline") == "gemini-transcript-v1":
+        from .gemini_stages import execute as gemini_execute
+        return gemini_execute(stage, payload)
     from .runtime import ensure_storage
 
     ensure_storage(cfg)

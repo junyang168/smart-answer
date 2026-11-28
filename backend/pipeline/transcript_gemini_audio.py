@@ -12,7 +12,7 @@ import subprocess
 import urllib.request
 import wave
 
-from backend.pipeline.slide_change_pilot import file_sha, read_json, save_json
+from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import check_schema, obj
 
@@ -71,22 +71,33 @@ def asr_call(audio):
         with urllib.request.urlopen(request, timeout=240) as response:
             return json.load(response)
     finally:
-        client.files.delete(name=uploaded.name)
+        try:
+            client.files.delete(name=uploaded.name)
+        except Exception as error:
+            # Cleanup is not a failed transcription and must not cause re-dispatch.
+            save_json(audio.with_suffix(".cleanup.json"), {"error_type": type(error).__name__})
 
 
 def words(raw, ordinal, start, end, origin, clip_end):
     if raw.get("model") != ASR_MODEL or raw.get("status") != "completed":
         raise ValueError("Gemini 3.5 transcription did not complete")
+    # The provider omits steps for a completed empty answer. Keep that as an
+    # uncovered interval, never as evidence that the recording was silent.
+    if "steps" not in raw:
+        if raw.get("usage", {}).get("total_output_tokens") == 0:
+            return []
+        raise ValueError("Completed transcription has no steps or empty-output proof")
     annotations = [word for step in raw["steps"] for content in step.get("content", [])
                    for word in content.get("annotations", []) if word.get("type") == "word_info"]
     if not annotations:
         return []
     times = [(origin + float(x["start_offset"].rstrip("s")),
-              origin + float(x["end_offset"].rstrip("s"))) for x in annotations]
+              origin + float(x["end_offset"].rstrip("s")) if "end_offset" in x else None)
+             for x in annotations]
     result = []
     for i, (item, (a, b)) in enumerate(zip(annotations, times)):
         following = times[i + 1][0] if i + 1 < len(times) else clip_end
-        suspect = b < a or b > following + 4 or b > clip_end + .12
+        suspect = b is None or b < a or b > following + 4 or b > clip_end + .12
         if suspect:
             # Keep verbatim text. An invalid word clock is a local alignment hint.
             a = min(a, following)
@@ -110,22 +121,35 @@ def transcribe(media, folder):
         binding = {"model": ASR_MODEL, "audio_sha256": file_sha(path), "origin": origin,
                    "clip_end": clip_end, "start": start, "end": end}
         intent, output = path.with_suffix(".request.json"), path.with_suffix(".response.json")
+        from backend.pipeline.media_model_calls import saved_call
+        from backend.pipeline.media_batch.runtime import atomic
+        request = {"stage": "gemini_asr", **binding}
+        cache = folder / "calls" / object_sha(request) / "state.json"
         if output.exists():
             if read_json(intent) != binding:
                 raise ValueError("Saved transcription request differs")
         else:
-            if intent.exists():
+            if intent.exists() and (read_json(intent) != binding or not cache.exists()):
                 raise ValueError(f"Unknown previous transcription outcome for {name}")
-            save_json(intent, binding)
-            save_json(output, asr_call(path))
+            def dispatch():
+                atomic(intent, binding)
+                return asr_call(path)
+            raw = saved_call(folder, request, .50, dispatch, max_calls=1000, budget_usd=100)
+            atomic(intent, binding)
+            atomic(output, raw)
         selected = words(read_json(output), name, start, end, origin, clip_end)
         gaps = [selected[0]["start"] - start, end - selected[-1]["end"]] if selected else [end - start]
         gaps += [b["start"] - a["end"] for a, b in zip(selected, selected[1:])]
         if end - start > 60 and (len(selected) < .75 * (end - start) or max(gaps) > 40):
             middle = (start + end) / 2
+            atomic(folder / f"node-{name}.json", {"id": name, "start": start, "end": end,
+                "audio_sha256": binding["audio_sha256"], "response_sha256": file_sha(output),
+                "children": [f"{name}a", f"{name}b"]})
             visit(f"{name}a", start, middle)
             visit(f"{name}b", middle, end)
         else:
+            atomic(folder / f"node-{name}.json", {"id": name, "start": start, "end": end,
+                "audio_sha256": binding["audio_sha256"], "response_sha256": file_sha(output), "children": []})
             coverage.append({"start": start, "end": end, "word_count": len(selected),
                              "coverage_review": max(gaps) > 35})
             result.extend(selected)
@@ -133,6 +157,9 @@ def transcribe(media, folder):
     for ordinal, start in enumerate(range(0, int(duration) + 1, 180)):
         if start < duration:
             visit(str(ordinal), start, min(start + 180, duration))
+            from backend.pipeline.media_batch.runtime import progress
+            import math
+            progress("transcribe", ordinal + 1, math.ceil(duration / 180), "root_windows")
     if not result:
         raise ValueError("No word-timed transcript")
     return {"duration": duration, "words": result, "coverage": coverage}
@@ -197,7 +224,7 @@ def alignment_worker(aligner, clips):
         environment["MEDIA_BATCH_CONTEXT"] = json.dumps({"capacity_root": capacity})
     subprocess.run([str(aligner), "-m", "backend.pipeline.transcript_alignment_worker",
                     "--out", str(clips), "--decode-profile", "monotonic"],
-                   check=True, env=environment)
+                   check=True, env=environment, pass_fds=__import__("backend.pipeline.media_batch.runtime", fromlist=["inherited_fds"]).inherited_fds())
 
 
 def ordered_start_anchors(candidates, duration):

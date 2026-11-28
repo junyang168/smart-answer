@@ -17,7 +17,7 @@ from backend.api.sc_api.transcript_review import ReviewStore, digest
 from backend.pipeline import slide_editor_alignment as alignment
 from backend.pipeline.slide_source_ink import source_ink_svg
 from backend.pipeline.editor_slide_display import measure
-from backend.pipeline.full_video_transcript import classify_slides
+from backend.pipeline.media_operations import classify_slides
 from backend.pipeline.slide_change_pilot import (
     file_sha,
     object_sha,
@@ -124,6 +124,19 @@ def produce(video, out, source):
         audit_material(part, evidence, decisions["bindings"])
 
 
+def effective_alignment_requests(out):
+    """Count one authorized answer, preserving its unknown parent as history."""
+    from backend.pipeline.media_batch.timeout_recovery import covered
+    for path in (out/'calls').glob('*/request.json'):
+        request=read_json(path)
+        if request.get('stage')!='slide_editor_alignment':continue
+        state=path.with_name('state.json')
+        if state.exists() and read_json(state).get('status')=='sent_outcome_unknown':
+            if covered(out,path.parent,None):continue
+            raise ValueError('Unresolved alignment request remains quarantined')
+        yield request
+
+
 def collect(run, snap):
     report = read_json(run / "slides/report.json")
     if report["source_sha256"] != snap["source"]:
@@ -143,12 +156,10 @@ def collect(run, snap):
         ):
             raise ValueError("Alignment input changed")
         covered = []
-        for path in (part / "alignment/calls").glob("*/request.json"):
-            request = read_json(path)
-            if request.get("stage") == "slide_editor_alignment":
-                if request["context_sha256"] != snap["context"]:
-                    raise ValueError("Editor timing context changed")
-                covered.extend(request["event_ids"])
+        for request in effective_alignment_requests(part/'alignment'):
+            if request["context_sha256"] != snap["context"]:
+                raise ValueError("Editor timing context changed")
+            covered.extend(request["event_ids"])
         if sorted(covered) != sorted(b["event_id"] for b in aligned["bindings"]):
             raise ValueError("Incomplete alignment requests")
         audited = {}

@@ -28,6 +28,12 @@ def requirements(task):
     pcm = int(seconds * 32000)
     overhead = 64 * MIB
     work = {
+        "audio": pcm * 2,
+        "transcribe": pcm * 2,
+        "flash": pcm * 2,
+        "timing": pcm * 6,
+        "slides": min(int(seconds * 40000), 4 * GIB),
+        "editor": pcm,
         "prepare": pcm * 4,
         "rough_prepare": pcm * 4,
         "rough_asr": pcm * 4,

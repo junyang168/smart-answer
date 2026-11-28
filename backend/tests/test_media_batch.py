@@ -327,6 +327,10 @@ def test_claim_is_exclusive_versioned_and_progress_cannot_be_forged(store, tmp_p
 
 def test_pause_cas_idempotency_and_unknown_call_not_retried(store, tmp_path):
     b, tid = task_fixture(store, tmp_path)
+    # This low-level control contract applies to the supported read-only inventory
+    # controller too; legacy generation resume is separately rejected below.
+    with store.connection() as c:
+        c.execute("UPDATE media_ingest.batches SET config=config || '{\"mode\":\"inventory\"}'::jsonb WHERE id=%s",(b,))
     assert store.control(b, "pause-op", 1, "pause") == 2
     assert store.control(b, "pause-op", 1, "pause") == 2
     assert store.claim(b, "W") is None
