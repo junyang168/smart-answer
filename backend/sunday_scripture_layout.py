@@ -72,15 +72,30 @@ def reader_counts(verse_counts):
     return counts
 
 
+def minimum_readers(verse_counts):
+    total = sum(verse_counts)
+    if 0 < total <= MAX_VERSES_PER_READER:
+        return 1
+    return sum(reader_counts(verse_counts))
+
+
 def reader_groups(sections, reader_count):
     passages=[(i,section.get('verses') or []) for i,section in enumerate(sections) if section.get('verses')]
-    counts=reader_counts([len(verses) for _,verses in passages])
-    minimum=sum(counts)
+    verse_counts = [len(verses) for _, verses in passages]
+    minimum = minimum_readers(verse_counts)
     if reader_count>MAX_READERS:
         raise ValueError('讀經同工最多 4 位。')
     if reader_count<minimum:
         raise ValueError(f'讀經同工人數不足：每人最多 8 節，這些經文至少需要 {minimum} 位讀經同工。')
-    target=min(reader_count,sum(len(verses) for _,verses in passages))
+    if reader_count < len(passages):
+        # Short readings can share a reader across passages while retaining
+        # each passage's own reference, text, and slide layout.
+        return [
+            {'section': section, 'verses': verses, 'reader_index': index * reader_count // len(passages)}
+            for index, (section, verses) in enumerate(passages)
+        ]
+    counts = reader_counts(verse_counts)
+    target=min(reader_count,sum(verse_counts))
     while sum(counts)<target:
         choices=[i for i,(_,verses) in enumerate(passages) if counts[i]<len(verses)]
         index=max(choices,key=lambda i:len(passages[i][1])/counts[i])
