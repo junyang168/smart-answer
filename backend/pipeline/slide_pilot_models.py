@@ -99,27 +99,32 @@ class VisionReviewer:
         else:
             from google.genai import types
             audio=any(getattr(p,'inline_data',None) and p.inline_data.mime_type.startswith('audio/') for p in contents)
-            if not audio:
-                from backend.pipeline.media_model_calls import call_artifacts
-                from backend.pipeline.media_flash_subscription import FlashSubscription
-                folder=call_artifacts()
-                if folder is None:raise ValueError('Flash subscription requires a durable saved_call')
-                parts=[]
-                for part in contents:
-                    if part.text:parts.append({'type':'text','text':part.text})
-                    elif part.inline_data:
-                        blob=part.inline_data
-                        if not blob.mime_type.startswith('image/'):raise ValueError('Unsupported Flash subscription modality')
-                        parts.append({'type':'image','mimeType':blob.mime_type,'data':base64.b64encode(blob.data).decode()})
-                    else:raise ValueError('Unsupported Flash subscription content')
-                effort=self.config.get('thinking_config',{}).get('thinking_level','MEDIUM').lower()
-                if effort not in ('low','medium','high'):raise ValueError('Unsupported Flash subscription thinking level')
-                return FlashSubscription(folder/'subscription').generate('gemini-3.8-flash-'+effort,parts,self.prompt,self.schema)
+            from backend.pipeline.media_model_calls import call_artifacts
+            from backend.pipeline.media_flash_subscription import FlashSubscription
+            folder=call_artifacts()
+            if folder is None:raise ValueError('Flash subscription requires a durable saved_call')
+            parts=[]
+            for part in contents:
+                if part.text:parts.append({'type':'text','text':part.text})
+                elif part.inline_data:
+                    blob=part.inline_data;kind=blob.mime_type.split('/')[0]
+                    if kind not in ('image','audio'):raise ValueError('Unsupported Flash subscription modality')
+                    parts.append({'type':kind,'mimeType':blob.mime_type,'data':base64.b64encode(blob.data).decode()})
+                else:raise ValueError('Unsupported Flash subscription content')
+            effort=self.config.get('thinking_config',{}).get('thinking_level','MEDIUM').lower()
+            if effort not in ('low','medium','high'):raise ValueError('Unsupported Flash subscription thinking level')
+            subscription=FlashSubscription(folder/'subscription')
+            try:
+                subscription.start()
+                capabilities=subscription.capabilities
+                if not audio or capabilities.get('audio'):
+                    return subscription.generate('gemini-3.8-flash-'+effort,parts,self.prompt,self.schema)
+            finally:subscription.close()
             if self.client is None:raise ValueError('Audio subscription unsupported and Gemini API credential unavailable')
             response = self.client.models.generate_content(model=self.model, contents=contents,
                 config=types.GenerateContentConfig(**{k:v for k,v in self.config.items() if k!='transport'}))
         raw=response.model_dump(mode="json", exclude_none=True)
-        raw.update(transport='gemini_api',transport_reason='subscription_audio_capability_false')
+        raw.update(transport='gemini_api',transport_reason='subscription_audio_capability_false',subscription_capabilities=capabilities)
         return raw
 
     def text(self, raw: dict) -> str:

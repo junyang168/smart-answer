@@ -157,6 +157,8 @@ def test_flash_images_use_subscription_without_api_credentials(tmp_path,monkeypa
     calls=[]
     class Flash:
         def __init__(self,folder):self.folder=folder
+        def start(self):self.capabilities={'image':True,'audio':False}
+        def close(self):pass
         def generate(self,model,parts,prompt,schema):
             calls.append((model,parts,prompt,schema))
             assert self.folder.name=='subscription'
@@ -171,3 +173,35 @@ def test_flash_images_use_subscription_without_api_credentials(tmp_path,monkeypa
     assert json.loads(adapter.text(raw))=={'ok':True}
     assert calls[0][0]=='gemini-3.8-flash-low'
     assert adapter.count([types.Part.from_text(text='內容')])==len('內容'.encode())
+
+
+@pytest.mark.parametrize('audio_supported',[False,True])
+def test_flash_audio_probes_native_capability_before_choosing_transport(tmp_path,monkeypatch,audio_supported):
+    from backend.pipeline.slide_pilot_models import VisionReviewer
+    from backend.pipeline.media_model_calls import saved_call
+    from backend.pipeline import media_flash_subscription
+    from google.genai import types
+    from types import SimpleNamespace
+    seen=[]
+    class Flash:
+        def __init__(self,folder):pass
+        def start(self):self.capabilities={'image':True,'audio':audio_supported};seen.append('probe')
+        def close(self):seen.append('close')
+        def generate(self,model,parts,prompt,schema):
+            assert parts==[{'type':'audio','mimeType':'audio/mp3','data':'YXVkaW8='}]
+            seen.append('subscription')
+            return {'transport':'agy_subscription','status':'completed','model':'gemini-3.8-flash','answer':{}}
+    monkeypatch.setattr(media_flash_subscription,'FlashSubscription',Flash)
+    def api(**kwargs):
+        seen.append('api')
+        return SimpleNamespace(model_dump=lambda **kw:{'model_version':'gemini-3.8-flash'})
+    adapter=VisionReviewer('gemini','source',{})
+    adapter.client=SimpleNamespace(models=SimpleNamespace(generate_content=api))
+    raw=saved_call(tmp_path,{'model':adapter.model,'audio':'bound source'},.6,
+        lambda:adapter.generate([types.Part.from_bytes(data=b'audio',mime_type='audio/mp3')]))
+    assert seen[0]=='probe' and 'close' in seen
+    if audio_supported:
+        assert raw['transport']=='agy_subscription' and 'api' not in seen
+    else:
+        assert raw['transport']=='gemini_api' and raw['transport_reason']=='subscription_audio_capability_false'
+        assert raw['subscription_capabilities']['audio'] is False and 'subscription' not in seen

@@ -63,7 +63,7 @@ class FlashSubscription:
     def generate(self,model,parts,prompt,schema):
         from backend.pipeline.slide_visual_evidence import check_schema
         try:
-            self.start()
+            if self.process is None:self.start()
             for part in parts:
                 if part['type'] in ('audio','image') and not self.capabilities.get(part['type']):
                     raise SubscriptionSetupError('Subscription does not support '+part['type'])

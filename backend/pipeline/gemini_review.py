@@ -99,7 +99,7 @@ def candidate(source, out, playback):
         if type(p.get('timing_review')) is not bool:
             raise ValueError('Missing timing review status')
         if not p['timing_review'] and p.get('start_timing_method') not in (
-                'original_word','exact_word_match','qwen_context','qwen_opening_context'):
+                'original_word','same_length_correction','exact_word_match','qwen_context','qwen_opening_context'):
             raise ValueError('Unproven paragraph start')
     if not rows: raise ValueError('Empty candidate')
     if playback['source_sha256'] != source_sha or file_sha(Path(playback['path'])) != playback['sha256']:

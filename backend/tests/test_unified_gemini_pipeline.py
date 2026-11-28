@@ -282,3 +282,39 @@ def test_asr_coverage_gap_is_withheld_in_editor_without_changing_text(setup):
     assert rows[0]['text']=='原文~~重複~~。'
     assert ctx['timing_quality']['status']=='editor_draft_only'
     assert ctx['timing_quality']['source_holds']['1']['reason']=='asr_coverage_unverified'
+
+
+def test_editor_accepts_existing_source_word_correction_method_but_rejects_unknown(setup):
+    from backend.pipeline.gemini_review import candidate
+    store,root,item,actor,source,cfg,manifest=setup
+    out=Path(cfg['artifact_root']);fake_flow(None,source,out)
+    def method(value):
+        saved=json.loads((out/'layout.json').read_text());saved['value']['paragraphs'][0]['start_timing_method']=value
+        saved['output_sha256']=object_sha(saved['value']);atomic(out/'layout.json',saved)
+    playback={'source_sha256':file_sha(source),'sha256':file_sha(source),'path':str(source)}
+    method('same_length_correction')
+    assert candidate(source,out,playback)['layout']['paragraphs'][0]['start_timing_method']=='same_length_correction'
+    method('invented_clock')
+    with pytest.raises(ValueError,match='Unproven'):candidate(source,out,playback)
+
+
+def test_recovery_bound_is_per_original_task_without_new_call_budget(setup,monkeypatch):
+    from backend.pipeline.media_batch.engineering_recovery import reserve,verify
+    from backend.pipeline.media_batch import gemini_plan
+    store,root,item,actor,source,cfg,manifest=setup
+    batch=create(store,manifest,cfg,actor);accept(store,batch)
+    first=store.claim(batch,'first');store.update(first,state='failed',error='first defect')
+    out=Path(first['payload']['out']);out.mkdir(parents=True)
+    atomic(out/'asr-0.request.json',{'source_sha256':file_sha(source)})
+    atomic(out/'asr-0.response.json',{'status':'completed'})
+    for i in range(3):
+        monkeypatch.setattr(gemini_plan,'implementation',lambda i=i:f'fixed-{i}')
+        reserve(store,batch,first['id'],defect='first task defect',validation='test',patch=f'fix-{i}')
+    second=store.claim(batch,'other-original-stage');assert second and second['id']!=first['id']
+    store.update(second,state='failed',error='adapter defect')
+    monkeypatch.setattr(gemini_plan,'implementation',lambda:'fixed-next-stage')
+    before=store.snapshot(batch);before.pop('generated_at')
+    result=reserve(store,batch,second['id'],defect='next original task defect',validation='test',patch='next stage fix')
+    assert result['original_task_recovery_ordinal']==1 and len(result['prior_receipts'])==3
+    verify(second['payload'],'fixed-next-stage')
+    after=store.snapshot(batch);after.pop('generated_at');assert after==before

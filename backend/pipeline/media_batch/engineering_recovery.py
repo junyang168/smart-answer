@@ -5,14 +5,20 @@ unknown dispatch. An operator must bind a concrete defect and regression result.
 """
 import json
 import os
+import re
 from pathlib import Path
 from .runtime import file_sha, lock_held
 from .store import key, Conflict
 
 
 def receipts(out):
-    return [p for p in [out/'engineering-recovery.json',
-                       out/'engineering-recovery-2.json',out/'engineering-recovery-3.json'] if p.exists()]
+    found={1:out/'engineering-recovery.json'} if (out/'engineering-recovery.json').exists() else {}
+    for path in out.glob('engineering-recovery-*.json'):
+        match=re.fullmatch(r'engineering-recovery-([2-9]|[1-9][0-9]+)\.json',path.name)
+        if not match:raise ValueError('Invalid engineering recovery history name')
+        found[int(match[1])]=path
+    if sorted(found)!=list(range(1,len(found)+1)):raise ValueError('Engineering recovery history has a gap')
+    return [found[n] for n in sorted(found)]
 
 
 def verify(payload, current):
@@ -50,14 +56,21 @@ def reserve(store, batch, task_id, *, defect, validation, patch):
         # Bind the original saved request/answer tree, including empty replies.
         files = sorted(set(out.rglob('*.request.json')) | set(out.rglob('*.response.json')) |
                        set(out.glob('calls/*/request.json')) | set(out.glob('calls/*/response.json')) |
-                       {p for p in (out/'run.json',out/'transcribe.json',out/'flash.json') if p.exists()})
+                       {p for p in (out/name for name in ('run.json','transcribe.json','flash.json','timing.json',
+                           'speakers.json','repetitions.json','layout.json','media-receipt.json')) if p.exists()})
         if not files:
             raise Conflict('Saved source requests and answers required')
         previous=receipts(out)
-        if len(previous)>=3:raise Conflict('Bounded engineering recovery reservations exhausted')
+        prior=[json.loads(p.read_text()) for p in previous]
+        if any(r['batch']!=batch for r in prior):raise Conflict('Recovery workspace belongs to another original batch')
+        # Three defects per original task, not three for a whole eleven-stage
+        # pipeline. These reservations never add model calls or change budgets.
+        ordinal=1+sum(r['failed_task']==task_id for r in prior)
+        if ordinal>3:raise Conflict('Bounded engineering recovery reservations exhausted for this original task')
         if previous and json.loads(previous[-1].read_text())['corrected_implementation']==implementation():
             raise Conflict('This corrected implementation already has a recovery reservation')
         receipt = dict(schema_version='media-engineering-recovery.v1', batch=batch,
+                       original_task_recovery_ordinal=ordinal,
                        failed_task=task_id, original_error=task['error'], defect=defect,
                        validation=validation, program_delta=patch,
                        original_implementation=payload['config']['implementation'],
