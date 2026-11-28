@@ -10,6 +10,7 @@ import httpx
 
 from backend.sunday_data_lock import sunday_data_lock
 from .fast_path import standalone_acknowledgement
+from .absence_query import handle_standalone_query
 from .models import ChatMessage, Extraction, SERVICE_FIELDS, FRIDAY_FIELDS, ZONE
 from .store import Store, dump, now_text
 
@@ -730,6 +731,8 @@ class Assistant:
             elif msg.unverified_edit:
                 self.execute_request(msg, Extraction(questions=["這則消息已編輯，但無法核對編輯版本時間。請另發一則更正，說明要登記的姓名、日期或欄位內容。 "]))
             elif self.fast_path_ignore(msg, row):
+                return
+            elif handle_standalone_query(self, msg, row, settings):
                 return
             elif self.extractor is not None:
                 # Dependency injection for deterministic business-rule tests.
