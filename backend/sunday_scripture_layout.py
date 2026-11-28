@@ -62,6 +62,7 @@ def paginate(verses, frame=None):
 
 MAX_READERS = 4
 MAX_VERSES_PER_READER = 8
+SINGLE_READER_VERSE_LIMIT = 5
 
 
 def reader_counts(verse_counts):
@@ -74,9 +75,11 @@ def reader_counts(verse_counts):
 
 def minimum_readers(verse_counts):
     total = sum(verse_counts)
-    if 0 < total <= MAX_VERSES_PER_READER:
+    if total == 0:
+        return 0
+    if total <= SINGLE_READER_VERSE_LIMIT:
         return 1
-    return sum(reader_counts(verse_counts))
+    return max(2, sum(reader_counts(verse_counts)))
 
 
 def reader_groups(sections, reader_count):
@@ -86,7 +89,7 @@ def reader_groups(sections, reader_count):
     if reader_count>MAX_READERS:
         raise ValueError('讀經同工最多 4 位。')
     if reader_count<minimum:
-        raise ValueError(f'讀經同工人數不足：每人最多 8 節，這些經文至少需要 {minimum} 位讀經同工。')
+        raise ValueError(f'讀經同工人數不足：這些經文至少需要 {minimum} 位讀經同工。')
     if reader_count < len(passages):
         # Short readings can share a reader across passages while retaining
         # each passage's own reference, text, and slide layout.
